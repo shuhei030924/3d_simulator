@@ -125,13 +125,21 @@ class Photo(Process):
     mask: Mask = field(default_factory=Mask)
     thickness_um: float = 1.0
     polarity: str = "positive"  # positive: 開口部のレジストが除去される
+    # 光学解像度有限による角の丸め（OPC 前の生パターン）。マスクラスタを
+    # ガウスぼかししてから 0.5 で二値化し、鋭い角を丸める。0=無効。
+    edge_blur_sigma_um: float = 0.0
 
     def summary(self) -> str:
         pol = "ポジ" if self.polarity == "positive" else "ネガ"
-        return f"PHOTO  厚{self.thickness_um:.2f}µm  {pol}  図形{len(self.mask.shapes)}"
+        blur = "" if self.edge_blur_sigma_um <= 0 else "  +角丸め"
+        return (
+            f"PHOTO  厚{self.thickness_um:.2f}µm  {pol}"
+            f"  図形{len(self.mask.shapes)}{blur}"
+        )
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "レジスト厚")
+        _require_non_negative(self.edge_blur_sigma_um, "エッジぼかし")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         resist_id = materials.BY_NAME["photoresist"].id
@@ -154,6 +162,14 @@ class Photo(Process):
 
         # 2) 現像: マスクの選択領域に応じて列ごとにレジストを除去
         selected = self.mask.rasterize(nx, ny)  # True = 開口（選択領域）
+        if self.edge_blur_sigma_um > 0:
+            # 角を丸める: ガウスぼかし後に 0.5 で再二値化
+            sigma = wafer.um_to_vox(self.edge_blur_sigma_um)
+            if sigma > 0:
+                blurred = ndimage.gaussian_filter(
+                    selected.astype(np.float32), sigma=sigma, mode="nearest"
+                )
+                selected = blurred >= 0.5
         remove_cols = selected if self.polarity == "positive" else ~selected
         if remove_cols.any():
             resist_vox = grid == resist_id
@@ -165,6 +181,7 @@ class Photo(Process):
             "mask": self.mask.to_dict(),
             "thickness_um": self.thickness_um,
             "polarity": self.polarity,
+            "edge_blur_sigma_um": self.edge_blur_sigma_um,
         }
 
     @classmethod
@@ -173,6 +190,7 @@ class Photo(Process):
             mask=Mask.from_dict(d.get("mask")),
             thickness_um=float(d.get("thickness_um", 1.0)),
             polarity=d.get("polarity", "positive"),
+            edge_blur_sigma_um=float(d.get("edge_blur_sigma_um", 0.0)),
         )
 
 

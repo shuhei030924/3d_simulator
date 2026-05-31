@@ -307,6 +307,8 @@ class ProcessDialog(QtWidgets.QDialog):
             if e is not None:
                 self.polarity.setCurrentText(e.polarity)
             self.form.addRow("極性", self.polarity)
+            self.edge_blur = _spin(getattr(e, "edge_blur_sigma_um", 0.0), 0.0, 5.0, 0.05, 3)
+            self.form.addRow("角丸めσ (µm)", self.edge_blur)
             mask = e.mask if e is not None else Mask()
             self.mask_editor = MaskEditor(mask)
             self.form.addRow(self.mask_editor)
@@ -662,6 +664,7 @@ class ProcessDialog(QtWidgets.QDialog):
                 mask=self.mask_editor.get_mask(),
                 thickness_um=self.thick.value(),
                 polarity=self.polarity.currentText(),
+                edge_blur_sigma_um=self.edge_blur.value(),
             )
         if t == "CVD":
             return CVD(
