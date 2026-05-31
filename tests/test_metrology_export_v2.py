@@ -158,3 +158,27 @@ def test_cli_sweep2_bad_field(tmp_path):
         "0.nope:0.3:0.5:0.2,1.thickness_um:0.2:0.4:0.2",
     ])
     assert code == 1
+
+
+# --- 表面粗さスペクトル（支配波長） ---------------------------------------
+def test_dominant_wavelength_flat_is_zero(wafer):
+    CVD(material="oxide", thickness_um=0.5).apply(wafer)
+    # 平坦面は支配波長 0
+    assert metrology.dominant_wavelength_um(wafer) == 0.0
+
+
+def test_dominant_wavelength_matches_period(wafer):
+
+    # x 方向に周期 8 ピクセルの矩形凹凸表面を人工的に作る
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    grid[:] = materials.AIR
+    base = 10
+    period = 8
+    for x in range(nx):
+        top = base + (4 if (x % period) < period // 2 else 0)
+        grid[:top, :, x] = materials.BY_NAME["silicon"].id
+    wl = metrology.dominant_wavelength_um(wafer)
+    # 支配波長は周期 8px × pitch に近いはず
+    assert abs(wl - period * wafer.config.pitch_um) < wafer.config.pitch_um
+

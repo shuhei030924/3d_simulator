@@ -646,6 +646,36 @@ def dopant_depth_profile(wafer: Wafer, dopant) -> np.ndarray:
     return frac.astype(np.float64)
 
 
+def dominant_wavelength_um(wafer: Wafer) -> float:
+    """表面高さマップの 2D FFT から支配的な凹凸周期（波長, µm）を返す。
+
+    表面高さ（NaN は平均で補間）の平均を引いて 2D FFT し、振幅が最大となる
+    空間周波数に対応する波長を返す。CVD roughness や Photo edge_blur が作る
+    周期的な凹凸の特徴波長の評価に使う。平坦面（有意な変動なし）は 0。
+    """
+    height = surface_height_map(wafer)
+    valid = ~np.isnan(height)
+    if valid.sum() < 4:
+        return 0.0
+    h = np.where(valid, height, np.nanmean(height))
+    h = h - h.mean()
+    ny, nx = h.shape
+    if np.allclose(h, 0.0):
+        return 0.0
+    spec = np.abs(np.fft.fft2(h))
+    fy = np.fft.fftfreq(ny)[:, None]  # サイクル/ピクセル
+    fx = np.fft.fftfreq(nx)[None, :]
+    fr = np.sqrt(fy ** 2 + fx ** 2)
+    spec_flat = spec.copy()
+    spec_flat[0, 0] = 0.0  # DC 成分を除外
+    idx = int(np.argmax(spec_flat))
+    f = float(fr.flat[idx])
+    if f <= 0:
+        return 0.0
+    # 波長(ピクセル) = 1/f → µm へ
+    return (1.0 / f) * wafer.config.pitch_um
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
