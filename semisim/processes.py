@@ -1200,14 +1200,20 @@ class Fill(Process):
 
     material: str = "metal_cu"
     overfill_um: float = 0.1
+    # アスペクト比依存のキーホール空隙。void_ar>0 で、深さ/幅 が void_ar を
+    # 超える狭いトレンチはコンフォーマル成長が上部で先に塞がり（ピンチオフ）、
+    # 中央に縦長の空隙（シーム/ボイド）を残す。0 で完全充填（従来動作）。
+    void_ar: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
-        return f"FILL  {m.label}  +{self.overfill_um:.2f}µm"
+        vd = "" if self.void_ar <= 0 else f"  ボイドAR>{self.void_ar:.1f}"
+        return f"FILL  {m.label}  +{self.overfill_um:.2f}µm{vd}"
 
     def apply(self, wafer: Wafer) -> None:
         if self.overfill_um < 0:
             raise ValueError("オーバーフィル量は 0 以上である必要があります。")
+        _require_non_negative(self.void_ar, "ボイドARしきい値")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
@@ -1225,14 +1231,47 @@ class Fill(Process):
         )
         grid[deposit] = mat_id
 
+        # キーホール空隙: 狭いトレンチで上部ピンチオフ → 中央に縦空隙を残す。
+        if self.void_ar > 0:
+            field_level = int(z_top.max())
+            # 周囲フィールドより低い（=リセス/トレンチ）列のみ対象
+            recess = has_solid & (z_top < field_level)
+            if recess.any():
+                hw = ndimage.distance_transform_edt(recess)  # 列ごとのハーフ幅
+                labels, n = ndimage.label(recess)
+                if n > 0:
+                    feat = ndimage.maximum(hw, labels, index=range(1, n + 1))
+                    lut = np.concatenate(([0.0], np.asarray(feat, dtype=float)))
+                    hw_feat = lut[labels]  # トレンチごとの代表ハーフ幅
+                    depth = np.where(recess, field_level - z_top, 0.0).astype(float)
+                    width = np.maximum(2.0 * hw_feat, 1.0)
+                    # AR が閾値を超える狭いリセスの中心線（ハーフ幅が最大の列）
+                    narrow = recess & (depth > self.void_ar * width)
+                    centerline = hw >= (hw_feat - 0.5)
+                    cand = narrow & centerline
+                    lo = z_top.astype(float) + hw_feat  # ボトムアップ充填上端
+                    hi = float(field_level) - hw_feat  # トップピンチオフ下端
+                    void = (
+                        cand[None, :, :]
+                        & (z_idx > lo[None, :, :])
+                        & (z_idx <= hi[None, :, :])
+                        & (grid == mat_id)
+                    )
+                    grid[void] = materials.AIR
+
     def params_dict(self) -> dict:
-        return {"material": self.material, "overfill_um": self.overfill_um}
+        return {
+            "material": self.material,
+            "overfill_um": self.overfill_um,
+            "void_ar": self.void_ar,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> Fill:
         return cls(
             material=d.get("material", "metal_cu"),
             overfill_um=float(d.get("overfill_um", 0.1)),
+            void_ar=float(d.get("void_ar", 0.0)),
         )
 
 

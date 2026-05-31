@@ -570,6 +570,8 @@ class ProcessDialog(QtWidgets.QDialog):
             self.form.addRow("充填材料", self.material)
             self.overfill = _spin(getattr(e, "overfill_um", 0.1), 0.0, 10.0, 0.05, 3)
             self.form.addRow("オーバーフィル (µm)", self.overfill)
+            self.void_ar = _spin(getattr(e, "void_ar", 0.0), 0.0, 50.0, 0.5, 1)
+            self.form.addRow("ボイド AR しきい値", self.void_ar)
             note = QtWidgets.QLabel("開口/トレンチをボトムアップ充填（ダマシン）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -734,6 +736,7 @@ class ProcessDialog(QtWidgets.QDialog):
             return Fill(
                 material=self.material.currentData(),
                 overfill_um=self.overfill.value(),
+                void_ar=self.void_ar.value(),
             )
         if t == "SPINON":
             return SpinCoat(
