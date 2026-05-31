@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from . import metrology, presets
@@ -28,6 +29,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--list-presets", action="store_true", help="利用可能なプリセット名を一覧表示"
     )
     p.add_argument("--report", metavar="PATH", help="計測レポートをテキスト保存")
+    p.add_argument(
+        "--json-report",
+        metavar="PATH",
+        help="計測サマリを JSON 保存（プログラム解析用）",
+    )
     p.add_argument("--stl", metavar="PATH", help="固体形状を STL 出力（要 pyvista）")
     p.add_argument(
         "--png",
@@ -108,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.report, "w", encoding="utf-8") as f:
             f.write(report)
         print(f"レポートを保存しました: {args.report}", file=sys.stderr)
+    if args.json_report:
+        with open(args.json_report, "w", encoding="utf-8") as f:
+            json.dump(metrology.summary(wafer), f, ensure_ascii=False, indent=2)
+        print(f"JSON レポートを保存しました: {args.json_report}", file=sys.stderr)
     if args.stl:
         _export_stl(wafer, args.stl, include_resist)
         print(f"STL を保存しました: {args.stl}", file=sys.stderr)

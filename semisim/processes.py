@@ -352,7 +352,11 @@ def _resolve_targets(targets) -> list[int]:
 @register
 @dataclass
 class DryEtch(Process):
-    """上方から垂直に削る異方性エッチング。レジスト等で保護される。"""
+    """上方から垂直に削る異方性エッチング。レジスト等で保護される。
+
+    lateral_um を指定すると、垂直エッチ後にマスク端からわずかに横方向へも
+    削る（RIE のエッチバイアス/アンダーカット）。0 で完全異方性。
+    """
 
     type = "DRY"
     label = "ドライエッチ"
@@ -360,15 +364,18 @@ class DryEtch(Process):
     targets: list[str] = field(default_factory=list)  # 空 = 自動
     depth_um: float = 0.5
     overetch_pct: float = 0.0  # ターゲット枯渇後に下層も削る割合(%)
+    lateral_um: float = 0.0  # 横方向エッチバイアス（アンダーカット）
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
         oe = "" if self.overetch_pct <= 0 else f"  +OE{self.overetch_pct:.0f}%"
-        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}"
+        lat = "" if self.lateral_um <= 0 else f"  横{self.lateral_um:.2f}µm"
+        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "エッチ量")
         _require_non_negative(self.overetch_pct, "オーバーエッチ率")
+        _require_non_negative(self.lateral_um, "横方向バイアス")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         target_ids = set(_resolve_targets(self.targets))
@@ -401,11 +408,27 @@ class DryEtch(Process):
                 ys, xs = np.nonzero(exposed)
                 grid[z_top[ys, xs], ys, xs] = materials.AIR
 
+        # 横方向エッチバイアス: 生成した空気に隣接するターゲットを lat 分削る。
+        # レジストは保護されるため、マスク端下へのアンダーカットを再現する。
+        lat = wafer.um_to_vox(self.lateral_um) if self.lateral_um > 0 else 0
+        if lat > 0:
+            resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
+            air = grid == materials.AIR
+            grown = ndimage.distance_transform_edt(~air) <= lat
+            undercut = (
+                grown
+                & np.isin(grid, list(target_ids))
+                & ~np.isin(grid, resist_ids)
+            )
+            undercut[0, :, :] = False  # 基板最下層は保護
+            grid[undercut] = materials.AIR
+
     def params_dict(self) -> dict:
         return {
             "targets": list(self.targets),
             "depth_um": self.depth_um,
             "overetch_pct": self.overetch_pct,
+            "lateral_um": self.lateral_um,
         }
 
     @classmethod
@@ -414,6 +437,7 @@ class DryEtch(Process):
             targets=list(d.get("targets", [])),
             depth_um=float(d.get("depth_um", 0.5)),
             overetch_pct=float(d.get("overetch_pct", 0.0)),
+            lateral_um=float(d.get("lateral_um", 0.0)),
         )
 
 
@@ -449,6 +473,8 @@ class WetEtch(Process):
             front = ndimage.binary_dilation(air, structure=struct)
             cur_target = np.isin(grid, target_ids)
             remove = front & cur_target
+            # 基板最下層は薬液で削り切らない（ウェハ貫通を防ぐ物理的下限）。
+            remove[0, :, :] = False
             if not remove.any():
                 break
             grid[remove] = materials.AIR
@@ -570,6 +596,8 @@ class CMP(Process):
 
     stop_material を指定すると、その材料（研磨ストップ層）の最高点より下は
     削らない。STI の窒化膜ストップのような選択研磨を再現する。
+    dishing_um と soft_material を指定すると、平坦化後に軟らかい材料
+    （Cu など）を追加で凹ませるディッシングを再現する（ダマシン研磨）。
     """
 
     type = "CMP"
@@ -577,13 +605,19 @@ class CMP(Process):
 
     remove_um: float = 0.5
     stop_material: str = ""
+    soft_material: str = ""
+    dishing_um: float = 0.0
 
     def summary(self) -> str:
         stop = f"  停止層={self.stop_material}" if self.stop_material else ""
-        return f"CMP  上面から{self.remove_um:.2f}µm研磨し平坦化{stop}"
+        dish = ""
+        if self.soft_material and self.dishing_um > 0:
+            dish = f"  ディッシング{self.dishing_um:.2f}µm({self.soft_material})"
+        return f"CMP  上面から{self.remove_um:.2f}µm研磨し平坦化{stop}{dish}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.remove_um, "研磨量")
+        _require_non_negative(self.dishing_um, "ディッシング量")
         grid = wafer.grid
         nz = grid.shape[0]
         z_top = wafer.top_surface_z()
@@ -606,14 +640,35 @@ class CMP(Process):
         if cut + 1 < nz:
             grid[cut + 1:, :, :] = materials.AIR
 
+        # ディッシング: 軟らかい材料（Cu など）は研磨で余計に凹む。
+        # 平坦化後の上面から dishing 分だけ、対象材料が露出する列を追加除去。
+        if self.soft_material and self.dishing_um > 0:
+            soft_id = materials.get(self.soft_material).id
+            dish = wafer.um_to_vox(self.dishing_um)
+            for _ in range(dish):
+                z_top2 = wafer.top_surface_z()
+                ys, xs = np.nonzero(z_top2 >= 0)
+                if ys.size == 0:
+                    break
+                zt = z_top2[ys, xs]
+                is_soft = grid[zt, ys, xs] == soft_id
+                grid[zt[is_soft], ys[is_soft], xs[is_soft]] = materials.AIR
+
     def params_dict(self) -> dict:
-        return {"remove_um": self.remove_um, "stop_material": self.stop_material}
+        return {
+            "remove_um": self.remove_um,
+            "stop_material": self.stop_material,
+            "soft_material": self.soft_material,
+            "dishing_um": self.dishing_um,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> CMP:
         return cls(
             remove_um=float(d.get("remove_um", 0.5)),
             stop_material=d.get("stop_material", ""),
+            soft_material=d.get("soft_material", ""),
+            dishing_um=float(d.get("dishing_um", 0.0)),
         )
 
 

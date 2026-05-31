@@ -132,7 +132,7 @@ py tools\render_gallery.py
 | --- | --- | --- |
 | PHOTO | `polarity` | `positive`=開口部のレジストを除去 / `negative`=開口部以外を除去。空マスクは全面開口扱い |
 | PVD | `step_coverage` | 0=完全シャドーイング（窪み底に成膜されない）/ 1=完全コンフォーマル。窪み深さに比例して膜厚を減衰 |
-| DRY | `overetch_pct` | ターゲット枯渇後に下層を削る割合（%）。0 で下層を保護 |
+| DRY | `overetch_pct` / `lateral_um` | ターゲット枯渇後に下層を削る割合（%）。0 で下層を保護。`lateral_um` でマスク下への横方向エッチバイアス（アンダーカット）を再現 |
 | WET | `targets` | エッチ対象材料。障壁材料は貫通しない（前線伝播でアンダーカット再現） |
 | IMPLANT | `range_um` / `straggle_um` / `lateral_straggle_um` / `threshold` | 投影飛程 Rp と縦/横ストラグルのガウス濃度分布。`threshold`（既定 ±1.5σ 相当）以上を埋込ドープ。横ストラグルでマスク端の下へ回り込む。レジスト下は遮蔽 |
 | ANNEAL | `depth_um` | ドライブイン量。ユークリッド距離で等方（真円状）に拡散 |
@@ -145,7 +145,7 @@ py tools\render_gallery.py
 | CLEAN | `target` / `thickness_um` | 対象材料を表面から等方的に薄く除去 |
 | REFLOW | `target` / `radius_um` | 平滑化半径。モルフォロジ処理で角を丸める |
 | ALD | `cycles` / `growth_per_cycle_nm` | サイクル数×1サイクル成長量で膜厚を nm 精度に制御。超コンフォーマル |
-| CMP | `remove_um` / `stop_material` | 研磨量と研磨ストップ層（指定時はその最高点より下を削らない） |
+| CMP | `remove_um` / `stop_material` / `soft_material` / `dishing_um` | 研磨量と研磨ストップ層（指定時はその最高点より下を削らない）。`soft_material`＋`dishing_um` で軟材料（Cu 等）をディッシング量だけ追加で凹ませるダマシン研磨を再現 |
 
 ## 構成
 

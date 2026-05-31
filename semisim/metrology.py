@@ -199,12 +199,73 @@ def trench_is_closed(wafer: Wafer, x_index: int, y_index: int) -> bool:
     return bool((col[:top] == materials.AIR).any())
 
 
+def void_volume_um3(wafer: Wafer) -> float:
+    """埋め込まれた空隙（ボイド）の総体積 (µm³) を返す。
+
+    各列で最上固体より下にある空気ボクセル＝外気と繋がらない閉塞空隙とみなす。
+    ダマシン/トレンチ充填の品質評価に使う。
+    """
+    grid = wafer.grid
+    nz = grid.shape[0]
+    solid = grid != materials.AIR
+    # 各列の最上固体高さ（無い列は -1）
+    has_solid = solid.any(axis=0)
+    top = np.where(has_solid, nz - 1 - np.argmax(solid[::-1, :, :], axis=0), -1)
+    z_idx = np.arange(nz)[:, None, None]
+    buried_air = (grid == materials.AIR) & (z_idx < top[None, :, :])
+    return float(buried_air.sum()) * (wafer.config.pitch_um ** 3)
+
+
+def cmp_uniformity_pct(wafer: Wafer) -> float:
+    """表面高さの不均一性 (3σ/平均, %) を返す。CMP 平坦性評価の指標。
+
+    値が小さいほど平坦。完全平坦面は 0。有効な表面が無ければ 0。
+    """
+    height = surface_height_map(wafer)
+    valid = height[~np.isnan(height)]
+    if valid.size == 0:
+        return 0.0
+    mean = float(valid.mean())
+    if mean <= 0:
+        return 0.0
+    return float(3.0 * valid.std() / mean * 100.0)
+
+
+def etch_depth_uniformity(wafer: Wafer, name_or_id) -> dict:
+    """指定材料の上面高さの分布統計を返す（エッチ/堆積均一性の評価）。
+
+    返り値: {"mean_um", "std_um", "cv_pct", "min_um", "max_um"}。
+    対象材料が存在しなければ全て 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    nz = grid.shape[0]
+    mask = grid == mat.id
+    has = mask.any(axis=0)
+    if not has.any():
+        return {"mean_um": 0.0, "std_um": 0.0, "cv_pct": 0.0, "min_um": 0.0, "max_um": 0.0}
+    top = nz - 1 - np.argmax(mask[::-1, :, :], axis=0)
+    heights = top[has].astype(float) * wafer.config.pitch_um
+    mean = float(heights.mean())
+    std = float(heights.std())
+    cv = float(std / mean * 100.0) if mean > 0 else 0.0
+    return {
+        "mean_um": mean,
+        "std_um": std,
+        "cv_pct": cv,
+        "min_um": float(heights.min()),
+        "max_um": float(heights.max()),
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
         "solid_fraction": solid_fraction(wafer),
         "step_height_um": step_height_um(wafer),
         "surface_roughness_um": surface_roughness_um(wafer),
+        "cmp_uniformity_pct": cmp_uniformity_pct(wafer),
+        "void_volume_um3": void_volume_um3(wafer),
         "materials": material_counts(wafer),
     }
 
@@ -225,6 +286,10 @@ def report(wafer: Wafer) -> str:
     lines.append(f"固体率: {solid_fraction(wafer) * 100:.1f}%")
     lines.append(f"表面段差: {step_height_um(wafer):.3f}µm")
     lines.append(f"表面粗さ(RMS): {surface_roughness_um(wafer):.3f}µm")
+    lines.append(f"CMP均一性(3σ/平均): {cmp_uniformity_pct(wafer):.2f}%")
+    void = void_volume_um3(wafer)
+    if void > 0:
+        lines.append(f"ボイド体積: {void:.4f}µm³")
     lines.append("")
     lines.append("材料別 体積/膜厚:")
     counts = material_counts(wafer)

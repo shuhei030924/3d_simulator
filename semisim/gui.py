@@ -358,6 +358,10 @@ class ProcessDialog(QtWidgets.QDialog):
                 )
                 self.overetch.setSuffix(" %")
                 self.form.addRow("オーバーエッチ", self.overetch)
+                self.lateral = _spin(
+                    getattr(e, "lateral_um", 0.0), 0.0, 5.0, 0.05, 3
+                )
+                self.form.addRow("横方向バイアス (µm)", self.lateral)
 
         elif t == "DIFFUSION":
             self.dopant = QtWidgets.QComboBox()
@@ -396,6 +400,18 @@ class ProcessDialog(QtWidgets.QDialog):
                 if idx >= 0:
                     self.stop_material.setCurrentIndex(idx)
             self.form.addRow("研磨ストップ層", self.stop_material)
+            self.soft_material = QtWidgets.QComboBox()
+            self.soft_material.addItem("（なし）", "")
+            for m in materials.all_materials():
+                if m.name not in {"air", "silicon"}:
+                    self.soft_material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.soft_material.findData(getattr(e, "soft_material", ""))
+                if idx >= 0:
+                    self.soft_material.setCurrentIndex(idx)
+            self.form.addRow("軟材料(ディッシング)", self.soft_material)
+            self.dishing = _spin(getattr(e, "dishing_um", 0.0), 0.0, 5.0, 0.05, 3)
+            self.form.addRow("ディッシング量 (µm)", self.dishing)
             note = QtWidgets.QLabel("最も高い点から指定量削り、上面を水平にします。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -598,6 +614,7 @@ class ProcessDialog(QtWidgets.QDialog):
                     targets=tgts,
                     depth_um=self.depth.value(),
                     overetch_pct=self.overetch.value(),
+                    lateral_um=self.lateral.value(),
                 )
             return WetEtch(targets=tgts, depth_um=self.depth.value())
         if t == "DIFFUSION":
@@ -608,6 +625,8 @@ class ProcessDialog(QtWidgets.QDialog):
             return CMP(
                 remove_um=self.remove.value(),
                 stop_material=self.stop_material.currentData(),
+                soft_material=self.soft_material.currentData(),
+                dishing_um=self.dishing.value(),
             )
         if t == "OXIDE":
             return Oxidation(thickness_um=self.thick.value())
