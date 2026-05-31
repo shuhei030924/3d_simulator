@@ -404,17 +404,23 @@ class PVD(Process):
     # の庇が合体して上部を塞ぎ、下にキーホールボイドが残る。膜厚に対する
     # 横張り出し量の比で与える。
     overhang: float = 0.0
+    # 斜め蒸着（指向性）の入射角（度, 鉛直から）。0=真上から。>0 で +x 方向
+    # から斜めにフラックスが入り、背の高い構造の風下(-x)側に影ができて膜が
+    # 付かない。電子ビーム蒸着の指向性シャドーイング/リフトオフに対応。
+    tilt_deg: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
         sc = "" if self.step_coverage >= 0.999 else f"  被覆{self.step_coverage:.0%}"
         oh = "" if self.overhang <= 0 else f"  庇{self.overhang:.1f}"
-        return f"PVD  {m.label}  厚{self.thickness_um:.2f}µm{sc}{oh}"
+        tl = "" if self.tilt_deg <= 0 else f"  傾斜{self.tilt_deg:.0f}°"
+        return f"PVD  {m.label}  厚{self.thickness_um:.2f}µm{sc}{oh}{tl}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "膜厚")
         _require_range(self.step_coverage, 0.0, 1.0, "ステップカバレッジ")
         _require_non_negative(self.overhang, "オーバーハング")
+        _require_range(self.tilt_deg, 0.0, 89.0, "入射角")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
@@ -435,6 +441,26 @@ class PVD(Process):
             local_t = np.maximum(0, np.round(t * atten)).astype(int)
         else:
             local_t = np.full((ny, nx), t, dtype=int)
+
+        # 斜め蒸着シャドーイング: +x からの斜め入射で、風下側の列が背の高い
+        # 構造に隠れる場合は膜が付かない（local_t=0）。鉛直から角 θ の入射は
+        # 水平距離 d 進むのに高さ d/tan(θ) を要するので、x+d 列の高さが
+        # z_top[x] + d/tan(θ) 以上なら遮蔽される。
+        if self.tilt_deg > 0:
+            tan_t = math.tan(math.radians(self.tilt_deg))
+            ztf = np.where(valid, z_top, -(10**9)).astype(np.float64)
+            shadowed = np.zeros((ny, nx), dtype=bool)
+            zspan = 0
+            if valid.any():
+                zspan = int(z_top[valid].max() - z_top[valid].min())
+            for d in range(1, nx):
+                needed = math.ceil(d / tan_t)
+                if needed > zspan:  # これ以上遠い遮蔽体は届かない
+                    break
+                shifted = np.full((ny, nx), -(10**9), dtype=np.float64)
+                shifted[:, : nx - d] = ztf[:, d:]  # x+d 列の高さを x へ
+                shadowed |= shifted >= (ztf + needed)
+            local_t = np.where(shadowed, 0, local_t)
 
         z_idx = np.arange(nz)[:, None, None]
         lo = z_top[None, :, :]
@@ -469,6 +495,7 @@ class PVD(Process):
             "thickness_um": self.thickness_um,
             "step_coverage": self.step_coverage,
             "overhang": self.overhang,
+            "tilt_deg": self.tilt_deg,
         }
 
     @classmethod
@@ -478,6 +505,7 @@ class PVD(Process):
             thickness_um=float(d.get("thickness_um", 0.5)),
             step_coverage=float(d.get("step_coverage", 1.0)),
             overhang=float(d.get("overhang", 0.0)),
+            tilt_deg=float(d.get("tilt_deg", 0.0)),
         )
 
 

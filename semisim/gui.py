@@ -343,6 +343,9 @@ class ProcessDialog(QtWidgets.QDialog):
                 self.form.addRow("段差被覆率", self.coverage)
                 self.overhang = _spin(getattr(e, "overhang", 0.0), 0.0, 3.0, 0.1, 1)
                 self.form.addRow("オーバーハング (庇)", self.overhang)
+                self.tilt = _spin(getattr(e, "tilt_deg", 0.0), 0.0, 89.0, 5.0, 0)
+                self.tilt.setSuffix(" °")
+                self.form.addRow("斜め蒸着 入射角", self.tilt)
                 note = QtWidgets.QLabel("低いほど窪み底に付きにくくなります（100%=一様）。")
                 note.setStyleSheet("color: gray;")
                 self.form.addRow(note)
@@ -739,6 +742,7 @@ class ProcessDialog(QtWidgets.QDialog):
                 thickness_um=self.thick.value(),
                 step_coverage=self.coverage.value() / 100.0,
                 overhang=self.overhang.value(),
+                tilt_deg=self.tilt.value(),
             )
         if t in ("DRY", "WET"):
             tgts = [
