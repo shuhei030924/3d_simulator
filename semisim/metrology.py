@@ -367,6 +367,70 @@ def thermal_budget(steps) -> dict:
     }
 
 
+def via_fill_quality(wafer: Wafer, name_or_id) -> dict:
+    """指定材料によるビア/トレンチ充填の品質を返す。
+
+    充填材料を含む列について、その材料の最上面より下に挟まれる空気
+    （=キーホール/シーム空隙）を数え、充填率を算出する。
+
+    返り値: {"fill_fraction", "void_volume_um3", "void_count"}。
+      fill_fraction: 材料体積 / (材料体積 + 空隙体積)。1.0 で完全充填。
+    充填材料が存在しなければ fill_fraction=1.0, 空隙 0 を返す。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    nz = grid.shape[0]
+    is_mat = grid == mat.id
+    has = is_mat.any(axis=0)  # (ny, nx)
+    if not has.any():
+        return {"fill_fraction": 1.0, "void_volume_um3": 0.0, "void_count": 0}
+    # 各列の材料最上高さ（無い列は -1）
+    top_mat = np.where(has, nz - 1 - np.argmax(is_mat[::-1, :, :], axis=0), -1)
+    z_idx = np.arange(nz)[:, None, None]
+    void = (grid == materials.AIR) & (z_idx < top_mat[None, :, :]) & has[None, :, :]
+    void_vox = float(void.sum())
+    mat_vox = float(is_mat.sum())
+    denom = mat_vox + void_vox
+    fill = 1.0 if denom <= 0 else mat_vox / denom
+    return {
+        "fill_fraction": float(fill),
+        "void_volume_um3": void_vox * (wafer.config.pitch_um ** 3),
+        "void_count": int(void_vox),
+    }
+
+
+def sidewall_bowing_um(wafer: Wafer, y_index: int) -> float:
+    """Y 断面でのトレンチ側壁のボーイング（樽型膨らみ）量を µm で返す。
+
+    各高さ z における内部トレンチ幅（両側を固体で挟まれた空気の幅）を測り、
+    最大幅と表面付近（最上で内部幅>0 の z）の開口幅との差を返す。
+    値が大きいほど側壁が外側へ膨らんでいる（ボーイング/バレリング）。
+    トレンチが見つからなければ 0。
+    """
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    y = int(np.clip(y_index, 0, ny - 1))
+    s = grid[:, y, :]  # (nz, nx)
+    widths = np.zeros(nz, dtype=int)
+    for z in range(nz):
+        row = s[z]
+        solid = np.flatnonzero(row != materials.AIR)
+        if solid.size < 2:
+            continue
+        lo, hi = int(solid.min()), int(solid.max())
+        if hi - lo < 2:
+            continue
+        interior = row[lo + 1 : hi]  # 両側を固体で挟まれた内側
+        widths[z] = int((interior == materials.AIR).sum())
+    nz_with = np.flatnonzero(widths > 0)
+    if nz_with.size == 0:
+        return 0.0
+    top_z = int(nz_with.max())  # 最上（表面側）の内部幅を開口幅とみなす
+    surface_w = widths[top_z]
+    max_w = int(widths.max())
+    return float(max(0, max_w - surface_w)) * wafer.config.pitch_um
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
