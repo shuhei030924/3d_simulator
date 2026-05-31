@@ -234,7 +234,6 @@ def _run_sweep2(recipe, spec: str) -> int:
                 f"{s['surface_roughness_um']:.4f},{s['cmp_uniformity_pct']:.4f}"
             )
     return 0
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -289,8 +288,10 @@ def main(argv: list[str] | None = None) -> int:
             f.write(report)
         print(f"レポートを保存しました: {args.report}", file=sys.stderr)
     if args.json_report:
+        data = metrology.summary(wafer)
+        data["electrical"] = metrology.electrical_report(wafer)
         with open(args.json_report, "w", encoding="utf-8") as f:
-            json.dump(metrology.summary(wafer), f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
         print(f"JSON レポートを保存しました: {args.json_report}", file=sys.stderr)
     if args.stl:
         _export_stl(wafer, args.stl, include_resist, hidden)

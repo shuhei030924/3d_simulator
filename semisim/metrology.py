@@ -936,3 +936,37 @@ def report(wafer: Wafer) -> str:
             lines.extend(pair_lines)
     return "\n".join(lines)
 
+
+def electrical_report(wafer: Wafer) -> dict:
+    """電気/DRC 指標を機械可読な辞書で返す（JSON 出力用）。
+
+    グリッドに存在する導体材料を自動検出し、材料ごとにシート抵抗・x 方向導通・
+    連結成分数を、導体ペアごとに最小間隔（µm, 接触は 0）をまとめる。
+    導体が無ければ空の構造を返す。inf は None（JSON で表現可能）に変換する。
+    """
+    conductors = [
+        m
+        for m in materials.all_materials()
+        if m.resistivity_ohm_um > 0 and (wafer.grid == m.id).any()
+    ]
+
+    def _jsonable(x: float):
+        return None if x == float("inf") else x
+
+    cond_data: dict[str, dict] = {}
+    for m in conductors:
+        cont = electrical_continuity(wafer, m.name, "x")
+        cond_data[m.name] = {
+            "sheet_resistance_ohm_sq": _jsonable(sheet_resistance_ohm_sq(wafer, m.name)),
+            "connected_x": cont["connected"],
+            "n_components": cont["n_components"],
+        }
+    spacing: dict[str, float] = {}
+    for i in range(len(conductors)):
+        for j in range(i + 1, len(conductors)):
+            a, b = conductors[i], conductors[j]
+            sp = min_spacing_um(wafer, a.name, b.name)
+            if sp != float("inf"):
+                spacing[f"{a.name}-{b.name}"] = sp
+    return {"conductors": cond_data, "min_spacing_um": spacing}
+

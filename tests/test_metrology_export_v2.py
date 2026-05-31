@@ -556,6 +556,35 @@ def test_report_flags_short(wafer):
     assert "ショート" in txt or "★" in txt
 
 
+def test_electrical_report_dict(wafer):
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    nx = grid.shape[2]
+    grid[30, 20, 0:nx] = cu
+    rep = metrology.electrical_report(wafer)
+    assert "metal_cu" in rep["conductors"]
+    c = rep["conductors"]["metal_cu"]
+    assert c["connected_x"] is True
+    assert c["sheet_resistance_ohm_sq"] is not None
+
+
+def test_electrical_report_empty_no_conductor(wafer):
+    rep = metrology.electrical_report(wafer)
+    assert rep["conductors"] == {}
+    assert rep["min_spacing_um"] == {}
+
+
+def test_electrical_report_json_serializable(wafer):
+    import json
+
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    grid[30, 20, 5] = cu  # 単一ボクセル(オープン)→ sheet_resistance は有限
+    rep = metrology.electrical_report(wafer)
+    json.dumps(rep)  # inf が None 化されていれば例外なし
+
+
+
 
 
 
