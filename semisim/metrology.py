@@ -812,6 +812,24 @@ def line_resistance_ohm(wafer: Wafer, name_or_id, axis: str = "x") -> float:
     return float(total)
 
 
+def sheet_resistance_ohm_sq(wafer: Wafer, name_or_id) -> float:
+    """導体薄膜のシート抵抗（Ω/sq）を返す。標準的な薄膜評価指標。
+
+    Rs = ρ / t（ρ=resistivity_ohm_um, t=膜の平均厚 µm）。膜が薄いほど Rs は
+    大きい。4 探針測定で得られる値に対応し、line_resistance_ohm（全抵抗 Ω）と
+    異なり形状に依らないシート単位の量。膜が存在しない/非導体は inf。
+    """
+    mat = materials.get(name_or_id)
+    rho = mat.resistivity_ohm_um
+    if rho <= 0:
+        return float("inf")
+    stats = film_thickness_stats(wafer, name_or_id)
+    t = stats.get("mean", 0.0)
+    if t <= 0:
+        return float("inf")
+    return float(rho / t)
+
+
 def min_spacing_um(wafer: Wafer, name_a, name_b) -> float:
     """2 材料領域の最小間隔（µm）を返す。DRC（設計規則）チェック用。
 

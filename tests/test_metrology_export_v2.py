@@ -504,6 +504,38 @@ def test_min_spacing_absent_inf(wafer):
     assert metrology.min_spacing_um(wafer, "metal_cu", "metal_al") == float("inf")
 
 
+# --- シート抵抗 (Ω/sq) ----------------------------------------------------
+def test_sheet_resistance_thinner_is_higher(wafer):
+    from semisim.grid import Wafer
+
+    cfg = wafer.config
+    w_thin = Wafer(cfg)
+    w_thick = Wafer(cfg)
+    cu = materials.BY_NAME["metal_cu"].id
+    # 全面に厚さの異なる Cu 膜を敷く
+    w_thin.grid[30:31, :, :] = cu  # 厚さ1
+    w_thick.grid[30:34, :, :] = cu  # 厚さ4
+    rs_thin = metrology.sheet_resistance_ohm_sq(w_thin, "metal_cu")
+    rs_thick = metrology.sheet_resistance_ohm_sq(w_thick, "metal_cu")
+    assert rs_thin > rs_thick > 0
+
+
+def test_sheet_resistance_value(wafer):
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    grid[30:32, :, :] = cu  # 厚さ2 ボクセル = 0.2µm
+    rs = metrology.sheet_resistance_ohm_sq(wafer, "metal_cu")
+    rho = materials.BY_NAME["metal_cu"].resistivity_ohm_um
+    assert abs(rs - rho / 0.2) < 1e-6
+
+
+def test_sheet_resistance_nonconductor_inf(wafer):
+    grid = wafer.grid
+    grid[30:32, :, :] = materials.BY_NAME["oxide"].id
+    assert metrology.sheet_resistance_ohm_sq(wafer, "oxide") == float("inf")
+
+
+
 
 
 
