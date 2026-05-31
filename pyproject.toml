@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semisim"
+version = "0.2.0"
+description = "ボクセルベースの半導体プロセス 3D シミュレータ"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "shuhei030924" }]
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.9",
+    "pyvista>=0.40",
+    "pyvistaqt>=0.10",
+    "PyQt5>=5.15",
+    "scikit-image>=0.19",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+semisim = "main:run"
+
+[tool.setuptools]
+packages = ["semisim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true

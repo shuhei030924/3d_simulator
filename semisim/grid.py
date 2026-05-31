@@ -42,7 +42,7 @@ class WaferConfig:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "WaferConfig":
+    def from_dict(cls, d: dict) -> WaferConfig:
         return cls(
             nx=int(d.get("nx", 120)),
             ny=int(d.get("ny", 120)),

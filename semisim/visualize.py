@@ -102,3 +102,10 @@ def material_listed_cmap():
     bounds = np.arange(-0.5, n + 0.5, 1.0)
     norm = BoundaryNorm(bounds, cmap.N)
     return cmap, norm
+
+
+def export_stl(wafer: Wafer, path: str, include_resist: bool = True) -> None:
+    """固体形状の外表面を三角形メッシュ化して STL に書き出す（形状のみ）。"""
+    solid = solid_unstructured(wafer, include_resist=include_resist)
+    surface = solid.extract_surface().triangulate()
+    surface.save(path)

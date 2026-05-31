@@ -45,6 +45,9 @@ _MATERIALS: list[Material] = [
     Material(8, "tungsten", "タングステン (W)", (0.55, 0.55, 0.60)),
     Material(9, "doped_n", "n型拡散層", (0.30, 0.45, 0.85)),
     Material(10, "doped_p", "p型拡散層", (0.85, 0.35, 0.55)),
+    Material(11, "tin", "バリア (TiN)", (0.65, 0.62, 0.45)),
+    Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78)),
+    Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False),
 ]
 
 # 名前 / ID での高速参照
@@ -61,7 +64,7 @@ def all_materials() -> list[Material]:
 
 def deposit_materials() -> list[Material]:
     """成膜（CVD/PVD）で選択可能な材料を返す。"""
-    skip = {"air", "silicon", "doped_n", "doped_p"}
+    skip = {"air", "silicon", "doped_n", "doped_p", "epi_si"}
     return [m for m in _MATERIALS if m.name not in skip]
 
 

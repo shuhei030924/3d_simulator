@@ -8,35 +8,111 @@
 - **充填ボリューム表現**: 断面が空洞にならず、常に中身が詰まって表示されます。
 - **自由な断面**: X / Y / Z / 角度指定 / マウス操作の任意断面。2D 断面ビューでは
   クリック 2 点で膜厚・CD を実寸（µm）測定できます。
-- **工程を自由に追加**: PHOTO / CVD / PVD / DRY / WET / DIFFUSION / OXIDE / CMP / STRIP。
+- **豊富な工程**: PHOTO / CVD / PVD / DRY / WET / DIFFUSION / OXIDE / CMP / STRIP に加え、
+  IMPLANT（イオン注入）/ ANNEAL（ドライブイン拡散）/ EPI（選択エピ成長）/
+  KOH（異方性ウェット・斜め側壁）/ FILL（ダマシン埋込）/ LIFTOFF / DRIE（深掘りエッチ）。
 - **任意角度パターン**: 回転矩形・帯・周期ライン（グレーティング）。
-- **アンドゥ / リドゥ**、レシピの JSON 保存 / 読込、スナップショットキャッシュによる
-  高速プレビュー。
+- **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD など計測ヘルパ（`semisim/metrology.py`）。
+- **アンドゥ / リドゥ**、レシピの JSON 保存 / 読込、STL エクスポート、スナップショット
+  キャッシュ（上限付き）による高速プレビュー。
 
 ## セットアップ
 
+Windows (PowerShell):
+
 ```powershell
-python -m venv .venv
+py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+```
+
+Linux / macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+開発用ツール（pytest / ruff / mypy）も入れる場合:
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ## 実行
 
 ```powershell
-python main.py
+py main.py
 ```
 
 ## テスト
 
+エンジン部は GUI なしで完全にテストできます（pytest）。
+
 ```powershell
-python test_engine.py
-python test_cache.py
-python test_physics.py
-python test_slice.py
-python test_stack.py
-python test_angles.py
+pytest
 ```
+
+3D 可視化や処理結果の断面 PNG を生成して目視確認する場合:
+
+```powershell
+py tools\render_gallery.py
+```
+
+生成された PNG は `docs/gallery/` に出力されます。
+
+## ギャラリー（断面例）
+
+各プロセスを実行したウェハの中央断面（XZ 面）です。
+
+| 例 | 内容 |
+| --- | --- |
+| ![implant](docs/gallery/implant_buried_layer.png) | イオン注入による埋込ドープ層（レジストで中央を遮蔽） |
+| ![koh](docs/gallery/koh_vgroove.png) | KOH 異方性エッチの V 溝（54.7° 側壁） |
+| ![drie](docs/gallery/drie_scallop.png) | DRIE 深掘りトレンチ（側壁スキャロップ） |
+| ![damascene](docs/gallery/damascene_cu.png) | Cu ダマシン配線（TiN バリア＋CMP 平坦化） |
+| ![epitaxy](docs/gallery/epitaxy_selective.png) | 選択エピタキシャル成長（酸化膜開口部のみ） |
+| ![mosfet](docs/gallery/mosfet_flow.png) | 簡易 MOSFET フロー（ゲート＋ソース/ドレイン） |
+
+## 工程一覧
+
+| タイプ | 名称 | 概要 |
+| --- | --- | --- |
+| PHOTO | フォトリソ | レジスト塗布＋現像でパターニング |
+| CVD | CVD 成膜 | 等方コンフォーマル成膜 |
+| PVD | PVD 成膜 | 指向性成膜（段差被覆率でシャドーイング） |
+| DRY | ドライエッチ | 異方性エッチ（垂直・オーバーエッチ対応） |
+| WET | ウェットエッチ | 等方エッチ（アンダーカット） |
+| DIFFUSION | 拡散 | 表面からの不純物拡散 |
+| IMPLANT | イオン注入 | 投影飛程＋ストラグルのガウス分布で埋込ドープ |
+| ANNEAL | アニール | ドーパントのドライブイン（等方再分布） |
+| OXIDE | 熱酸化 | 露出 Si を消費し SiO₂ 成長（45/55 則） |
+| EPI | エピ成長 | 露出シリコン上のみに選択的単結晶成長 |
+| KOH | 異方性ウェット | 結晶面に沿った斜め側壁（V 溝・台形） |
+| FILL | 埋込（ダマシン） | 開口・トレンチをボトムアップで金属充填 |
+| DRIE | 深掘りエッチ | 高アスペクト比の深掘り（スキャロップ） |
+| LIFTOFF | リフトオフ | レジストとその上の膜を一括除去 |
+| CMP | CMP 平坦化 | 上面研磨で平坦化 |
+| STRIP | 剥離 | 指定材料を全除去 |
+
+## 主なパラメータ解説
+
+各工程の代表的なパラメータと物理的な意味は次のとおり。寸法はすべて µm 指定で、
+内部的に `WaferConfig.pitch_um` でボクセル数へ丸められる（最小 1 ボクセル）。
+
+| 工程 | パラメータ | 意味・効果 |
+| --- | --- | --- |
+| PHOTO | `polarity` | `positive`=開口部のレジストを除去 / `negative`=開口部以外を除去。空マスクは全面開口扱い |
+| PVD | `step_coverage` | 0=完全シャドーイング（窪み底に成膜されない）/ 1=完全コンフォーマル。窪み深さに比例して膜厚を減衰 |
+| DRY | `overetch_pct` | ターゲット枯渇後に下層を削る割合（%）。0 で下層を保護 |
+| WET | `targets` | エッチ対象材料。障壁材料は貫通しない（前線伝播でアンダーカット再現） |
+| IMPLANT | `range_um` / `straggle_um` | 投影飛程 Rp とばらつき ΔRp。Rp±1.5σ の帯を埋込ドープ。レジスト下は遮蔽 |
+| ANNEAL | `depth_um` | ドライブイン量。ユークリッド距離で等方（真円状）に拡散 |
+| OXIDE | `thickness_um` | 生成 SiO₂ 厚。約 45% 分の Si を消費し 55% を上方成長（Deal–Grove 体積比）。ドープ Si も酸化 |
+| KOH | `side_wall_angle_deg` | 結晶面に沿う側壁角（既定 54.7°、(100)Si を想定） |
+| FILL | `overfill_um` | 充填の盛り上げ量。ボトムアップで開口/トレンチを充填 |
+| DRIE | `scallop_pitch_um` | Bosch サイクルに対応するスキャロップ周期 |
 
 ## 構成
 
@@ -46,6 +122,15 @@ python test_angles.py
 | `semisim/grid.py` | ボクセルグリッド（Wafer） |
 | `semisim/masks.py` | フォトマスク図形（分数座標 0..1） |
 | `semisim/processes.py` | 各プロセス工程のロジック |
+| `semisim/metrology.py` | 計測・解析ヘルパ |
 | `semisim/recipe.py` | レシピ管理・シミュレーション・保存/読込 |
 | `semisim/visualize.py` | PyVista / matplotlib 可視化ヘルパ |
 | `semisim/gui.py` | PyQt5 + PyVista GUI 本体 |
+| `tests/` | pytest テスト一式 |
+| `tools/render_gallery.py` | 断面 PNG ギャラリ生成（目視確認用） |
+| `samples/` | サンプルレシピ JSON |
+
+## 座標規約
+
+`grid[z, y, x]`。z は高さ（0 が基板底、増加方向が上＝膜成長方向）。x, y は面内。
+ボクセル 1 辺の物理長は `WaferConfig.pitch_um`。

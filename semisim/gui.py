@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-import os
-
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyvistaqt import QtInteractor
@@ -17,9 +15,16 @@ from .masks import Mask, Shape
 from .processes import (
     CMP,
     CVD,
+    DRIE,
     PVD,
+    AnisoWetEtch,
+    Anneal,
     Diffusion,
     DryEtch,
+    Epitaxy,
+    Fill,
+    Implant,
+    LiftOff,
     Oxidation,
     Photo,
     Process,
@@ -362,6 +367,103 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "EPI":
+            self.material = QtWidgets.QComboBox()
+            for name in ("epi_si", "silicon"):
+                self.material.addItem(materials.get(name).label, name)
+            if e is not None:
+                idx = self.material.findData(e.material)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("材料", self.material)
+            self.thick = _spin(getattr(e, "thickness_um", 0.5), 0.05, 20.0, 0.1)
+            self.form.addRow("エピ厚 (µm)", self.thick)
+            note = QtWidgets.QLabel("露出シリコン上のみに選択成長します。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "IMPLANT":
+            self.dopant = QtWidgets.QComboBox()
+            for name in ("doped_n", "doped_p"):
+                self.dopant.addItem(materials.get(name).label, name)
+            if e is not None:
+                idx = self.dopant.findData(e.dopant)
+                if idx >= 0:
+                    self.dopant.setCurrentIndex(idx)
+            self.form.addRow("ドーパント", self.dopant)
+            self.range_um = _spin(getattr(e, "range_um", 0.4), 0.05, 20.0, 0.1)
+            self.form.addRow("投影飛程 Rp (µm)", self.range_um)
+            self.straggle = _spin(getattr(e, "straggle_um", 0.1), 0.01, 5.0, 0.05, 3)
+            self.form.addRow("飛程ばらつき σ (µm)", self.straggle)
+            note = QtWidgets.QLabel("Rp を中心に埋込ドープ（レジストで遮蔽）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "ANNEAL":
+            self.depth = _spin(getattr(e, "depth_um", 0.3), 0.05, 20.0, 0.1)
+            self.form.addRow("ドライブイン量 (µm)", self.depth)
+            note = QtWidgets.QLabel("既存の拡散層を等方的に再分布させます。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "KOH":
+            self.targets_combo = QtWidgets.QComboBox()
+            for name in ("silicon",):
+                self.targets_combo.addItem(materials.get(name).label, name)
+            if e is not None:
+                idx = self.targets_combo.findData(e.target)
+                if idx >= 0:
+                    self.targets_combo.setCurrentIndex(idx)
+            self.form.addRow("対象材料", self.targets_combo)
+            self.depth = _spin(getattr(e, "depth_um", 1.0), 0.05, 30.0, 0.1)
+            self.form.addRow("エッチ深さ (µm)", self.depth)
+            self.angle = _spin(getattr(e, "sidewall_angle_deg", 54.7), 5.0, 89.0, 1.0, 1)
+            self.form.addRow("側壁角度 (°)", self.angle)
+            note = QtWidgets.QLabel("結晶異方性で斜め側壁（V 溝/台形）を形成。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "DRIE":
+            self.targets_combo = QtWidgets.QComboBox()
+            for name in ("silicon",):
+                self.targets_combo.addItem(materials.get(name).label, name)
+            if e is not None:
+                idx = self.targets_combo.findData(e.target)
+                if idx >= 0:
+                    self.targets_combo.setCurrentIndex(idx)
+            self.form.addRow("対象材料", self.targets_combo)
+            self.depth = _spin(getattr(e, "depth_um", 2.0), 0.05, 50.0, 0.1)
+            self.form.addRow("エッチ深さ (µm)", self.depth)
+            self.scallop = _spin(getattr(e, "scallop_um", 0.0), 0.0, 5.0, 0.05, 3)
+            self.form.addRow("スキャロップ深さ (µm)", self.scallop)
+            self.scallop_pitch = _spin(
+                getattr(e, "scallop_pitch_um", 0.5), 0.05, 5.0, 0.05, 3
+            )
+            self.form.addRow("スキャロップ周期 (µm)", self.scallop_pitch)
+            note = QtWidgets.QLabel("高アスペクト比の垂直深掘り（Bosch）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "FILL":
+            self.material = QtWidgets.QComboBox()
+            for m in materials.deposit_materials():
+                self.material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.material.findData(e.material)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("充填材料", self.material)
+            self.overfill = _spin(getattr(e, "overfill_um", 0.1), 0.0, 10.0, 0.05, 3)
+            self.form.addRow("オーバーフィル (µm)", self.overfill)
+            note = QtWidgets.QLabel("開口/トレンチをボトムアップ充填（ダマシン）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "LIFTOFF":
+            note = QtWidgets.QLabel("レジストとその上の膜を一括除去します。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
     # -- 結果取得 ----------------------------------------------------------
     def build_process(self) -> Process:
         t = self.proc_type
@@ -399,6 +501,39 @@ class ProcessDialog(QtWidgets.QDialog):
             return CMP(remove_um=self.remove.value())
         if t == "OXIDE":
             return Oxidation(thickness_um=self.thick.value())
+        if t == "EPI":
+            return Epitaxy(
+                material=self.material.currentData(),
+                thickness_um=self.thick.value(),
+            )
+        if t == "IMPLANT":
+            return Implant(
+                dopant=self.dopant.currentData(),
+                range_um=self.range_um.value(),
+                straggle_um=self.straggle.value(),
+            )
+        if t == "ANNEAL":
+            return Anneal(depth_um=self.depth.value())
+        if t == "KOH":
+            return AnisoWetEtch(
+                target=self.targets_combo.currentData(),
+                depth_um=self.depth.value(),
+                sidewall_angle_deg=self.angle.value(),
+            )
+        if t == "DRIE":
+            return DRIE(
+                target=self.targets_combo.currentData(),
+                depth_um=self.depth.value(),
+                scallop_um=self.scallop.value(),
+                scallop_pitch_um=self.scallop_pitch.value(),
+            )
+        if t == "FILL":
+            return Fill(
+                material=self.material.currentData(),
+                overfill_um=self.overfill.value(),
+            )
+        if t == "LIFTOFF":
+            return LiftOff()
         raise ValueError(t)
 
 
@@ -410,9 +545,15 @@ class WaferDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("ウェハ設定（新規）")
         form = QtWidgets.QFormLayout(self)
-        self.nx = QtWidgets.QSpinBox(); self.nx.setRange(20, 300); self.nx.setValue(config.nx)
-        self.ny = QtWidgets.QSpinBox(); self.ny.setRange(20, 300); self.ny.setValue(config.ny)
-        self.nz = QtWidgets.QSpinBox(); self.nz.setRange(20, 300); self.nz.setValue(config.nz)
+        self.nx = QtWidgets.QSpinBox()
+        self.nx.setRange(20, 300)
+        self.nx.setValue(config.nx)
+        self.ny = QtWidgets.QSpinBox()
+        self.ny.setRange(20, 300)
+        self.ny.setValue(config.ny)
+        self.nz = QtWidgets.QSpinBox()
+        self.nz.setRange(20, 300)
+        self.nz.setValue(config.nz)
         self.pitch = _spin(config.pitch_um, 0.01, 2.0, 0.01, 3)
         self.sub = _spin(config.substrate_um, 0.2, 20.0, 0.1, 2)
         form.addRow("X ボクセル数", self.nx)
@@ -701,6 +842,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("新規", self.new_recipe),
             ("保存", self.save_recipe),
             ("読込", self.load_recipe),
+            ("STL出力", self.export_stl),
         ]:
             b = QtWidgets.QPushButton(text)
             b.clicked.connect(fn)
@@ -979,6 +1121,24 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_list()
             self.rebuild_and_render()
             self.status.showMessage(f"読込みました: {path}", 5000)
+
+    def export_stl(self):
+        """現在のウェハ形状を STL ファイルに書き出す。"""
+        if getattr(self, "wafer", None) is None:
+            QtWidgets.QMessageBox.information(self, "STL出力", "出力する形状がありません。")
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "STL を出力", "wafer.stl", "STL (*.stl)"
+        )
+        if not path:
+            return
+        try:
+            visualize.export_stl(
+                self.wafer, path, include_resist=self.show_resist
+            )
+            self.status.showMessage(f"STL を出力しました: {path}", 5000)
+        except Exception as ex:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "STL出力エラー", str(ex))
 
     # -- 断面コントロール --------------------------------------------------
     def _on_clip_mode(self, idx: int):

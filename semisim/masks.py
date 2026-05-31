@@ -27,7 +27,7 @@ class Shape:
         return {"kind": self.kind, "params": dict(self.params)}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Shape":
+    def from_dict(cls, d: dict) -> Shape:
         return cls(kind=d["kind"], params=dict(d.get("params", {})))
 
     def rasterize(self, nx: int, ny: int) -> np.ndarray:
@@ -101,7 +101,7 @@ class Mask:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Mask":
+    def from_dict(cls, d: dict) -> Mask:
         if d is None:
             return cls()
         return cls(

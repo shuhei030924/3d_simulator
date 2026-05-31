@@ -1,0 +1,65 @@
+{
+  "format_version": 1,
+  "config": {
+    "nx": 120,
+    "ny": 120,
+    "nz": 120,
+    "pitch_um": 0.1,
+    "substrate_um": 3.0
+  },
+  "steps": [
+    {
+      "type": "CVD",
+      "material": "oxide",
+      "thickness_um": 0.4
+    },
+    {
+      "type": "CVD",
+      "material": "nitride",
+      "thickness_um": 0.3
+    },
+    {
+      "type": "PHOTO",
+      "mask": {
+        "shapes": [
+          {
+            "kind": "rect",
+            "params": {
+              "x0": 0.3,
+              "y0": 0.3,
+              "x1": 0.7,
+              "y1": 0.7
+            }
+          }
+        ],
+        "invert": false
+      },
+      "thickness_um": 1.2,
+      "polarity": "positive"
+    },
+    {
+      "type": "DRY",
+      "targets": [
+        "nitride",
+        "oxide"
+      ],
+      "depth_um": 0.7,
+      "overetch_pct": 0.0
+    },
+    {
+      "type": "STRIP",
+      "material": "photoresist"
+    },
+    {
+      "type": "DIFFUSION",
+      "dopant": "doped_n",
+      "depth_um": 0.6
+    },
+    {
+      "type": "PVD",
+      "material": "metal_al",
+      "thickness_um": 0.5,
+      "step_coverage": 1.0
+    }
+  ]
+}

@@ -1,6 +1,7 @@
-numpy
-scipy
-pyvista
-pyvistaqt
-PyQt5
-scikit-image
+# コア依存（再現性のため下限を固定。詳細は pyproject.toml）
+numpy>=1.22
+scipy>=1.9
+pyvista>=0.40
+pyvistaqt>=0.10
+PyQt5>=5.15
+scikit-image>=0.19
