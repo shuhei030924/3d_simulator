@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy import ndimage
 
 from . import materials
 from .grid import Wafer
@@ -429,6 +430,47 @@ def sidewall_bowing_um(wafer: Wafer, y_index: int) -> float:
     surface_w = widths[top_z]
     max_w = int(widths.max())
     return float(max(0, max_w - surface_w)) * wafer.config.pitch_um
+
+
+def pattern_density_map(
+    wafer: Wafer, name_or_id=None, radius_um: float = 2.0
+) -> np.ndarray:
+    """局所パターン密度（平面占有率）マップ (ny, nx) を 0..1 で返す。
+
+    name_or_id を指定するとその材料のフットプリント（その材料を含む列）を、
+    省略すると基板上面より上に存在する全固体（=パターン構造）の占有を用い、
+    半径 radius_um の窓で平滑化する。CMP のディッシング/エロージョンや
+    エッチ/デポのローディング効果（疎密差）の評価に使う。
+    """
+    grid = wafer.grid
+    if name_or_id is None:
+        sub_z = wafer.um_to_vox(wafer.config.substrate_um)
+        sub_z = int(np.clip(sub_z, 0, grid.shape[0]))
+        footprint = np.any(grid[sub_z:] != materials.AIR, axis=0)
+    else:
+        mid = materials.get(name_or_id).id
+        footprint = np.any(grid == mid, axis=0)
+    occ = footprint.astype(np.float64)
+    r = max(1, wafer.um_to_vox(radius_um))
+    dens = ndimage.uniform_filter(occ, size=2 * r + 1, mode="nearest")
+    return dens
+
+
+def pattern_density_stats(
+    wafer: Wafer, name_or_id=None, radius_um: float = 2.0
+) -> dict:
+    """パターン密度マップの統計を返す。
+
+    返り値: {"min", "max", "mean", "range"}（いずれも 0..1）。range が大きい
+    ほど疎密差が大きく、CMP ディッシングやエッチローディングが顕在化しやすい。
+    """
+    dens = pattern_density_map(wafer, name_or_id, radius_um)
+    return {
+        "min": float(dens.min()),
+        "max": float(dens.max()),
+        "mean": float(dens.mean()),
+        "range": float(dens.max() - dens.min()),
+    }
 
 
 def conformality_pct(wafer: Wafer, name_or_id) -> dict:
