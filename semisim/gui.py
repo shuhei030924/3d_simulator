@@ -5,11 +5,13 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyvistaqt import QtInteractor
 
-from . import materials, processes, visualize
+from . import materials, metrology, presets, processes, visualize
 from .grid import WaferConfig
 from .masks import Mask, Shape
 from .processes import (
@@ -32,6 +34,7 @@ from .processes import (
     WetEtch,
 )
 from .recipe import Recipe
+from .settings import AppSettings
 
 
 # =============================================================================
@@ -735,14 +738,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("半導体プロセス 3D シミュレータ")
         self.resize(1280, 800)
 
-        self.recipe = Recipe(config=WaferConfig())
+        # アプリ設定（最後のフォルダ・最近のレシピ・既定ウェハ設定）を復元
+        self.settings = AppSettings.load()
+        self.settings.prune_missing()
+        if self.settings.default_config:
+            try:
+                base_cfg = WaferConfig.from_dict(self.settings.default_config)
+            except Exception:  # noqa: BLE001
+                base_cfg = WaferConfig()
+        else:
+            base_cfg = WaferConfig()
+
+        self.recipe = Recipe(config=base_cfg)
         self.solid_mesh = None  # キャッシュした固体メッシュ
         self.clip_mode = "Z"     # none / X / Y / Z / angle / free
         self.clip_invert = False
         self.clip_frac = 50      # 0..100
         self.azimuth = 0         # 方位角(度)
         self.elevation = 0       # 仰角(度)
-        self.show_resist = True
+        self.show_resist = self.settings.show_resist
         self.smooth = False
 
         # アンドゥ/リドゥ履歴（レシピ全体の dict スナップショット）
@@ -751,6 +765,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._build_ui()
         self._install_shortcuts()
+        self._restore_geometry()
         self._load_sample_recipe()
         self.rebuild_and_render()
 
@@ -794,6 +809,31 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "undo_btn"):
             self.undo_btn.setEnabled(bool(self._undo_stack))
             self.redo_btn.setEnabled(bool(self._redo_stack))
+
+    # -- 終了時の設定保存 --------------------------------------------------
+    def _restore_geometry(self):
+        """保存済みウィンドウジオメトリを復元する。"""
+        geo = self.settings.window_geometry
+        if not geo:
+            return
+        try:
+            ba = QtCore.QByteArray.fromBase64(geo.encode("ascii"))
+            self.restoreGeometry(ba)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def closeEvent(self, event):
+        """終了時に現在のウェハ設定・レジスト表示状態・ウィンドウ位置を保存する。"""
+        try:
+            self.settings.default_config = self.recipe.config.to_dict()
+            self.settings.show_resist = self.show_resist
+            self.settings.window_geometry = bytes(
+                self.saveGeometry().toBase64()
+            ).decode("ascii")
+            self.settings.save()
+        except Exception:  # noqa: BLE001
+            pass
+        super().closeEvent(event)
 
     # -- UI 構築 -----------------------------------------------------------
     def _build_ui(self):
@@ -848,6 +888,29 @@ class MainWindow(QtWidgets.QMainWindow):
             b.clicked.connect(fn)
             frow.addWidget(b)
         left.addLayout(frow)
+
+        # プリセット読込・最近のレシピ・計測レポート
+        prow = QtWidgets.QHBoxLayout()
+        preset_btn = QtWidgets.QToolButton()
+        preset_btn.setText("プリセット ▾")
+        preset_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        pmenu = QtWidgets.QMenu(preset_btn)
+        for name in presets.available():
+            act = pmenu.addAction(name)
+            act.triggered.connect(lambda _=False, nm=name: self.load_preset(nm))
+        preset_btn.setMenu(pmenu)
+        prow.addWidget(preset_btn)
+
+        self.recent_btn = QtWidgets.QToolButton()
+        self.recent_btn.setText("最近のレシピ ▾")
+        self.recent_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        prow.addWidget(self.recent_btn)
+        self._rebuild_recent_menu()
+
+        report_btn = QtWidgets.QPushButton("計測レポート")
+        report_btn.clicked.connect(self.show_report)
+        prow.addWidget(report_btn)
+        left.addLayout(prow)
 
         # アンドゥ/リドゥ
         urow = QtWidgets.QHBoxLayout()
@@ -1099,28 +1162,114 @@ class MainWindow(QtWidgets.QMainWindow):
             self.rebuild_and_render()
 
     def save_recipe(self):
+        start = self.settings.last_dir or "recipe.json"
+        if self.settings.last_dir:
+            start = os.path.join(self.settings.last_dir, "recipe.json")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "レシピを保存", "recipe.json", "JSON (*.json)"
+            self, "レシピを保存", start, "JSON (*.json)"
         )
         if path:
             self.recipe.save(path)
+            self._remember_recipe(path)
             self.status.showMessage(f"保存しました: {path}", 5000)
 
     def load_recipe(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "レシピを読込", "", "JSON (*.json)"
+            self, "レシピを読込", self.settings.last_dir, "JSON (*.json)"
+        )
+        if path:
+            self._load_recipe_path(path)
+
+    def _load_recipe_path(self, path: str):
+        """指定パスのレシピを読み込んで反映する（最近メニュー/読込で共用）。"""
+        try:
+            loaded = Recipe.load(path)
+        except Exception as ex:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "読込エラー", str(ex))
+            return
+        self._push_undo()
+        self.recipe = loaded
+        self._refresh_list()
+        self.rebuild_and_render()
+        self._remember_recipe(path)
+        self.status.showMessage(f"読込みました: {path}", 5000)
+
+    def load_preset(self, name: str):
+        """組み込みプリセットを読み込む。"""
+        try:
+            recipe = presets.build(name)
+        except Exception as ex:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "プリセット", str(ex))
+            return
+        self._push_undo()
+        self.recipe = recipe
+        self._refresh_list()
+        self.rebuild_and_render()
+        self.status.showMessage(f"プリセットを読込みました: {name}", 5000)
+
+    def show_report(self):
+        """現在のウェハの計測レポートをダイアログ表示し、任意で保存できる。"""
+        if getattr(self, "wafer", None) is None:
+            QtWidgets.QMessageBox.information(self, "計測レポート", "対象がありません。")
+            return
+        text = metrology.report(self.wafer)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("計測レポート")
+        dlg.resize(560, 480)
+        v = QtWidgets.QVBoxLayout(dlg)
+        edit = QtWidgets.QTextEdit()
+        edit.setReadOnly(True)
+        edit.setStyleSheet("font-family: monospace;")
+        edit.setText(text)
+        v.addWidget(edit)
+        btns = QtWidgets.QHBoxLayout()
+        save_b = QtWidgets.QPushButton("テキスト保存")
+        save_b.clicked.connect(lambda: self._save_report_text(text))
+        close_b = QtWidgets.QPushButton("閉じる")
+        close_b.clicked.connect(dlg.accept)
+        btns.addStretch(1)
+        btns.addWidget(save_b)
+        btns.addWidget(close_b)
+        v.addLayout(btns)
+        dlg.exec_()
+
+    def _save_report_text(self, text: str):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "レポートを保存", self.settings.last_dir or "report.txt", "Text (*.txt)"
         )
         if path:
             try:
-                loaded = Recipe.load(path)
-            except Exception as ex:  # noqa: BLE001
-                QtWidgets.QMessageBox.critical(self, "読込エラー", str(ex))
-                return
-            self._push_undo()
-            self.recipe = loaded
-            self._refresh_list()
-            self.rebuild_and_render()
-            self.status.showMessage(f"読込みました: {path}", 5000)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                self.status.showMessage(f"レポートを保存しました: {path}", 5000)
+            except OSError as ex:
+                QtWidgets.QMessageBox.warning(self, "保存エラー", str(ex))
+
+    def _remember_recipe(self, path: str):
+        """最近のレシピに追加して設定を保存し、メニューを更新する。"""
+        self.settings.add_recent(path)
+        self.settings.show_resist = self.show_resist
+        try:
+            self.settings.save()
+        except OSError:
+            pass
+        self._rebuild_recent_menu()
+
+    def _rebuild_recent_menu(self):
+        """最近のレシピメニューを再構築する。"""
+        if not hasattr(self, "recent_btn"):
+            return
+        menu = QtWidgets.QMenu(self.recent_btn)
+        if not self.settings.recent_recipes:
+            act = menu.addAction("(履歴なし)")
+            act.setEnabled(False)
+        else:
+            for p in self.settings.recent_recipes:
+                act = menu.addAction(os.path.basename(p))
+                act.setToolTip(p)
+                act.triggered.connect(lambda _=False, pp=p: self._load_recipe_path(pp))
+        self.recent_btn.setMenu(menu)
+
 
     def export_stl(self):
         """現在のウェハ形状を STL ファイルに書き出す。"""

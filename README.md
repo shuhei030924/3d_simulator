@@ -13,6 +13,10 @@
   KOH（異方性ウェット・斜め側壁）/ FILL（ダマシン埋込）/ LIFTOFF / DRIE（深掘りエッチ）。
 - **任意角度パターン**: 回転矩形・帯・周期ライン（グレーティング）。
 - **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD など計測ヘルパ（`semisim/metrology.py`）。
+  人が読めるテキスト計測レポート（`metrology.report`）も生成できます。
+- **プリセットレシピ**: 代表的な 8 フロー（ダマシン・MOSFET・KOH・DRIE 等）をメニューから即読込（`semisim/presets.py`）。
+- **設定の永続化**: 最後に使ったフォルダ・最近開いたレシピ・既定ウェハ設定・ウィンドウ位置を
+  保存し次回起動時に復元（`semisim/settings.py`、`~/.semisim/settings.json`）。
 - **アンドゥ / リドゥ**、レシピの JSON 保存 / 読込、STL エクスポート、スナップショット
   キャッシュ（上限付き）による高速プレビュー。
 
@@ -124,6 +128,8 @@ py tools\render_gallery.py
 | `semisim/processes.py` | 各プロセス工程のロジック |
 | `semisim/metrology.py` | 計測・解析ヘルパ |
 | `semisim/recipe.py` | レシピ管理・シミュレーション・保存/読込 |
+| `semisim/presets.py` | 組み込みプリセットレシピ（レシピライブラリ） |
+| `semisim/settings.py` | アプリ設定の永続化（最近のレシピ・既定設定） |
 | `semisim/visualize.py` | PyVista / matplotlib 可視化ヘルパ |
 | `semisim/gui.py` | PyQt5 + PyVista GUI 本体 |
 | `tests/` | pytest テスト一式 |
@@ -134,3 +140,19 @@ py tools\render_gallery.py
 
 `grid[z, y, x]`。z は高さ（0 が基板底、増加方向が上＝膜成長方向）。x, y は面内。
 ボクセル 1 辺の物理長は `WaferConfig.pitch_um`。
+
+## 技術選定について（言語）
+
+本シミュレータは Python を採用しています。理由は次のとおりです。
+
+- **数値計算エコシステム**: ボクセル演算は NumPy のベクトル化と SciPy の
+  `ndimage`（距離変換・モルフォロジ・フィルタ）に強く依存しており、これらは
+  C/Fortran 実装で十分高速です。中核ループはすでに配列演算化されています。
+- **可視化**: PyVista(VTK) による 3D、matplotlib による 2D 断面が即利用でき、
+  プロトタイピングと検証が速いです。
+- **十分な性能**: 高解像度（0.025µm 格子, 320³ 級）でもギャラリー全 8 フローが
+  数十秒で完了します。対話操作向けには中解像度プリセットを用意しています。
+
+将来さらに大規模・高速化が必要になった場合は、ホットスポット（反復モルフォロジ等）を
+Rust(PyO3) / C++ 拡張や Numba/Cython でオフロードする構成が現実的で、
+全面的な別言語への移植より費用対効果が高いと判断しています。

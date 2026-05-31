@@ -135,3 +135,33 @@ def summary(wafer: Wafer) -> dict:
         "step_height_um": step_height_um(wafer),
         "materials": material_counts(wafer),
     }
+
+
+def report(wafer: Wafer) -> str:
+    """人が読めるテキスト計測レポートを生成する。
+
+    材料ごとの体積、固体率、段差、各材料の膜厚統計をまとめた文字列を返す。
+    GUI のレポート表示やファイル出力に使う。
+    """
+    cfg = wafer.config
+    lines: list[str] = []
+    lines.append("=== 計測レポート ===")
+    lines.append(
+        f"グリッド: {cfg.nx}x{cfg.ny}x{cfg.nz} vox"
+        f"  (pitch={cfg.pitch_um:g}µm)"
+    )
+    lines.append(f"固体率: {solid_fraction(wafer) * 100:.1f}%")
+    lines.append(f"表面段差: {step_height_um(wafer):.3f}µm")
+    lines.append("")
+    lines.append("材料別 体積/膜厚:")
+    counts = material_counts(wafer)
+    for name in sorted(counts):
+        vol = material_volume_um3(wafer, name)
+        stats = film_thickness_stats(wafer, name)
+        lines.append(
+            f"  {name:<12} 体積={vol:8.3f}µm³  "
+            f"膜厚 平均={stats['mean']:.3f} 最大={stats['max']:.3f}µm  "
+            f"被覆={stats['coverage'] * 100:.0f}%"
+        )
+    return "\n".join(lines)
+
