@@ -70,3 +70,12 @@ def test_thinned_3dic_preset_thins_substrate():
     # 研削後の基板厚は初期 6.0µm より小さい
     assert wafer.config.substrate_um < 6.0
 
+
+def test_ldd_mosfet_preset_forms_spacer_and_silicide():
+    """LDD MOSFET プリセットで側壁スペーサ(窒化膜)とシリサイドが形成される。"""
+    r = presets.build("LDD MOSFET")
+    wafer = r.simulate()
+    counts = metrology.material_counts(wafer)
+    assert counts.get("nitride", 0) > 0
+    assert counts.get("silicide", 0) > 0
+

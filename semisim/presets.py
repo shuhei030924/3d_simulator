@@ -28,6 +28,7 @@ from .processes import (
     Oxidation,
     Photo,
     Silicidation,
+    Spacer,
     Strip,
 )
 from .recipe import Recipe
@@ -213,6 +214,30 @@ def thinned_3dic_flow() -> Recipe:
     return r
 
 
+def ldd_mosfet_flow() -> Recipe:
+    """LDD MOSFET: ゲート→LDD注入→側壁スペーサ→S/D注入→サリサイド。
+
+    ゲート形成後に浅い LDD（低濃度ドレイン）を自己整合注入し、窒化膜の
+    サイドウォールスペーサを形成。スペーサをマスクに深い S/D を注入する
+    ことで、ゲート端のホットキャリア劣化を抑える現代 CMOS の代表フロー。
+    """
+    r = Recipe(config=_default_cfg())
+    r.name = "LDD MOSFET"
+    r.description = "サイドウォールスペーサを用いた LDD MOSFET フロー"
+    r.add(Oxidation(thickness_um=0.12))  # ゲート酸化膜
+    r.add(CVD(material="poly", thickness_um=0.4))  # ゲートポリ
+    r.add(Photo(mask=_center_mask(0.25), thickness_um=1.0, polarity="negative"))
+    r.add(DryEtch(targets=["poly"], depth_um=0.4))  # ゲート整形
+    r.add(Strip(material="photoresist"))
+    r.add(DryEtch(targets=["oxide"], depth_um=0.12))  # S/D 上の酸化膜除去→Si露出
+    r.add(Implant(dopant="doped_n", range_um=0.12, straggle_um=0.05))  # 浅い LDD
+    r.add(Spacer(material="nitride", thickness_um=0.1))  # 側壁スペーサ
+    r.add(Implant(dopant="doped_n", range_um=0.35, straggle_um=0.12))  # 深い S/D
+    r.add(Anneal(depth_um=0.2))  # 活性化
+    r.add(Silicidation(thickness_um=0.05))  # 自己整合シリサイド
+    return r
+
+
 # 表示ラベル -> 生成関数（GUI メニュー/テストで使用）
 PRESETS: dict[str, callable] = {
     "イオン注入 埋込層": implant_buried_layer,
@@ -224,6 +249,7 @@ PRESETS: dict[str, callable] = {
     "金属リフトオフ": metal_liftoff,
     "MOSFET フロー": mosfet_flow,
     "サリサイド ゲート": salicide_gate_flow,
+    "LDD MOSFET": ldd_mosfet_flow,
     "TSV 貫通ビア": tsv_flow,
     "多層 Cu 配線": multilevel_interconnect,
     "薄化 3D-IC": thinned_3dic_flow,
