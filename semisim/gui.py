@@ -32,6 +32,7 @@ from .processes import (
     Photo,
     PlasmaClean,
     Process,
+    RapidThermalAnneal,
     Reflow,
     SpinCoat,
     SputterEtch,
@@ -385,6 +386,10 @@ class ProcessDialog(QtWidgets.QDialog):
                 )
                 self.selectivity.setPlaceholderText("例: oxide:0.33,nitride:0.1")
                 self.form.addRow("エッチ選択比", self.selectivity)
+                self.mask_erosion = _spin(
+                    getattr(e, "mask_erosion", 0.0), 0.0, 2.0, 0.05, 2
+                )
+                self.form.addRow("マスク消耗比", self.mask_erosion)
 
         elif t == "DIFFUSION":
             self.dopant = QtWidgets.QComboBox()
@@ -482,6 +487,17 @@ class ProcessDialog(QtWidgets.QDialog):
             self.depth = _spin(getattr(e, "depth_um", 0.3), 0.05, 20.0, 0.1)
             self.form.addRow("ドライブイン量 (µm)", self.depth)
             note = QtWidgets.QLabel("既存の拡散層を等方的に再分布させます。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "RTP":
+            self.depth = _spin(getattr(e, "depth_um", 0.15), 0.02, 10.0, 0.05, 3)
+            self.form.addRow("ドライブイン量 (µm)", self.depth)
+            self.lateral_factor = _spin(
+                getattr(e, "lateral_factor", 0.3), 0.0, 1.0, 0.05, 2
+            )
+            self.form.addRow("横拡散比", self.lateral_factor)
+            note = QtWidgets.QLabel("急速熱処理。横方向拡散を抑えて浅く活性化します。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
@@ -639,6 +655,7 @@ class ProcessDialog(QtWidgets.QDialog):
                     overetch_pct=self.overetch.value(),
                     lateral_um=self.lateral.value(),
                     selectivity=_parse_selectivity(self.selectivity.text()),
+                    mask_erosion=self.mask_erosion.value(),
                 )
             return WetEtch(targets=tgts, depth_um=self.depth.value())
         if t == "DIFFUSION":
@@ -667,6 +684,11 @@ class ProcessDialog(QtWidgets.QDialog):
             )
         if t == "ANNEAL":
             return Anneal(depth_um=self.depth.value())
+        if t == "RTP":
+            return RapidThermalAnneal(
+                depth_um=self.depth.value(),
+                lateral_factor=self.lateral_factor.value(),
+            )
         if t == "KOH":
             return AnisoWetEtch(
                 target=self.targets_combo.currentData(),

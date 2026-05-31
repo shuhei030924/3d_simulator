@@ -369,6 +369,9 @@ class DryEtch(Process):
     # 1.0=基準速度、低いほど削れにくい（ストップ層は 0 付近）。
     # 例: {"oxide": 0.33} は Si:SiO2 = 3:1 の選択比を表す。
     selectivity: dict[str, float] = field(default_factory=dict)
+    # マスク消耗比: ターゲットを depth_um 削る間にレジストが
+    # mask_erosion×depth_um だけ上面から減る（実機の 0.3〜0.5 程度）。
+    mask_erosion: float = 0.0
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
@@ -389,6 +392,7 @@ class DryEtch(Process):
         _require_positive(self.depth_um, "エッチ量")
         _require_non_negative(self.overetch_pct, "オーバーエッチ率")
         _require_non_negative(self.lateral_um, "横方向バイアス")
+        _require_non_negative(self.mask_erosion, "マスク消耗比")
         for name, rv in self.selectivity.items():
             _require_range(rv, 0.0, 1.0, f"選択比[{name}]")
         grid = wafer.grid
@@ -445,6 +449,23 @@ class DryEtch(Process):
             undercut[0, :, :] = False  # 基板最下層は保護
             grid[undercut] = materials.AIR
 
+        # マスク消耗: レジストを上面から mask_erosion×depth 分だけ削る。
+        # 実機ではエッチ中にマスクも消費され、過度だと被覆が失われ CD が崩れる。
+        erode = (
+            wafer.um_to_vox(self.mask_erosion * self.depth_um)
+            if self.mask_erosion > 0
+            else 0
+        )
+        if erode > 0:
+            resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
+            for _ in range(erode):
+                z_top, top_id = _top_material(wafer)
+                do = (z_top >= 0) & np.isin(top_id, resist_ids)
+                if not do.any():
+                    break
+                ys, xs = np.nonzero(do)
+                grid[z_top[ys, xs], ys, xs] = materials.AIR
+
     def params_dict(self) -> dict:
         return {
             "targets": list(self.targets),
@@ -452,6 +473,7 @@ class DryEtch(Process):
             "overetch_pct": self.overetch_pct,
             "lateral_um": self.lateral_um,
             "selectivity": dict(self.selectivity),
+            "mask_erosion": self.mask_erosion,
         }
 
     @classmethod
@@ -464,6 +486,7 @@ class DryEtch(Process):
             selectivity={
                 str(k): float(v) for k, v in dict(d.get("selectivity", {})).items()
             },
+            mask_erosion=float(d.get("mask_erosion", 0.0)),
         )
 
 
@@ -908,6 +931,64 @@ class Anneal(Process):
     @classmethod
     def _from_params(cls, d: dict) -> Anneal:
         return cls(depth_um=float(d.get("depth_um", 0.3)))
+
+
+# === RTP（急速熱処理 / スパイクアニール）====================================
+@register
+@dataclass
+class RapidThermalAnneal(Process):
+    """急速熱処理（RTP/スパイクアニール）。浅く、横方向拡散を抑えてドライブイン。
+
+    炉アニール（等方的に丸く広がる）と異なり、短時間高温で活性化のみを狙うため
+    横方向の広がりが小さい。lateral_factor（0〜1）で横/縦の拡散比を制御し、
+    0 に近いほど純垂直、1 で等方（炉アニール相当）になる。
+    """
+
+    type = "RTP"
+    label = "急速熱処理"
+
+    depth_um: float = 0.15
+    lateral_factor: float = 0.3  # 横拡散 / 縦拡散 の比（既定 0.3、炉より小さい）
+
+    def summary(self) -> str:
+        return (
+            f"RTP  ドライブイン{self.depth_um:.2f}µm  横比{self.lateral_factor:.2f}"
+        )
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.depth_um, "ドライブイン量")
+        _require_range(self.lateral_factor, 0.0, 1.0, "横拡散比")
+        grid = wafer.grid
+        si_id = materials.BY_NAME["silicon"].id
+        lat = wafer.um_to_vox(self.depth_um)
+        if lat <= 0:
+            return
+        # 異方拡散: 縦は lat、横は lat×lateral_factor の到達距離。
+        # distance_transform_edt の sampling で横方向の距離コストを増やし、
+        # 横の広がりを抑える。lateral_factor=0 は実質純垂直。
+        lf = self.lateral_factor
+        big = 1e6  # 横拡散を実質ゼロにするための大コスト
+        lateral_cost = (1.0 / lf) if lf > 0 else big
+        sampling = (1.0, lateral_cost, lateral_cost)
+        for name in ("doped_n", "doped_p"):
+            dop_id = materials.get(name).id
+            region = grid == dop_id
+            if not region.any():
+                continue
+            dist = ndimage.distance_transform_edt(~region, sampling=sampling)
+            grown = dist <= lat
+            spread = grown & (grid == si_id)
+            grid[spread] = dop_id
+
+    def params_dict(self) -> dict:
+        return {"depth_um": self.depth_um, "lateral_factor": self.lateral_factor}
+
+    @classmethod
+    def _from_params(cls, d: dict) -> RapidThermalAnneal:
+        return cls(
+            depth_um=float(d.get("depth_um", 0.15)),
+            lateral_factor=float(d.get("lateral_factor", 0.3)),
+        )
 
 
 # === EPI（選択エピタキシャル成長）==========================================
@@ -1405,7 +1486,7 @@ def available_types() -> list[tuple[str, str]]:
     order = [
         "PHOTO", "CVD", "ALD", "PVD", "EPI",
         "DRY", "WET", "KOH", "DRIE", "SPUTTER",
-        "DIFFUSION", "IMPLANT", "ANNEAL", "OXIDE",
+        "DIFFUSION", "IMPLANT", "ANNEAL", "RTP", "OXIDE",
         "FILL", "SPINON", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
     ]
     out = []
