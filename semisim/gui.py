@@ -644,6 +644,11 @@ class ProcessDialog(QtWidgets.QDialog):
             )
             self.isotropic.setSuffix(" %")
             self.form.addRow("等方成分", self.isotropic)
+            self.faceting = _spin(
+                getattr(e, "faceting", 0.0) * 100.0, 0.0, 100.0, 5.0, 0
+            )
+            self.faceting.setSuffix(" %")
+            self.form.addRow("ファセット (面取り)", self.faceting)
             note = QtWidgets.QLabel("材料を問わず物理的に削ります（イオンミリング）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -802,6 +807,7 @@ class ProcessDialog(QtWidgets.QDialog):
             return SputterEtch(
                 depth_um=self.depth.value(),
                 isotropic=self.isotropic.value() / 100.0,
+                faceting=self.faceting.value() / 100.0,
             )
         if t == "CLEAN":
             return PlasmaClean(

@@ -1829,14 +1829,19 @@ class SputterEtch(Process):
 
     depth_um: float = 0.3
     isotropic: float = 0.0
+    # ファセッティング（0..1）。イオンミリングは入射角依存スパッタ率により
+    # 鋭い凸角を優先的に削り、角を斜めのファセット（面取り）にする。
+    faceting: float = 0.0
 
     def summary(self) -> str:
         iso = "" if self.isotropic <= 0 else f"  等方{self.isotropic:.0%}"
-        return f"SPUTTER  深さ{self.depth_um:.2f}µm{iso}"
+        fac = "" if self.faceting <= 0 else f"  面取り{self.faceting:.0%}"
+        return f"SPUTTER  深さ{self.depth_um:.2f}µm{iso}{fac}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "エッチ量")
         _require_range(self.isotropic, 0.0, 1.0, "等方成分")
+        _require_range(self.faceting, 0.0, 1.0, "面取り")
         grid = wafer.grid
         depth = wafer.um_to_vox(self.depth_um)
         resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
@@ -1866,14 +1871,45 @@ class SputterEtch(Process):
             erode[0, :, :] = False
             grid[erode] = materials.AIR
 
+        # ファセッティング: 露出した凸角を優先的に削り面取りする。各反復で
+        # 「空気に接し、かつ固体隣接が少ない（=凸の角/稜）」ボクセルを除去
+        # する。これを繰り返すと角に約45°のファセットが形成される。
+        fac = int(round(depth * self.faceting)) if self.faceting > 0 else 0
+        if fac > 0:
+            k = np.zeros((3, 3, 3), dtype=np.int8)
+            k[1, 1, 0] = k[1, 1, 2] = k[1, 0, 1] = k[1, 2, 1] = 1
+            k[0, 1, 1] = k[2, 1, 1] = 1
+            struct = ndimage.generate_binary_structure(3, 1)
+            for _ in range(fac):
+                solid = (grid != materials.AIR) & ~np.isin(grid, resist_ids)
+                exposed = solid & ndimage.binary_dilation(
+                    grid == materials.AIR, structure=struct
+                )
+                neigh = ndimage.convolve(
+                    solid.astype(np.int8), k, mode="constant", cval=0
+                )
+                # 凸角/稜: 6 近傍中 4 個以下が固体（平坦面は 5）
+                convex = exposed & (neigh <= 4)
+                convex[0, :, :] = False
+                convex[:, 0, :] = convex[:, -1, :] = False
+                convex[:, :, 0] = convex[:, :, -1] = False
+                if not convex.any():
+                    break
+                grid[convex] = materials.AIR
+
     def params_dict(self) -> dict:
-        return {"depth_um": self.depth_um, "isotropic": self.isotropic}
+        return {
+            "depth_um": self.depth_um,
+            "isotropic": self.isotropic,
+            "faceting": self.faceting,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> SputterEtch:
         return cls(
             depth_um=float(d.get("depth_um", 0.3)),
             isotropic=float(d.get("isotropic", 0.0)),
+            faceting=float(d.get("faceting", 0.0)),
         )
 
 

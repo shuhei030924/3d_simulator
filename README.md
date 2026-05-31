@@ -161,6 +161,7 @@ py tools\render_gallery.py
 | DRIE | `redeposit_um` | 側壁再付着 / パシベーション（Bosch）。エッチ生成物がトレンチ側壁に再堆積して幅を狭める（0=無効） |
 | DRIE | `microtrench_um` | マイクロトレンチング。側壁反射イオンが集中するトレンチ底の隅（フット）が局所的に深く掘れる（0=無効） |
 | SPUTTER | `depth_um` / `isotropic` | 物理ミリング量と横方向成分（0=純垂直 / 1=深さと同等のアンダーカット）。基板最下層は保護 |
+| SPUTTER | `faceting` | 入射角依存スパッタによる凸角の面取り（0=無効 / 1=深さ相当の角削り）。鋭い角に約45°ファセットを形成 |
 | CLEAN | `target` / `thickness_um` | 対象材料を表面から等方的に薄く除去 |
 | REFLOW | `target` / `radius_um` | 平滑化半径。モルフォロジ処理で角を丸める |
 | ALD | `cycles` / `growth_per_cycle_nm` | サイクル数×1サイクル成長量で膜厚を nm 精度に制御。超コンフォーマル |
