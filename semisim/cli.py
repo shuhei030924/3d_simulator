@@ -60,6 +60,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--sweep2",
+        metavar="SPEC_A,SPEC_B",
+        help=(
+            "2 パラメータ同時採引（実験計画法）。'A,B' とカンマで 2 つの "
+            "'INDEX.FIELD:START:STOP:STEP' を並べる。全組合せを実行し、"
+            "各指標を CSV（標準出力）に出す"
+        ),
+    )
+    p.add_argument(
         "--thermal-budget",
         action="store_true",
         help="熱工程のサーマルバジェット（実効拡散長）を表示して終了",
@@ -161,6 +170,45 @@ def _run_sweep(recipe, spec: str) -> int:
     return 0
 
 
+def _set_step_param(recipe, index: int, field: str, val: float) -> None:
+    """工程 index のパラメータ field を val に掛け替える（キャッシュ無効化込み）。"""
+    base = recipe.steps[index].params_dict()
+    params = dict(base)
+    params[field] = val
+    params["type"] = recipe.steps[index].type
+    recipe.steps[index] = type(recipe.steps[index])._from_params(params)
+    recipe.invalidate(index)
+
+
+def _run_sweep2(recipe, spec: str) -> int:
+    """2 パラメータの全組合せを実行し、CSV を出力する（2D 採引）。"""
+    parts = spec.split(",")
+    if len(parts) != 2:
+        raise ValueError(
+            f"--sweep2 はカンマ区切りで 2 つの仕様が必要です: {spec!r}"
+        )
+    ia, fa, va = _parse_sweep(parts[0])
+    ib, fb, vb = _parse_sweep(parts[1])
+    for idx, fld in ((ia, fa), (ib, fb)):
+        if not 0 <= idx < len(recipe.steps):
+            raise ValueError(f"工程番号 {idx} が範囲外です。")
+        if fld not in recipe.steps[idx].params_dict():
+            raise ValueError(f"工程[{idx}] にパラメータ {fld!r} がありません。")
+    print(f"{fa},{fb},solid_fraction,step_height_um,surface_roughness_um,cmp_uniformity_pct")
+    for x in va:
+        _set_step_param(recipe, ia, fa, x)
+        for y in vb:
+            _set_step_param(recipe, ib, fb, y)
+            wafer = recipe.simulate()
+            s = metrology.summary(wafer)
+            print(
+                f"{x},{y},{s['solid_fraction']:.6f},{s['step_height_um']:.4f},"
+                f"{s['surface_roughness_um']:.4f},{s['cmp_uniformity_pct']:.4f}"
+            )
+    return 0
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -182,6 +230,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.sweep:
         try:
             return _run_sweep(recipe, args.sweep)
+        except ValueError as exc:
+            print(f"エラー: {exc}", file=sys.stderr)
+            return 1
+
+    if args.sweep2:
+        try:
+            return _run_sweep2(recipe, args.sweep2)
         except ValueError as exc:
             print(f"エラー: {exc}", file=sys.stderr)
             return 1

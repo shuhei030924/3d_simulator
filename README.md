@@ -70,6 +70,9 @@ py -m semisim recipe.json --report out.txt --stl shape.stl --png slice.png
 # 中央列の縦方向材料スタックを CSV 出力（依存なし、SEM/TEM 断面比較用）
 py -m semisim --preset "MOSFET フロー" --csv-column column.csv
 
+# 2 パラメータ同時採引（実験計画法）。全組合せの計測値を CSV 出力
+py -m semisim recipe.json --sweep2 "4.depth_um:0.3:0.7:0.2,5.taper_deg:0:30:15"
+
 # 熱工程のサーマルバジェット（実効拡散長）を表示
 py -m semisim --preset "拡散＋アニール" --thermal-budget
 ```

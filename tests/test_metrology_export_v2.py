@@ -117,3 +117,44 @@ def test_column_profile_air_top(wafer):
     air_name = materials.BY_ID[materials.AIR].name
     last = csv.strip().splitlines()[-1]
     assert last.endswith(air_name)
+
+
+# --- CLI 2D スイープ -------------------------------------------------------
+def _sweep_recipe():
+    r = Recipe(config=_cfg())
+    r.add(CVD(material="oxide", thickness_um=0.5))  # index 0
+    r.add(CVD(material="poly", thickness_um=0.3))  # index 1
+    return r
+
+
+def test_cli_sweep2_outputs_grid(capsys, tmp_path):
+    path = tmp_path / "r.json"
+    _sweep_recipe().save(str(path))
+    code = cli_main([
+        str(path),
+        "--sweep2",
+        "0.thickness_um:0.3:0.5:0.2,1.thickness_um:0.2:0.4:0.2",
+    ])
+    assert code == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    # ヘッダ + 2x2 = 4 行
+    assert lines[0].startswith("thickness_um,thickness_um,")
+    assert len(lines) == 1 + 4
+
+
+def test_cli_sweep2_bad_count(tmp_path):
+    path = tmp_path / "r.json"
+    _sweep_recipe().save(str(path))
+    code = cli_main([str(path), "--sweep2", "0.thickness_um:0.3:0.5:0.2"])
+    assert code == 1
+
+
+def test_cli_sweep2_bad_field(tmp_path):
+    path = tmp_path / "r.json"
+    _sweep_recipe().save(str(path))
+    code = cli_main([
+        str(path),
+        "--sweep2",
+        "0.nope:0.3:0.5:0.2,1.thickness_um:0.2:0.4:0.2",
+    ])
+    assert code == 1
