@@ -738,6 +738,43 @@ def dominant_wavelength_um(wafer: Wafer) -> float:
     return (1.0 / f) * wafer.config.pitch_um
 
 
+def electrical_continuity(wafer: Wafer, name_or_id, axis: str = "x") -> dict:
+    """導体材料が指定軸の両端を連結しているか（導通/オープン）を判定する。
+
+    指定材料のボクセルを 6 近傍でラベリングし、指定軸（"x"/"y"）の最小端
+    （index 0 の面）と最大端（最終 index の面）の両方に同時に接する連結成分が
+    あれば「導通」とみなす。エッチング過多による配線断線（オープン不良）や、
+    パターンが両端に届かない欠損の検出に使う。
+    返り値: {"connected", "n_components", "spanning_components", "largest_um3"}。
+    材料が存在しなければ全て 0/False。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    mask = grid == mat.id
+    if not mask.any():
+        return {
+            "connected": False,
+            "n_components": 0,
+            "spanning_components": 0,
+            "largest_um3": 0.0,
+        }
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)  # grid 軸 [z,y,x]
+    structure = ndimage.generate_binary_structure(3, 1)  # 6 近傍
+    labels, n = ndimage.label(mask, structure=structure)
+    n_axis = grid.shape[a]
+    lo = set(np.unique(np.take(labels, 0, axis=a)))
+    hi = set(np.unique(np.take(labels, n_axis - 1, axis=a)))
+    spanning = (lo & hi) - {0}  # 両端に接するラベル（背景0除く）
+    sizes = np.bincount(labels.ravel())[1:]
+    vox = wafer.config.pitch_um ** 3
+    return {
+        "connected": len(spanning) > 0,
+        "n_components": int(n),
+        "spanning_components": int(len(spanning)),
+        "largest_um3": float(sizes.max()) * vox if sizes.size else 0.0,
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {

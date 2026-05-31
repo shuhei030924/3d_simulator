@@ -391,5 +391,46 @@ def test_arde_off_equal_depth():
     assert abs(wide - narrow) < 1.0  # ラグ無しなら深さは等しい
 
 
+# --- 電気的導通チェック (オープン不良検出) --------------------------------
+def test_continuity_connected_line(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, y = 25, 20
+    nx = grid.shape[2]
+    grid[z, y, 0:nx] = w_id  # x 方向に端から端まで連結した配線
+    r = metrology.electrical_continuity(wafer, "tungsten", "x")
+    assert r["connected"] is True
+    assert r["spanning_components"] >= 1
+
+
+def test_continuity_open_line(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, y = 25, 20
+    nx = grid.shape[2]
+    grid[z, y, 0:nx] = w_id
+    grid[z, y, nx // 2] = materials.AIR  # 中央で断線(オープン)
+    r = metrology.electrical_continuity(wafer, "tungsten", "x")
+    assert r["connected"] is False
+    assert r["spanning_components"] == 0
+
+
+def test_continuity_absent_material(wafer):
+    r = metrology.electrical_continuity(wafer, "tungsten", "x")
+    assert r["connected"] is False
+    assert r["n_components"] == 0
+
+
+def test_continuity_axis_selectable(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, x = 25, 20
+    ny = grid.shape[1]
+    grid[z, 0:ny, x] = w_id  # y 方向に貫通する配線
+    assert metrology.electrical_continuity(wafer, "tungsten", "y")["connected"] is True
+    assert metrology.electrical_continuity(wafer, "tungsten", "x")["connected"] is False
+
+
+
 
 
