@@ -18,13 +18,16 @@ from .processes import (
     PVD,
     AnisoWetEtch,
     Anneal,
+    Backgrind,
     Diffusion,
     DryEtch,
     Epitaxy,
     Fill,
     Implant,
     LiftOff,
+    Oxidation,
     Photo,
+    Silicidation,
     Strip,
 )
 from .recipe import Recipe
@@ -170,6 +173,46 @@ def multilevel_interconnect() -> Recipe:
     return r
 
 
+def salicide_gate_flow() -> Recipe:
+    """自己整合シリサイド付きゲート: ゲート酸化→ポリゲート→S/D注入→SALICIDE。
+
+    ゲートポリと露出ソース/ドレインのシリコン上にのみシリサイドが自己整合で
+    形成され、ゲート酸化膜で覆われた領域には付かない様子を再現する。
+    """
+    r = Recipe(config=_default_cfg())
+    r.name = "サリサイド ゲート"
+    r.description = "自己整合シリサイド形成を含むゲートフロー"
+    r.add(Oxidation(thickness_um=0.15))  # ゲート酸化膜
+    r.add(CVD(material="poly", thickness_um=0.4))  # ゲートポリ
+    r.add(Photo(mask=_center_mask(0.3), thickness_um=1.0, polarity="negative"))
+    r.add(DryEtch(targets=["poly"], depth_um=0.4))  # ゲート整形
+    r.add(Strip(material="photoresist"))
+    r.add(DryEtch(targets=["oxide"], depth_um=0.15))  # S/D 上のゲート酸化膜除去→Si露出
+    r.add(Implant(dopant="doped_n", range_um=0.3, straggle_um=0.1))  # S/D 注入
+    r.add(Anneal(depth_um=0.2))  # 活性化
+    r.add(Silicidation(thickness_um=0.06))  # 自己整合シリサイド
+    return r
+
+
+def thinned_3dic_flow() -> Recipe:
+    """3D-IC 向け薄化フロー: 配線形成→裏面研削でウェハ薄化。
+
+    表面に金属配線を作った後、裏面研削で基板を大きく薄くする。デバイス層は
+    保護され、基板のみが薄くなる（積層実装/TSV 露出の前工程相当）。
+    """
+    r = Recipe(config=WaferConfig(nx=120, ny=120, nz=160, pitch_um=0.06, substrate_um=6.0))
+    r.name = "薄化 3D-IC"
+    r.description = "配線形成後に裏面研削でウェハを薄化する 3D-IC フロー"
+    r.add(CVD(material="oxide", thickness_um=0.3))
+    r.add(PVD(material="metal_al", thickness_um=0.5))
+    r.add(Photo(mask=_stripe_mask(0.4, 0.2), thickness_um=1.0, polarity="positive"))
+    r.add(DryEtch(targets=["metal_al"], depth_um=0.5))
+    r.add(Strip(material="photoresist"))
+    r.add(CVD(material="oxide", thickness_um=0.4))  # パッシベーション
+    r.add(Backgrind(thin_um=4.0))  # 裏面研削でウェハ薄化
+    return r
+
+
 # 表示ラベル -> 生成関数（GUI メニュー/テストで使用）
 PRESETS: dict[str, callable] = {
     "イオン注入 埋込層": implant_buried_layer,
@@ -180,8 +223,10 @@ PRESETS: dict[str, callable] = {
     "Cu ダマシン配線": cu_damascene,
     "金属リフトオフ": metal_liftoff,
     "MOSFET フロー": mosfet_flow,
+    "サリサイド ゲート": salicide_gate_flow,
     "TSV 貫通ビア": tsv_flow,
     "多層 Cu 配線": multilevel_interconnect,
+    "薄化 3D-IC": thinned_3dic_flow,
 }
 
 

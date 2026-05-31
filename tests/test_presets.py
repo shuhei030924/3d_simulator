@@ -53,3 +53,20 @@ def test_report_is_multiline_string():
     text = metrology.report(r.simulate())
     assert isinstance(text, str)
     assert text.count("\n") > 3
+
+
+def test_salicide_gate_preset_forms_silicide():
+    """サリサイド ゲートプリセットでシリサイドが形成される。"""
+    r = presets.build("サリサイド ゲート")
+    wafer = r.simulate()
+    counts = metrology.material_counts(wafer)
+    assert counts.get("silicide", 0) > 0
+
+
+def test_thinned_3dic_preset_thins_substrate():
+    """薄化 3D-IC プリセットで基板が初期より薄くなる。"""
+    r = presets.build("薄化 3D-IC")
+    wafer = r.simulate()
+    # 研削後の基板厚は初期 6.0µm より小さい
+    assert wafer.config.substrate_um < 6.0
+
