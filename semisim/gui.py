@@ -22,6 +22,7 @@ from .processes import (
     PVD,
     AnisoWetEtch,
     Anneal,
+    Backgrind,
     Diffusion,
     DryEtch,
     Epitaxy,
@@ -480,6 +481,13 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "BACKGRIND":
+            self.thin = _spin(getattr(e, "thin_um", 1.0), 0.1, 100.0, 0.5, 2)
+            self.form.addRow("研削量 (µm)", self.thin)
+            note = QtWidgets.QLabel("裏面（底）から基板を研削しウェハを薄化します。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
         elif t == "OXIDE":
             self.thick = _spin(getattr(e, "thickness_um", 0.3), 0.05, 20.0, 0.1)
             self.form.addRow("酸化膜厚 (µm)", self.thick)
@@ -763,6 +771,8 @@ class ProcessDialog(QtWidgets.QDialog):
                 erosion_um=self.erosion.value(),
                 density_radius_um=self.density_radius.value(),
             )
+        if t == "BACKGRIND":
+            return Backgrind(thin_um=self.thin.value())
         if t == "OXIDE":
             return Oxidation(thickness_um=self.thick.value(), beak_fraction=self.beak.value())
         if t == "SALICIDE":

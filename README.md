@@ -126,6 +126,7 @@ py tools\render_gallery.py
 | CLEAN | プラズマクリーン | 露出表面を薄く等方除去（デスカム／残渣除去） |
 | LIFTOFF | リフトオフ | レジストとその上の膜を一括除去 |
 | CMP | CMP 平坦化 | 上面研磨で平坦化（基板保護・研磨ストップ層対応） |
+| BACKGRIND | 裏面研削 | 基板を裏面（底）から研削しウェハを薄化（3D-IC/パッケージ。デバイス層は保護） |
 | STRIP | 剥離 | 指定材料を全除去 |
 
 ## 主なパラメータ解説
@@ -172,6 +173,7 @@ py tools\render_gallery.py
 | ALD | `ar_coverage` / `ar_threshold` | 高アスペクト比窪みでの底被覆率（前駆体枯渇）。1.0=完全コンフォーマル |
 | CMP | `remove_um` / `stop_material` / `soft_material` / `dishing_um` | 研磨量と研磨ストップ層（指定時はその最高点より下を削らない）。`soft_material`＋`dishing_um` で軟材料（Cu 等）をディッシング量だけ追加で凹ませるダマシン研磨を再現 |
 | CMP | `erosion_um` / `density_radius_um` | パターン密度依存エロージョン。軟材料が密集する領域ほど余分に削れる（密度を `density_radius_um` 近傍で平均） |
+| BACKGRIND | `thin_um` | 裏面からの基板研削量。全構造を下方へシフトして底の基板を除去（最低 1 ボクセルの基板を残しデバイスを保護） |
 
 ## 構成
 

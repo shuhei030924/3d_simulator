@@ -985,6 +985,56 @@ class CMP(Process):
         )
 
 
+# === BACKGRIND（裏面研削 / ウェハ薄化）=====================================
+@register
+@dataclass
+class Backgrind(Process):
+    """ウェハ裏面（底）を研削して基板を薄くする（3D-IC/パッケージ向け）。
+
+    基板シリコンを底面から thin_um だけ除去し、全構造を下方へシフトする。
+    表面のデバイス層は保護され、最下の基板シリコンのみが削られる（研削が
+    デバイスに到達しないよう、最低 1 ボクセルの基板を残す）。config の
+    substrate_um も実際に削れた分だけ更新する。
+    """
+
+    type = "BACKGRIND"
+    label = "裏面研削"
+
+    thin_um: float = 1.0
+
+    def summary(self) -> str:
+        return f"BACKGRIND  裏面から{self.thin_um:.2f}µm研削しウェハ薄化"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.thin_um, "研削量")
+        grid = wafer.grid
+        nz = grid.shape[0]
+        si_id = materials.BY_NAME["silicon"].id
+        # 各列で底から連続するシリコン（基板）の厚さを求める。
+        is_si = grid == si_id
+        contig = np.cumprod(is_si, axis=0)  # 最初の非シリコンで 0 になる
+        bottom_si = contig.sum(axis=0)  # (ny, nx) 底基板の厚さ[vox]
+        min_sub = int(bottom_si.min())
+        # デバイスに到達しないよう、最低 1 ボクセルの基板を残す。
+        t = wafer.um_to_vox(self.thin_um)
+        t = min(t, max(0, min_sub - 1))
+        if t <= 0:
+            return
+        # 全構造を t ボクセルだけ下へシフト（底の基板を除去）。
+        grid[: nz - t, :, :] = grid[t:, :, :]
+        grid[nz - t :, :, :] = materials.AIR
+        # 実際に削れた分だけ基板厚を更新。
+        removed_um = t * wafer.config.pitch_um
+        wafer.config.substrate_um = max(0.0, wafer.config.substrate_um - removed_um)
+
+    def params_dict(self) -> dict:
+        return {"thin_um": self.thin_um}
+
+    @classmethod
+    def _from_params(cls, d: dict) -> Backgrind:
+        return cls(thin_um=float(d.get("thin_um", 1.0)))
+
+
 # === OXIDE（熱酸化）========================================================
 @register
 @dataclass
@@ -2108,7 +2158,7 @@ def available_types() -> list[tuple[str, str]]:
         "PHOTO", "CVD", "ALD", "PVD", "EPI",
         "DRY", "WET", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "RTP", "OXIDE",
-        "SALICIDE", "FILL", "SPINON", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
+        "SALICIDE", "FILL", "SPINON", "CMP", "BACKGRIND", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
     ]
     out = []
     for t in order:
