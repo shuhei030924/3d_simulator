@@ -461,6 +461,8 @@ class ProcessDialog(QtWidgets.QDialog):
         elif t == "OXIDE":
             self.thick = _spin(getattr(e, "thickness_um", 0.3), 0.05, 20.0, 0.1)
             self.form.addRow("酸化膜厚 (µm)", self.thick)
+            self.beak = _spin(getattr(e, "beak_fraction", 0.0), 0.0, 3.0, 0.1, 2)
+            self.form.addRow("バーズビーク比", self.beak)
             note = QtWidgets.QLabel("露出シリコンを熱酸化します（Si を一部消費）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -703,7 +705,7 @@ class ProcessDialog(QtWidgets.QDialog):
                 dishing_um=self.dishing.value(),
             )
         if t == "OXIDE":
-            return Oxidation(thickness_um=self.thick.value())
+            return Oxidation(thickness_um=self.thick.value(), beak_fraction=self.beak.value())
         if t == "EPI":
             return Epitaxy(
                 material=self.material.currentData(),

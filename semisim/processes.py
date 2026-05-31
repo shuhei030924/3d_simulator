@@ -819,13 +819,19 @@ class Oxidation(Process):
     # 熱酸化では SiO2 の分子体積が元の Si の約 2.27 倍に膨張するため、厚さ tox の
     # SiO2 を作るのに約 0.44〜0.46×tox の Si が消費される（1/2.27 ≈ 0.44）。
     consume_fraction: float = 0.45
+    # LOCOS バーズビーク: マスク（窒化膜）端の下へ酸化膜が横方向に侵入し、
+    # Si 表面でテーパ状に食い込む。beak_fraction は横侵入距離を酸化膜厚に対する
+    # 比で与える（0=無効、典型 0.5〜1.0）。
+    beak_fraction: float = 0.0
 
     def summary(self) -> str:
-        return f"OXIDE  酸化膜{self.thickness_um:.2f}µm成長"
+        bk = "" if self.beak_fraction <= 0 else "  +バーズビーク"
+        return f"OXIDE  酸化膜{self.thickness_um:.2f}µm成長{bk}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "酸化膜厚")
         _require_range(self.consume_fraction, 0.0, 0.95, "消費比")
+        _require_non_negative(self.beak_fraction, "バーズビーク比")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         si_id = materials.BY_NAME["silicon"].id
@@ -866,10 +872,37 @@ class Oxidation(Process):
         )
         grid[deposit] = ox_id
 
+        # 3) バーズビーク: マスク端の下へ Si 表面酸化を横方向にテーパ侵入させる。
+        if self.beak_fraction > 0 and consume > 0:
+            beak_len = max(1, int(round(self.beak_fraction * total)))
+            # 非露出（マスク下）列について露出領域からの距離を測る。
+            dist = ndimage.distance_transform_edt(~eligible)
+            masked = (~eligible) & (dist > 0) & (dist <= beak_len)
+            if masked.any():
+                # 各マスク列で最上の Si を見つけ、テーパ深さぶん酸化膜へ変換。
+                taper = 1.0 - (dist - 1.0) / float(beak_len)  # 端で1→先端で~0
+                depth_cap = np.maximum(
+                    0, np.round(consume * np.clip(taper, 0.0, 1.0)).astype(int)
+                )
+                ys, xs = np.nonzero(masked)
+                for y, x in zip(ys.tolist(), xs.tolist()):
+                    d = int(depth_cap[y, x])
+                    if d <= 0:
+                        continue
+                    col = grid[:, y, x]
+                    si_z = np.nonzero(np.isin(col, si_like))[0]
+                    if si_z.size == 0:
+                        continue
+                    top_si = int(si_z.max())
+                    z0 = max(0, top_si - d + 1)
+                    seg = col[z0 : top_si + 1]
+                    seg[np.isin(seg, si_like)] = ox_id
+
     def params_dict(self) -> dict:
         return {
             "thickness_um": self.thickness_um,
             "consume_fraction": self.consume_fraction,
+            "beak_fraction": self.beak_fraction,
         }
 
     @classmethod
@@ -877,6 +910,7 @@ class Oxidation(Process):
         return cls(
             thickness_um=float(d.get("thickness_um", 0.3)),
             consume_fraction=float(d.get("consume_fraction", 0.45)),
+            beak_fraction=float(d.get("beak_fraction", 0.0)),
         )
 # === IMPLANT（イオン注入）==================================================
 @register
