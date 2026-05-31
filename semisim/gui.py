@@ -36,6 +36,7 @@ from .processes import (
     RapidThermalAnneal,
     Reflow,
     Silicidation,
+    Spacer,
     SpinCoat,
     SputterEtch,
     Strip,
@@ -510,6 +511,23 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "SPACER":
+            self.material = QtWidgets.QComboBox()
+            for name in ("nitride", "oxide"):
+                self.material.addItem(materials.get(name).label, name)
+            if e is not None:
+                idx = self.material.findData(e.material)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("材料", self.material)
+            self.thick = _spin(getattr(e, "thickness_um", 0.05), 0.01, 2.0, 0.01, 3)
+            self.form.addRow("膜厚 (µm)", self.thick)
+            self.overetch = _spin(getattr(e, "overetch_um", 0.0), 0.0, 1.0, 0.01, 3)
+            self.form.addRow("オーバーエッチ (µm)", self.overetch)
+            note = QtWidgets.QLabel("コンフォーマル成膜＋異方性エッチバックで側壁に残します。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
         elif t == "EPI":
             self.material = QtWidgets.QComboBox()
             for name in ("epi_si", "silicon"):
@@ -783,6 +801,12 @@ class ProcessDialog(QtWidgets.QDialog):
             return Silicidation(
                 thickness_um=self.thick.value(),
                 react_poly=self.react_poly.isChecked(),
+            )
+        if t == "SPACER":
+            return Spacer(
+                material=self.material.currentData(),
+                thickness_um=self.thick.value(),
+                overetch_um=self.overetch.value(),
             )
         if t == "EPI":
             return Epitaxy(

@@ -383,6 +383,71 @@ class ALD(Process):
         )
 
 
+# === Spacer（サイドウォールスペーサ）======================================
+@register
+@dataclass
+class Spacer(Process):
+    """サイドウォールスペーサ形成。
+
+    段差（ゲート等）にコンフォーマル成膜したのち異方性エッチバックを行い、
+    水平面の膜を除去して垂直側壁にのみ材料を残す。LDD/ゲートスペーサ等で
+    自己整合的に微細な側壁構造を作る代表的プロセス。
+    """
+
+    type = "SPACER"
+    label = "スペーサ形成"
+
+    material: str = "nitride"
+    thickness_um: float = 0.05
+    overetch_um: float = 0.0
+
+    def summary(self) -> str:
+        m = materials.get(self.material)
+        oe = "" if self.overetch_um <= 0 else f" +OE{self.overetch_um * 1000:.0f}nm"
+        return f"SPACER  {m.label}側壁スペーサ {self.thickness_um * 1000:.0f}nm{oe}"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.thickness_um, "膜厚")
+        _require_non_negative(self.overetch_um, "オーバーエッチ量")
+        grid = wafer.grid
+        mat_id = materials.get(self.material).id
+        t = wafer.um_to_vox(self.thickness_um)
+        # 1) コンフォーマル成膜: 既存固体表面から距離 t 以内の空気に堆積
+        air = grid == materials.AIR
+        dist = ndimage.distance_transform_edt(air)
+        coat = air & (dist <= t)
+        if not coat.any():
+            return
+        grid[coat] = mat_id
+        # 2) 異方性エッチバック: 各列のスペーサ縦連続ラン高さがしきい値以下
+        #    （＝水平膜）なら除去し、高いラン（側壁）は残す。
+        thresh = t + (wafer.um_to_vox(self.overetch_um) if self.overetch_um > 0 else 0)
+        remove = np.zeros_like(coat)
+        cols = np.argwhere(coat.any(axis=0))
+        for y, x in cols:
+            colz = np.flatnonzero(coat[:, y, x])
+            breaks = np.where(np.diff(colz) > 1)[0] + 1
+            for run in np.split(colz, breaks):
+                if run.size <= thresh:
+                    remove[run, y, x] = True
+        grid[remove] = materials.AIR
+
+    def params_dict(self) -> dict:
+        return {
+            "material": self.material,
+            "thickness_um": self.thickness_um,
+            "overetch_um": self.overetch_um,
+        }
+
+    @classmethod
+    def _from_params(cls, d: dict) -> Spacer:
+        return cls(
+            material=d.get("material", "nitride"),
+            thickness_um=float(d.get("thickness_um", 0.05)),
+            overetch_um=float(d.get("overetch_um", 0.0)),
+        )
+
+
 # === PVD（指向性成膜）======================================================
 @register
 @dataclass
