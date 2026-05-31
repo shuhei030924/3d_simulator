@@ -601,25 +601,43 @@ class WetEtch(Process):
 
     targets: list[str] = field(default_factory=list)
     depth_um: float = 0.5
+    # 横方向アンダーカット / 縦方向エッチ の比（0〜1）。
+    # 1.0=完全等方（縦と同量の横アンダーカット）。0=ほぼ垂直（撹拌や
+    # 表面活性化で横方向が抑制された実プロセスを模擬）。
+    lateral_ratio: float = 1.0
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
-        return f"WET  {tgt}  深さ{self.depth_um:.2f}µm"
+        lr = "" if self.lateral_ratio >= 0.999 else f"  横比{self.lateral_ratio:.2f}"
+        return f"WET  {tgt}  深さ{self.depth_um:.2f}µm{lr}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "エッチ量")
+        _require_range(self.lateral_ratio, 0.0, 1.0, "横方向比")
         grid = wafer.grid
         target_ids = _resolve_targets(self.targets)
         r = wafer.um_to_vox(self.depth_um)
-        # 露出面から 1 ボクセルずつ等方的に後退させる。
-        # 空気に隣接するターゲットのみを毎回除去するため、間に別材料が
-        # あれば貫通せず、マスク下のアンダーカットも自然に再現される。
+        # 露出面から 1 ボクセルずつエッチ前線を伝播させる。
+        # 縦方向(z)は毎回進め、横方向(x,y)は lateral_ratio に比例した
+        # 頻度でのみ進めることで、アンダーカット量を縦エッチの
+        # lateral_ratio 倍に制御する（等方〜異方の連続調整）。
         # 注: 距離変換による一括計算は障壁材料を貫通してしまい物理が崩れる
         # ため、ここでは前線伝播（反復ダイレーション）を意図的に用いる。
-        struct = ndimage.generate_binary_structure(3, 1)  # 6 近傍
+        full6 = ndimage.generate_binary_structure(3, 1)  # 6 近傍（等方）
+        vert = np.zeros((3, 3, 3), dtype=bool)  # 縦方向(z±1)のみ
+        vert[1, 1, 1] = True
+        vert[0, 1, 1] = True
+        vert[2, 1, 1] = True
+        lr = float(np.clip(self.lateral_ratio, 0.0, 1.0))
+        lat_budget = 0.0
         for _ in range(r):
             air = grid == materials.AIR
-            front = ndimage.binary_dilation(air, structure=struct)
+            lat_budget += lr
+            if lat_budget >= 1.0:
+                front = ndimage.binary_dilation(air, structure=full6)
+                lat_budget -= 1.0
+            else:
+                front = ndimage.binary_dilation(air, structure=vert)
             cur_target = np.isin(grid, target_ids)
             remove = front & cur_target
             # 基板最下層は薬液で削り切らない（ウェハ貫通を防ぐ物理的下限）。
@@ -629,13 +647,18 @@ class WetEtch(Process):
             grid[remove] = materials.AIR
 
     def params_dict(self) -> dict:
-        return {"targets": list(self.targets), "depth_um": self.depth_um}
+        return {
+            "targets": list(self.targets),
+            "depth_um": self.depth_um,
+            "lateral_ratio": self.lateral_ratio,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> WetEtch:
         return cls(
             targets=list(d.get("targets", [])),
             depth_um=float(d.get("depth_um", 0.5)),
+            lateral_ratio=float(d.get("lateral_ratio", 1.0)),
         )
 
 

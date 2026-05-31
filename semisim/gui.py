@@ -406,6 +406,11 @@ class ProcessDialog(QtWidgets.QDialog):
                 )
                 self.taper.setSuffix(" °")
                 self.form.addRow("側壁テーパ角", self.taper)
+            else:  # WET
+                self.lateral_ratio = _spin(
+                    getattr(e, "lateral_ratio", 1.0), 0.0, 1.0, 0.05, 2
+                )
+                self.form.addRow("横方向比 (1=等方)", self.lateral_ratio)
 
         elif t == "DIFFUSION":
             self.dopant = QtWidgets.QComboBox()
@@ -705,7 +710,8 @@ class ProcessDialog(QtWidgets.QDialog):
                     mask_erosion=self.mask_erosion.value(),
                     taper_deg=self.taper.value(),
                 )
-            return WetEtch(targets=tgts, depth_um=self.depth.value())
+            return WetEtch(targets=tgts, depth_um=self.depth.value(),
+                           lateral_ratio=self.lateral_ratio.value())
         if t == "DIFFUSION":
             return Diffusion(dopant=self.dopant.currentData(), depth_um=self.depth.value())
         if t == "STRIP":
