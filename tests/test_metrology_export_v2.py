@@ -253,6 +253,34 @@ def test_oxidation_time_mode_roundtrip():
     assert ox2._effective_thickness_um() == ox._effective_thickness_um()
 
 
+# --- Line Width Roughness (LWR) -------------------------------------------
+def test_lwr_straight_line_is_zero(wafer):
+    # まっすぐな一定幅ラインは LWR ≈ 0
+    grid = wafer.grid
+    poly = materials.BY_NAME["poly"].id
+    z = 25
+    grid[z, :, 18:23] = poly  # 全 y で幅 5 の直線
+    lwr = metrology.line_width_roughness_um(wafer, "poly", z)
+    assert lwr == 0.0
+
+
+def test_lwr_wiggly_line_positive(wafer):
+    grid = wafer.grid
+    poly = materials.BY_NAME["poly"].id
+    z = 25
+    ny = grid.shape[1]
+    # y ごとに幅を変えてギザギザにする
+    for y in range(ny):
+        w = 4 + (y % 3)
+        grid[z, y, 18 : 18 + w] = poly
+    lwr = metrology.line_width_roughness_um(wafer, "poly", z)
+    assert lwr > 0.0
+
+
+def test_lwr_absent_zero(wafer):
+    assert metrology.line_width_roughness_um(wafer, "tungsten", 25) == 0.0
+
+
 # --- ARDE / RIE ラグ -------------------------------------------------------
 def _arde_wafer():
     from semisim.grid import Wafer

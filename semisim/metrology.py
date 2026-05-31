@@ -313,6 +313,29 @@ def line_edge_roughness_um(wafer: Wafer, name_or_id, z_index: int) -> float:
     return float(np.std(edges)) * wafer.config.pitch_um
 
 
+def line_width_roughness_um(wafer: Wafer, name_or_id, z_index: int) -> float:
+    """指定高さでの対象材料ライン幅の揺らぎ (RMS, µm) を返す。
+
+    各 y 行で対象材料が存在する区間の幅（右端-左端+1）を求め、その y 方向の
+    標準偏差を LWR とみなす。LER がエッジ位置の揺らぎなのに対し、LWR は線幅
+    そのものの揺らぎで、両エッジの相関を反映する独立した指標。
+    対象が無い、または幅が取れる行が 2 未満なら 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    z = int(np.clip(z_index, 0, nz - 1))
+    plane = grid[z] == mat.id  # (ny, nx)
+    widths: list[int] = []
+    for y in range(ny):
+        xs = np.flatnonzero(plane[y])
+        if xs.size:
+            widths.append(int(xs.max() - xs.min() + 1))
+    if len(widths) < 2:
+        return 0.0
+    return float(np.std(widths)) * wafer.config.pitch_um
+
+
 def overlay_error_um(wafer: Wafer, ref_material, measure_material) -> float:
     """2 つの材料層の重心ずれ（オーバレイ誤差, µm）を xy 面内で返す。
 
