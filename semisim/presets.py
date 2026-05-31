@@ -143,6 +143,33 @@ def tsv_flow() -> Recipe:
     return r
 
 
+def multilevel_interconnect() -> Recipe:
+    """多層 Cu 配線（M1/Via/M2）: ダマシンを 3 段繰り返す先端ノード相当フロー。
+
+    各層は 層間絶縁膜(low_k) 成膜 → パターニング → バリア(TaN) →
+    Cu 充填 → CMP 平坦化（Cu ディッシング込み）で構成する。
+    DryEtch には酸化膜ストップ層相当の選択比を持たせ、下層を保護する。
+    """
+    r = Recipe(config=WaferConfig(nx=120, ny=120, nz=180, pitch_um=0.06, substrate_um=2.0))
+    r.name = "多層 Cu 配線 (M1/Via/M2)"
+    r.description = "ダマシンを3段繰り返す多層配線フロー"
+    masks = (_stripe_mask(0.40, 0.20), _center_mask(0.25), _stripe_mask(0.40, 0.20))
+    for mask in masks:
+        r.add(CVD(material="oxide", thickness_um=0.1))  # エッチストップ層（下地）
+        r.add(CVD(material="low_k", thickness_um=0.8))  # 層間絶縁膜
+        r.add(Photo(mask=mask, thickness_um=0.8, polarity="positive"))
+        # low_k を選択的に削り、下地 oxide で速度を落として（選択比0.1）ストップ
+        r.add(DryEtch(
+            targets=["low_k"], depth_um=0.8, overetch_pct=20.0,
+            selectivity={"oxide": 0.1},
+        ))
+        r.add(Strip(material="photoresist"))
+        r.add(ALD(material="tan", cycles=60, growth_per_cycle_nm=1.0))  # バリア
+        r.add(Fill(material="metal_cu", overfill_um=0.3))
+        r.add(CMP(remove_um=0.4, soft_material="metal_cu", dishing_um=0.05))
+    return r
+
+
 # 表示ラベル -> 生成関数（GUI メニュー/テストで使用）
 PRESETS: dict[str, callable] = {
     "イオン注入 埋込層": implant_buried_layer,
@@ -154,6 +181,7 @@ PRESETS: dict[str, callable] = {
     "金属リフトオフ": metal_liftoff,
     "MOSFET フロー": mosfet_flow,
     "TSV 貫通ビア": tsv_flow,
+    "多層 Cu 配線": multilevel_interconnect,
 }
 
 

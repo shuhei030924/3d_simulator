@@ -45,6 +45,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="STL/PNG 出力時にレジストを除外",
     )
+    p.add_argument(
+        "--sweep",
+        metavar="SPEC",
+        help=(
+            "パラメータ採引: 'INDEX.FIELD:START:STOP:STEP' 形式。"
+            "例: '4.depth_um:0.3:0.7:0.1' で steps[4].depth_um を掛け替えて"
+            "複数実行し、CSV を標準出力に出す"
+        ),
+    )
     return p
 
 
@@ -87,6 +96,61 @@ def _export_png(wafer, path: str, include_resist: bool) -> None:
     plt.close(fig)
 
 
+def _parse_sweep(spec: str) -> tuple[int, str, list[float]]:
+    """'INDEX.FIELD:START:STOP:STEP' を (index, field, 値リスト) に解釈する。"""
+    try:
+        head, start, stop, step = spec.split(":")
+        idx_str, field = head.split(".", 1)
+        index = int(idx_str)
+        start_f, stop_f, step_f = float(start), float(stop), float(step)
+    except ValueError as exc:
+        raise ValueError(
+            f"--sweep の形式が不正です: {spec!r}"
+            "（'INDEX.FIELD:START:STOP:STEP' を期待）"
+        ) from exc
+    if step_f <= 0:
+        raise ValueError("--sweep の STEP は正値である必要があります。")
+    values: list[float] = []
+    v = start_f
+    # 浮動小数誤差を考慮して stop をわずかに超えるまで含める
+    while v <= stop_f + step_f * 1e-6:
+        values.append(round(v, 9))
+        v += step_f
+    return index, field, values
+
+
+def _run_sweep(recipe, spec: str) -> int:
+    """指定工程のパラメータを掛け替えて連続実行し、CSV を出力する。"""
+    index, field, values = _parse_sweep(spec)
+    if not 0 <= index < len(recipe.steps):
+        print(f"エラー: 工程番号 {index} が範囲外です。", file=sys.stderr)
+        return 1
+    base = recipe.steps[index].params_dict()
+    if field not in base:
+        print(
+            f"エラー: 工程[{index}] にパラメータ {field!r} がありません。"
+            f"利用可能: {', '.join(base)}",
+            file=sys.stderr,
+        )
+        return 1
+    proc_type = recipe.steps[index].type
+    proc_cls = type(recipe.steps[index])
+    print(f"{field},solid_fraction,step_height_um,surface_roughness_um,cmp_uniformity_pct")
+    for val in values:
+        params = dict(base)
+        params[field] = val
+        params["type"] = proc_type
+        recipe.steps[index] = proc_cls._from_params(params)
+        recipe.invalidate(index)
+        wafer = recipe.simulate()
+        s = metrology.summary(wafer)
+        print(
+            f"{val},{s['solid_fraction']:.6f},{s['step_height_um']:.4f},"
+            f"{s['surface_roughness_um']:.4f},{s['cmp_uniformity_pct']:.4f}"
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -104,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, ValueError, KeyError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 1
+
+    if args.sweep:
+        try:
+            return _run_sweep(recipe, args.sweep)
+        except ValueError as exc:
+            print(f"エラー: {exc}", file=sys.stderr)
+            return 1
 
     wafer = recipe.simulate()
     report = metrology.report(wafer)

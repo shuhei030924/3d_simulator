@@ -365,17 +365,32 @@ class DryEtch(Process):
     depth_um: float = 0.5
     overetch_pct: float = 0.0  # ターゲット枯渇後に下層も削る割合(%)
     lateral_um: float = 0.0  # 横方向エッチバイアス（アンダーカット）
+    # 材料別エッチ選択比（材料名 -> 相対エッチ速度, 0〜1）。
+    # 1.0=基準速度、低いほど削れにくい（ストップ層は 0 付近）。
+    # 例: {"oxide": 0.33} は Si:SiO2 = 3:1 の選択比を表す。
+    selectivity: dict[str, float] = field(default_factory=dict)
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
         oe = "" if self.overetch_pct <= 0 else f"  +OE{self.overetch_pct:.0f}%"
         lat = "" if self.lateral_um <= 0 else f"  横{self.lateral_um:.2f}µm"
-        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}"
+        sel = "  選択比あり" if self.selectivity else ""
+        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}"
+
+    def _rate_map(self, top_id: np.ndarray) -> np.ndarray:
+        """各列の最上面材料に対する相対エッチ速度マップ（既定 1.0）。"""
+        rate = np.ones(top_id.shape, dtype=float)
+        for name, rv in self.selectivity.items():
+            mid = materials.get(name).id
+            rate[top_id == mid] = rv
+        return rate
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "エッチ量")
         _require_non_negative(self.overetch_pct, "オーバーエッチ率")
         _require_non_negative(self.lateral_um, "横方向バイアス")
+        for name, rv in self.selectivity.items():
+            _require_range(rv, 0.0, 1.0, f"選択比[{name}]")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         target_ids = set(_resolve_targets(self.targets))
@@ -385,14 +400,21 @@ class DryEtch(Process):
         _, top_id = _top_material(wafer)
         eligible = np.isin(top_id, list(target_ids))  # (ny, nx)
 
+        # 選択比を 1 列あたりのエッチ予算（ボクセル）で表現する。
+        # 削るたびに cost=1/速度 を消費し、速度<1 の材料ほど予算を多く使う
+        # ＝削れる量が減る。速度1.0なら従来どおり depth ボクセル削る。
+        budget = np.where(eligible, float(depth), 0.0)
         for _ in range(depth):
             z_top, top_id = _top_material(wafer)
             top_is_target = np.isin(top_id, list(target_ids))
-            do = eligible & top_is_target & (z_top >= 0)
+            rate = self._rate_map(top_id)
+            cost = np.where(rate > 0, 1.0 / np.where(rate > 0, rate, 1.0), np.inf)
+            do = eligible & top_is_target & (z_top >= 0) & (budget >= cost)
             if not do.any():
                 break
             ys, xs = np.nonzero(do)
             grid[z_top[ys, xs], ys, xs] = materials.AIR
+            budget[do] -= cost[do]
 
         # オーバーエッチ: ターゲット直下に露出した下層を追加で削る。
         # レジスト(is_resist)は保護膜なので削らない。
@@ -429,6 +451,7 @@ class DryEtch(Process):
             "depth_um": self.depth_um,
             "overetch_pct": self.overetch_pct,
             "lateral_um": self.lateral_um,
+            "selectivity": dict(self.selectivity),
         }
 
     @classmethod
@@ -438,6 +461,9 @@ class DryEtch(Process):
             depth_um=float(d.get("depth_um", 0.5)),
             overetch_pct=float(d.get("overetch_pct", 0.0)),
             lateral_um=float(d.get("lateral_um", 0.0)),
+            selectivity={
+                str(k): float(v) for k, v in dict(d.get("selectivity", {})).items()
+            },
         )
 
 
@@ -501,7 +527,9 @@ class Diffusion(Process):
 
     dopant: str = "doped_n"  # doped_n / doped_p
     depth_um: float = 0.6
-    # 横方向広がり = 縦方向拡散深さ × lateral_factor（拡散の等方性の簡易係数）
+    # 横方向広がり = 縦方向拡散深さ × lateral_factor（拡散の等方性の簡易係数）。
+    # 既定 1/3: 等方拡散では横拡散が縦拡散の約 0.5〜0.8 倍だが、マスク端での
+    # 二次元拡散の実測（横/縦 ≈ 0.3）に合わせた経験値。
     lateral_factor: float = 1.0 / 3.0
 
     def summary(self) -> str:
@@ -683,6 +711,8 @@ class Oxidation(Process):
 
     thickness_um: float = 0.3
     # 生成 SiO2 厚に対し消費される Si の割合（Deal-Grove の体積膨張比に由来、約 0.45）。
+    # 熱酸化では SiO2 の分子体積が元の Si の約 2.27 倍に膨張するため、厚さ tox の
+    # SiO2 を作るのに約 0.44〜0.46×tox の Si が消費される（1/2.27 ≈ 0.44）。
     consume_fraction: float = 0.45
 
     def summary(self) -> str:

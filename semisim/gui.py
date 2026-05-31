@@ -144,6 +144,22 @@ def _spin(value: float, mn=0.0, mx=1.0, step=0.05, dec=2) -> QtWidgets.QDoubleSp
     return s
 
 
+def _parse_selectivity(text: str) -> dict[str, float]:
+    """'material:rate,material:rate' 形式を辞書に変換する（不正な項目は無視）。"""
+    result: dict[str, float] = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        name, _, rate = part.partition(":")
+        name = name.strip()
+        try:
+            result[name] = float(rate.strip())
+        except ValueError:
+            continue
+    return result
+
+
 class _RectDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -362,6 +378,13 @@ class ProcessDialog(QtWidgets.QDialog):
                     getattr(e, "lateral_um", 0.0), 0.0, 5.0, 0.05, 3
                 )
                 self.form.addRow("横方向バイアス (µm)", self.lateral)
+                self.selectivity = QtWidgets.QLineEdit()
+                sel = getattr(e, "selectivity", {}) or {}
+                self.selectivity.setText(
+                    ",".join(f"{k}:{v}" for k, v in sel.items())
+                )
+                self.selectivity.setPlaceholderText("例: oxide:0.33,nitride:0.1")
+                self.form.addRow("エッチ選択比", self.selectivity)
 
         elif t == "DIFFUSION":
             self.dopant = QtWidgets.QComboBox()
@@ -615,6 +638,7 @@ class ProcessDialog(QtWidgets.QDialog):
                     depth_um=self.depth.value(),
                     overetch_pct=self.overetch.value(),
                     lateral_um=self.lateral.value(),
+                    selectivity=_parse_selectivity(self.selectivity.text()),
                 )
             return WetEtch(targets=tgts, depth_um=self.depth.value())
         if t == "DIFFUSION":

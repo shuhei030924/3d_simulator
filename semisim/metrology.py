@@ -258,6 +258,81 @@ def etch_depth_uniformity(wafer: Wafer, name_or_id) -> dict:
     }
 
 
+def line_edge_roughness_um(wafer: Wafer, name_or_id, z_index: int) -> float:
+    """指定高さでの対象材料エッジ位置の揺らぎ (RMS, µm) を返す。
+
+    各 y 行で対象材料が左端から最初に現れる x 位置（左エッジ）を求め、
+    その y 方向の標準偏差を LER とみなす。理想直線エッジなら 0 に近い。
+    対象が無い、またはエッジが取れる行が 2 未満なら 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    z = int(np.clip(z_index, 0, nz - 1))
+    plane = grid[z] == mat.id  # (ny, nx)
+    edges: list[int] = []
+    for y in range(ny):
+        xs = np.flatnonzero(plane[y])
+        if xs.size:
+            edges.append(int(xs.min()))
+    if len(edges) < 2:
+        return 0.0
+    return float(np.std(edges)) * wafer.config.pitch_um
+
+
+def overlay_error_um(wafer: Wafer, ref_material, measure_material) -> float:
+    """2 つの材料層の重心ずれ（オーバレイ誤差, µm）を xy 面内で返す。
+
+    各材料の (x, y) 重心を求め、その水平距離を整合ずれの指標とする。
+    リソ重ね合わせやセルフアライン工程の評価に使う。
+    どちらかが存在しなければ 0。
+    """
+    a = materials.get(ref_material).id
+    b = materials.get(measure_material).id
+    grid = wafer.grid
+    mask_a = grid == a
+    mask_b = grid == b
+    if not mask_a.any() or not mask_b.any():
+        return 0.0
+    _, ya, xa = np.nonzero(mask_a)
+    _, yb, xb = np.nonzero(mask_b)
+    dy = ya.mean() - yb.mean()
+    dx = xa.mean() - xb.mean()
+    return float(np.hypot(dx, dy)) * wafer.config.pitch_um
+
+
+def feature_width_variants(
+    wafer: Wafer, name_or_id, z_index: int, y_index: int
+) -> dict:
+    """対象材料ラインの CD を複数定義で計測して返す。
+
+    返り値: {"max_run_um", "total_um", "gap_um"}。
+      max_run_um: 連続する最大幅（feature_width_um と同義）
+      total_um:   その行で対象材料が占める総 x 長（複数ラインの合計）
+      gap_um:     最初と最後の対象ボクセル間に挟まれる非対象部の総長
+    パターン密度や OPC 検討の概算に使う。対象が無ければ全て 0。
+    """
+    mat = materials.get(name_or_id)
+    line = line_scan(wafer, "x", z_index, y_index)
+    is_t = line == mat.id
+    pitch = wafer.config.pitch_um
+    if not is_t.any():
+        return {"max_run_um": 0.0, "total_um": 0.0, "gap_um": 0.0}
+    best = run = 0
+    for v in is_t:
+        run = run + 1 if v else 0
+        best = max(best, run)
+    idx = np.flatnonzero(is_t)
+    span = int(idx.max() - idx.min()) + 1
+    total = int(is_t.sum())
+    gap = span - total
+    return {
+        "max_run_um": float(best) * pitch,
+        "total_um": float(total) * pitch,
+        "gap_um": float(gap) * pitch,
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
