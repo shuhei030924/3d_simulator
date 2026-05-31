@@ -1,0 +1,104 @@
+"""PyVista によるボクセルボリュームの可視化ヘルパ。
+
+設計上の重要点:
+    * グリッドは充填ボリュームなので、クリップした断面は必ず中身が詰まって
+      見える（空洞にならない）。
+    * カテゴリ（材料 ID）ごとの色を ListedColormap で割り当てる。
+    * アンチエイリアス + 高解像度メッシュで拡大時のジャギーを軽減する。
+"""
+from __future__ import annotations
+
+import numpy as np
+import pyvista as pv
+from matplotlib.colors import ListedColormap
+
+from . import materials
+from .grid import Wafer
+
+
+def material_colormap() -> tuple[ListedColormap, list[int]]:
+    """材料 ID に対応した ListedColormap と clim を返す。"""
+    colors, _ = materials.color_lookup()
+    cmap = ListedColormap(colors)
+    return cmap, [0, len(colors) - 1]
+
+
+def build_image_data(wafer: Wafer) -> pv.ImageData:
+    """ウェハから材料 ID をセルデータに持つ ImageData を生成する。"""
+    nz, ny, nx = wafer.grid.shape
+    p = wafer.config.pitch_um
+    img = pv.ImageData(dimensions=(nx + 1, ny + 1, nz + 1), spacing=(p, p, p))
+    # VTK のセル順は x が最速。grid[z,y,x] の C-order ravel が一致する。
+    img.cell_data["material"] = wafer.grid.ravel(order="C").astype(np.float32)
+    return img
+
+
+def solid_unstructured(wafer: Wafer, include_resist: bool = True) -> pv.UnstructuredGrid:
+    """空気を除いた固体セルだけの UnstructuredGrid を返す。
+
+    include_resist=False の場合、フォトレジストも除外する。
+    """
+    grid = wafer.grid
+    if include_resist:
+        scal = grid
+    else:
+        resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
+        scal = grid.copy()
+        for rid in resist_ids:
+            scal[scal == rid] = materials.AIR
+
+    img = pv.ImageData(
+        dimensions=(grid.shape[2] + 1, grid.shape[1] + 1, grid.shape[0] + 1),
+        spacing=(wafer.config.pitch_um,) * 3,
+    )
+    img.cell_data["material"] = scal.ravel(order="C").astype(np.float32)
+    # 材料 ID >= 0.5（=空気以外）を残す
+    solid = img.threshold(0.5, scalars="material")
+    return solid
+
+
+def slice_2d(
+    wafer: Wafer, axis: str, index: int, include_resist: bool = True
+) -> tuple[np.ndarray, float, float]:
+    """断面の 2D 材料 ID 配列と物理サイズ (横µm, 縦µm) を返す。
+
+    axis="X": x=index で切った YZ 断面 (縦=Z, 横=Y)
+    axis="Y": y=index で切った XZ 断面 (縦=Z, 横=X)
+    axis="Z": z=index で切った XY 断面 (縦=Y, 横=X)
+    返す配列は表示用に縦軸が下から上（Z は下が基板）になるよう整える。
+    """
+    grid = wafer.grid  # [z, y, x]
+    nz, ny, nx = grid.shape
+    p = wafer.config.pitch_um
+
+    if axis == "X":
+        index = int(np.clip(index, 0, nx - 1))
+        plane = grid[:, :, index]  # (z, y)
+        width_um, height_um = ny * p, nz * p
+    elif axis == "Y":
+        index = int(np.clip(index, 0, ny - 1))
+        plane = grid[:, index, :]  # (z, x)
+        width_um, height_um = nx * p, nz * p
+    else:  # "Z"
+        index = int(np.clip(index, 0, nz - 1))
+        plane = grid[index, :, :]  # (y, x)
+        width_um, height_um = nx * p, ny * p
+
+    plane = plane.copy()
+    if not include_resist:
+        for m in materials.all_materials():
+            if m.is_resist:
+                plane[plane == m.id] = materials.AIR
+    return plane, width_um, height_um
+
+
+def material_listed_cmap():
+    """断面表示用の ListedColormap と正規化境界を返す。"""
+    from matplotlib.colors import BoundaryNorm
+
+    colors, _ = materials.color_lookup()
+    cmap = ListedColormap(colors)
+    n = len(colors)
+    bounds = np.arange(-0.5, n + 0.5, 1.0)
+    norm = BoundaryNorm(bounds, cmap.N)
+    return cmap, norm

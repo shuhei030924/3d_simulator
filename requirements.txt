@@ -1,0 +1,6 @@
+numpy
+scipy
+pyvista
+pyvistaqt
+PyQt5
+scikit-image
