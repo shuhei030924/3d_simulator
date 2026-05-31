@@ -186,16 +186,34 @@ class CVD(Process):
 
     material: str = "oxide"
     thickness_um: float = 0.5
+    # 負荷効果（マクロローディング, 0〜1）。パターン密度が高いほど反応種が
+    # 枯渇して膜が薄くなる現象を簡易再現する。0 で従来どおり一定厚。
+    loading: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
-        return f"CVD  {m.label}  厚{self.thickness_um:.2f}µm"
+        ld = "" if self.loading <= 0 else f"  負荷{self.loading:.2f}"
+        return f"CVD  {m.label}  厚{self.thickness_um:.2f}µm{ld}"
+
+    def _effective_thickness_vox(self, wafer: Wafer) -> int:
+        """パターン密度に応じて負荷効果で減じた実効膜厚（ボクセル）を返す。"""
+        t = wafer.um_to_vox(self.thickness_um)
+        if self.loading <= 0:
+            return t
+        # パターン密度 = 基板上面より高い（=既にパターンがある）列の割合。
+        # 平坦ブランケットでは 0、密パターンでは 1 に近づく。
+        sub_top = wafer.um_to_vox(wafer.config.substrate_um)
+        z_top = wafer.top_surface_z()
+        density = float(np.mean(z_top > sub_top)) if z_top.size else 0.0
+        t_eff = t * (1.0 - self.loading * density)
+        return max(1, int(round(t_eff)))
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "膜厚")
+        _require_range(self.loading, 0.0, 1.0, "負荷効果")
         grid = wafer.grid
         mat_id = materials.get(self.material).id
-        t = wafer.um_to_vox(self.thickness_um)
+        t = self._effective_thickness_vox(wafer)
         air = grid == materials.AIR
         # 固体表面からの距離 t 以内の空気に堆積（コンフォーマル）
         dist = ndimage.distance_transform_edt(air)
@@ -203,13 +221,18 @@ class CVD(Process):
         grid[deposit] = mat_id
 
     def params_dict(self) -> dict:
-        return {"material": self.material, "thickness_um": self.thickness_um}
+        return {
+            "material": self.material,
+            "thickness_um": self.thickness_um,
+            "loading": self.loading,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> CVD:
         return cls(
             material=d.get("material", "oxide"),
             thickness_um=float(d.get("thickness_um", 0.5)),
+            loading=float(d.get("loading", 0.0)),
         )
 
 

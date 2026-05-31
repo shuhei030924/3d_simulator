@@ -322,6 +322,11 @@ class ProcessDialog(QtWidgets.QDialog):
             self.form.addRow("材料", self.material)
             self.thick = _spin(getattr(e, "thickness_um", 0.5), 0.05, 20.0, 0.1)
             self.form.addRow("膜厚 (µm)", self.thick)
+            if t == "CVD":
+                self.loading = _spin(
+                    getattr(e, "loading", 0.0), 0.0, 1.0, 0.05, 2
+                )
+                self.form.addRow("負荷効果", self.loading)
             if t == "PVD":
                 self.coverage = _spin(
                     getattr(e, "step_coverage", 1.0) * 100.0, 0.0, 100.0, 5.0, 0
@@ -630,7 +635,11 @@ class ProcessDialog(QtWidgets.QDialog):
                 polarity=self.polarity.currentText(),
             )
         if t == "CVD":
-            return CVD(material=self.material.currentData(), thickness_um=self.thick.value())
+            return CVD(
+                material=self.material.currentData(),
+                thickness_um=self.thick.value(),
+                loading=self.loading.value(),
+            )
         if t == "ALD":
             return ALD(
                 material=self.material.currentData(),
