@@ -355,6 +355,10 @@ class ProcessDialog(QtWidgets.QDialog):
             )
             self.gpc.setSuffix(" nm")
             self.form.addRow("1サイクル成長量", self.gpc)
+            self.ar_coverage = _spin(getattr(e, "ar_coverage", 1.0), 0.0, 1.0, 0.05, 2)
+            self.form.addRow("高AR底被覆率", self.ar_coverage)
+            self.ar_threshold = _spin(getattr(e, "ar_threshold", 10.0), 1.0, 100.0, 1.0, 1)
+            self.form.addRow("被覆低下 AR", self.ar_threshold)
             note = QtWidgets.QLabel("nm 精度の超コンフォーマル膜（High-k/バリア）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -662,6 +666,8 @@ class ProcessDialog(QtWidgets.QDialog):
                 material=self.material.currentData(),
                 cycles=self.cycles.value(),
                 growth_per_cycle_nm=self.gpc.value(),
+                ar_coverage=self.ar_coverage.value(),
+                ar_threshold=self.ar_threshold.value(),
             )
         if t == "PVD":
             return PVD(

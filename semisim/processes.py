@@ -253,6 +253,8 @@ class ALD(Process):
     material: str = "hafnia"
     cycles: int = 100
     growth_per_cycle_nm: float = 1.0
+    ar_coverage: float = 1.0  # 高アスペクト比底部の被覆率(1.0=完全コンフォーマル)
+    ar_threshold: float = 10.0  # 被覆率が ar_coverage まで低下する AR
 
     @property
     def thickness_um(self) -> float:
@@ -260,21 +262,48 @@ class ALD(Process):
 
     def summary(self) -> str:
         m = materials.get(self.material)
+        cov = "" if self.ar_coverage >= 0.999 else f"  底被覆{self.ar_coverage:.0%}"
         return (
             f"ALD  {m.label}  {self.cycles}cyc×{self.growth_per_cycle_nm:.1f}nm"
-            f"={self.thickness_um * 1000:.0f}nm"
+            f"={self.thickness_um * 1000:.0f}nm{cov}"
         )
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.cycles, "サイクル数")
         _require_positive(self.growth_per_cycle_nm, "1サイクル成長量")
+        _require_range(self.ar_coverage, 0.0, 1.0, "底被覆率")
+        _require_positive(self.ar_threshold, "AR閾値")
         grid = wafer.grid
         mat_id = materials.get(self.material).id
         t = wafer.um_to_vox(self.thickness_um)
         air = grid == materials.AIR
         # 固体表面からの距離 t 以内の空気に等方堆積（超コンフォーマル）
         dist = ndimage.distance_transform_edt(air)
-        deposit = air & (dist <= t)
+        if self.ar_coverage >= 0.999:
+            deposit = air & (dist <= t)
+        else:
+            # 高 AR 窪みでは前駆体枯渇により深部ほど膜厚が減る。
+            # 各列の AR(=深さ/幅)で膜厚を ar_coverage に向け線形低下させる。
+            z_top = wafer.top_surface_z()
+            valid = z_top >= 0
+            field_level = int(z_top[valid].max()) if valid.any() else 0
+            recess = valid & (z_top < field_level)
+            t_field = np.full(z_top.shape, float(t))
+            if recess.any():
+                hw = ndimage.distance_transform_edt(recess)
+                labels, n = ndimage.label(recess)
+                if n > 0:
+                    feat = ndimage.maximum(hw, labels, index=range(1, n + 1))
+                    lut = np.concatenate(([0.0], np.asarray(feat, dtype=float)))
+                    hw_feat = lut[labels]
+                    width = np.maximum(2.0 * hw_feat, 1.0)
+                    depth = np.where(recess, field_level - z_top, 0.0).astype(float)
+                    ar = depth / width
+                    cov = 1.0 - (1.0 - self.ar_coverage) * np.clip(
+                        ar / self.ar_threshold, 0.0, 1.0
+                    )
+                    t_field = np.where(recess, np.maximum(1.0, t * cov), float(t))
+            deposit = air & (dist <= t_field[None, :, :])
         grid[deposit] = mat_id
 
     def params_dict(self) -> dict:
@@ -282,6 +311,8 @@ class ALD(Process):
             "material": self.material,
             "cycles": self.cycles,
             "growth_per_cycle_nm": self.growth_per_cycle_nm,
+            "ar_coverage": self.ar_coverage,
+            "ar_threshold": self.ar_threshold,
         }
 
     @classmethod
@@ -290,6 +321,8 @@ class ALD(Process):
             material=d.get("material", "hafnia"),
             cycles=int(d.get("cycles", 100)),
             growth_per_cycle_nm=float(d.get("growth_per_cycle_nm", 1.0)),
+            ar_coverage=float(d.get("ar_coverage", 1.0)),
+            ar_threshold=float(d.get("ar_threshold", 10.0)),
         )
 
 

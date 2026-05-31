@@ -156,6 +156,7 @@ py tools\render_gallery.py
 | CLEAN | `target` / `thickness_um` | 対象材料を表面から等方的に薄く除去 |
 | REFLOW | `target` / `radius_um` | 平滑化半径。モルフォロジ処理で角を丸める |
 | ALD | `cycles` / `growth_per_cycle_nm` | サイクル数×1サイクル成長量で膜厚を nm 精度に制御。超コンフォーマル |
+| ALD | `ar_coverage` / `ar_threshold` | 高アスペクト比窪みでの底被覆率（前駆体枯渇）。1.0=完全コンフォーマル |
 | CMP | `remove_um` / `stop_material` / `soft_material` / `dishing_um` | 研磨量と研磨ストップ層（指定時はその最高点より下を削らない）。`soft_material`＋`dishing_um` で軟材料（Cu 等）をディッシング量だけ追加で凹ませるダマシン研磨を再現 |
 
 ## 構成
