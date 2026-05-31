@@ -190,6 +190,7 @@ py tools\render_gallery.py
 | `semisim/recipe.py` | レシピ管理・シミュレーション・保存/読込 |
 | `semisim/presets.py` | 組み込みプリセットレシピ（レシピライブラリ） |
 | `semisim/settings.py` | アプリ設定の永続化（最近のレシピ・既定設定） |
+| `semisim/export.py` | ボクセル形状を STL メッシュへ書き出し（追加依存なし） |
 | `semisim/visualize.py` | PyVista / matplotlib 可視化ヘルパ |
 | `semisim/gui.py` | PyQt5 + PyVista GUI 本体 |
 | `tests/` | pytest テスト一式 |

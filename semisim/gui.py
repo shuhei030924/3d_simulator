@@ -11,7 +11,7 @@ import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 from pyvistaqt import QtInteractor
 
-from . import materials, metrology, presets, processes, visualize
+from . import export, materials, metrology, presets, processes, visualize
 from .grid import WaferConfig
 from .masks import Mask, Shape
 from .processes import (
@@ -1341,6 +1341,9 @@ class MainWindow(QtWidgets.QMainWindow):
         shot_btn = QtWidgets.QPushButton("画像保存")
         shot_btn.clicked.connect(self.save_screenshot)
         ctrl.addWidget(shot_btn)
+        stl_btn = QtWidgets.QPushButton("STL書出")
+        stl_btn.clicked.connect(self.export_stl)
+        ctrl.addWidget(stl_btn)
 
         # 3D タブと 2D タブを切り替えるタブウィジェット
         self.tabs = QtWidgets.QTabWidget()
@@ -1609,25 +1612,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 act.triggered.connect(lambda _=False, pp=p: self._load_recipe_path(pp))
         self.recent_btn.setMenu(menu)
 
-
-    def export_stl(self):
-        """現在のウェハ形状を STL ファイルに書き出す。"""
-        if getattr(self, "wafer", None) is None:
-            QtWidgets.QMessageBox.information(self, "STL出力", "出力する形状がありません。")
-            return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "STL を出力", "wafer.stl", "STL (*.stl)"
-        )
-        if not path:
-            return
-        try:
-            visualize.export_stl(
-                self.wafer, path, include_resist=self.show_resist
-            )
-            self.status.showMessage(f"STL を出力しました: {path}", 5000)
-        except Exception as ex:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(self, "STL出力エラー", str(ex))
-
     # -- 断面コントロール --------------------------------------------------
     def _on_clip_mode(self, idx: int):
         self.clip_mode = ["none", "X", "Y", "Z", "angle", "free"][idx]
@@ -1691,6 +1675,22 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 self.plotter.screenshot(path)
                 self.status.showMessage(f"画像を保存しました: {path}", 5000)
+            except Exception as ex:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(self, "保存エラー", str(ex))
+
+    def export_stl(self):
+        """現在のウェハを STL メッシュとして書き出す。"""
+        wafer = getattr(self, "wafer", None)
+        if wafer is None:
+            QtWidgets.QMessageBox.information(self, "STL書出", "先にシミュレーションを実行してください。")
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "STL を保存", "wafer.stl", "STL (*.stl)"
+        )
+        if path:
+            try:
+                n = export.to_stl(wafer, path)
+                self.status.showMessage(f"STL を保存しました（{n} 面）: {path}", 5000)
             except Exception as ex:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(self, "保存エラー", str(ex))
 
