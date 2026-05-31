@@ -476,6 +476,35 @@ def test_line_resistance_nonconductor_inf(wafer):
     assert metrology.line_resistance_ohm(wafer, "oxide", "x") == float("inf")
 
 
+# --- DRC 最小間隔チェック (ショート不良リスク) ----------------------------
+def test_min_spacing_separated(wafer):
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    al = materials.BY_NAME["metal_al"].id
+    z, y = 25, 20
+    grid[z, y, 5] = cu
+    grid[z, y, 15] = al  # 10 ボクセル離れている
+    s = metrology.min_spacing_um(wafer, "metal_cu", "metal_al")
+    assert abs(s - 10 * wafer.config.pitch_um) < 1e-9
+
+
+def test_min_spacing_touching_is_zero(wafer):
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    al = materials.BY_NAME["metal_al"].id
+    z, y = 25, 20
+    grid[z, y, 10] = cu
+    grid[z, y, 11] = al  # 隣接（ショート）
+    assert metrology.min_spacing_um(wafer, "metal_cu", "metal_al") == 0.0
+
+
+def test_min_spacing_absent_inf(wafer):
+    grid = wafer.grid
+    grid[25, 20, 10] = materials.BY_NAME["metal_cu"].id
+    assert metrology.min_spacing_um(wafer, "metal_cu", "metal_al") == float("inf")
+
+
+
 
 
 

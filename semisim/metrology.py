@@ -812,6 +812,30 @@ def line_resistance_ohm(wafer: Wafer, name_or_id, axis: str = "x") -> float:
     return float(total)
 
 
+def min_spacing_um(wafer: Wafer, name_a, name_b) -> float:
+    """2 材料領域の最小間隔（µm）を返す。DRC（設計規則）チェック用。
+
+    材料 A の各ボクセルから最も近い材料 B のボクセルまでのユークリッド距離の
+    最小値を返す。距離は等方ピッチで正規化する。両材料が接触している場合は 0
+    （ショート/ブリッジ）。どちらかの材料が存在しなければ inf。
+    隣接配線間スペースがルールを満たすか（ショート不良リスク）の検査に使う。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    grid = wafer.grid
+    mask_a = grid == a.id
+    mask_b = grid == b.id
+    if not mask_a.any() or not mask_b.any():
+        return float("inf")
+    if (mask_a & mask_b).any():  # 同一 ID 指定など
+        return 0.0
+    if (mask_a & ndimage.binary_dilation(mask_b)).any():
+        return 0.0  # 隣接（接触）
+    # B からの距離場を求め、A 位置で最小を取る（等方ピッチ）
+    dist = ndimage.distance_transform_edt(~mask_b)
+    return float(dist[mask_a].min()) * wafer.config.pitch_um
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
