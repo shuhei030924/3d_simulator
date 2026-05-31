@@ -395,6 +395,11 @@ class ProcessDialog(QtWidgets.QDialog):
                     getattr(e, "mask_erosion", 0.0), 0.0, 2.0, 0.05, 2
                 )
                 self.form.addRow("マスク消耗比", self.mask_erosion)
+                self.taper = _spin(
+                    getattr(e, "taper_deg", 0.0), 0.0, 89.0, 1.0, 1
+                )
+                self.taper.setSuffix(" °")
+                self.form.addRow("側壁テーパ角", self.taper)
 
         elif t == "DIFFUSION":
             self.dopant = QtWidgets.QComboBox()
@@ -665,6 +670,7 @@ class ProcessDialog(QtWidgets.QDialog):
                     lateral_um=self.lateral.value(),
                     selectivity=_parse_selectivity(self.selectivity.text()),
                     mask_erosion=self.mask_erosion.value(),
+                    taper_deg=self.taper.value(),
                 )
             return WetEtch(targets=tgts, depth_um=self.depth.value())
         if t == "DIFFUSION":

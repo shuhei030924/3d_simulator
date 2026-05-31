@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -395,13 +396,17 @@ class DryEtch(Process):
     # マスク消耗比: ターゲットを depth_um 削る間にレジストが
     # mask_erosion×depth_um だけ上面から減る（実機の 0.3〜0.5 程度）。
     mask_erosion: float = 0.0
+    # 側壁テーパ角（度, 垂直からの傾き）。0=完全垂直。正でホールが上広がりの
+    # 台形になる（深さ d で開口端から d×tan(taper) だけ内側に後退）。
+    taper_deg: float = 0.0
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
         oe = "" if self.overetch_pct <= 0 else f"  +OE{self.overetch_pct:.0f}%"
         lat = "" if self.lateral_um <= 0 else f"  横{self.lateral_um:.2f}µm"
         sel = "  選択比あり" if self.selectivity else ""
-        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}"
+        tp = "" if self.taper_deg <= 0 else f"  テーパ{self.taper_deg:.0f}°"
+        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}{tp}"
 
     def _rate_map(self, top_id: np.ndarray) -> np.ndarray:
         """各列の最上面材料に対する相対エッチ速度マップ（既定 1.0）。"""
@@ -416,6 +421,7 @@ class DryEtch(Process):
         _require_non_negative(self.overetch_pct, "オーバーエッチ率")
         _require_non_negative(self.lateral_um, "横方向バイアス")
         _require_non_negative(self.mask_erosion, "マスク消耗比")
+        _require_range(self.taper_deg, 0.0, 89.0, "テーパ角")
         for name, rv in self.selectivity.items():
             _require_range(rv, 0.0, 1.0, f"選択比[{name}]")
         grid = wafer.grid
@@ -427,6 +433,17 @@ class DryEtch(Process):
         _, top_id = _top_material(wafer)
         eligible = np.isin(top_id, list(target_ids))  # (ny, nx)
 
+        # 側壁テーパ: 各列が削れる最大深さを開口端からの距離で制限する。
+        # 深さ d での後退量 = d×tan(taper) ＝ 開口端から e ボクセル内側の列は
+        # 深さ e/tan(taper) までしか削れない（上広がりの台形プロファイル）。
+        if self.taper_deg > 0:
+            tan_t = math.tan(math.radians(self.taper_deg))
+            edge_dist = ndimage.distance_transform_edt(eligible)
+            depth_cap = np.where(eligible, np.minimum(depth, edge_dist / tan_t), 0.0)
+        else:
+            depth_cap = np.full((ny, nx), float(depth))
+        etched = np.zeros((ny, nx), dtype=float)  # 列ごとの除去ボクセル数
+
         # 選択比を 1 列あたりのエッチ予算（ボクセル）で表現する。
         # 削るたびに cost=1/速度 を消費し、速度<1 の材料ほど予算を多く使う
         # ＝削れる量が減る。速度1.0なら従来どおり depth ボクセル削る。
@@ -436,12 +453,19 @@ class DryEtch(Process):
             top_is_target = np.isin(top_id, list(target_ids))
             rate = self._rate_map(top_id)
             cost = np.where(rate > 0, 1.0 / np.where(rate > 0, rate, 1.0), np.inf)
-            do = eligible & top_is_target & (z_top >= 0) & (budget >= cost)
+            do = (
+                eligible
+                & top_is_target
+                & (z_top >= 0)
+                & (budget >= cost)
+                & (etched < depth_cap)
+            )
             if not do.any():
                 break
             ys, xs = np.nonzero(do)
             grid[z_top[ys, xs], ys, xs] = materials.AIR
             budget[do] -= cost[do]
+            etched[do] += 1.0
 
         # オーバーエッチ: ターゲット直下に露出した下層を追加で削る。
         # レジスト(is_resist)は保護膜なので削らない。
@@ -497,6 +521,7 @@ class DryEtch(Process):
             "lateral_um": self.lateral_um,
             "selectivity": dict(self.selectivity),
             "mask_erosion": self.mask_erosion,
+            "taper_deg": self.taper_deg,
         }
 
     @classmethod
@@ -510,6 +535,7 @@ class DryEtch(Process):
                 str(k): float(v) for k, v in dict(d.get("selectivity", {})).items()
             },
             mask_erosion=float(d.get("mask_erosion", 0.0)),
+            taper_deg=float(d.get("taper_deg", 0.0)),
         )
 
 
