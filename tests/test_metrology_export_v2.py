@@ -584,6 +584,74 @@ def test_electrical_report_json_serializable(wafer):
     json.dumps(rep)  # inf が None 化されていれば例外なし
 
 
+# --- コンタクト面積/接触抵抗 ----------------------------------------------
+def test_contact_area_counts_faces(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    si = materials.BY_NAME["silicon"].id
+    # シリコン上に W を 1 ボクセル置くと下面 1 面で接触
+    grid[30, 20, 20] = si
+    grid[31, 20, 20] = w_id
+    area = metrology.contact_area_um2(wafer, "tungsten", "silicon")
+    assert abs(area - wafer.config.pitch_um ** 2) < 1e-12
+
+
+def test_contact_area_larger_with_more_faces(wafer):
+    from semisim.grid import Wafer
+
+    cfg = wafer.config
+    w1 = Wafer(cfg)
+    w2 = Wafer(cfg)
+    w_id = materials.BY_NAME["tungsten"].id
+    si = materials.BY_NAME["silicon"].id
+    w1.grid[30, 20, 20] = si
+    w1.grid[31, 20, 20] = w_id  # 1 面接触
+    w2.grid[30, 20, 20:23] = si
+    w2.grid[31, 20, 20:23] = w_id  # 3 面接触
+    a1 = metrology.contact_area_um2(w1, "tungsten", "silicon")
+    a2 = metrology.contact_area_um2(w2, "tungsten", "silicon")
+    assert a2 > a1
+
+
+def test_contact_resistance_inverse_to_area(wafer):
+    from semisim.grid import Wafer
+
+    cfg = wafer.config
+    w_small = Wafer(cfg)
+    w_big = Wafer(cfg)
+    w_id = materials.BY_NAME["tungsten"].id
+    si = materials.BY_NAME["silicon"].id
+    w_small.grid[30, 20, 20] = si
+    w_small.grid[31, 20, 20] = w_id
+    w_big.grid[30, 20, 20:24] = si
+    w_big.grid[31, 20, 20:24] = w_id
+    r_small = metrology.contact_resistance_ohm(w_small, "tungsten", "silicon")
+    r_big = metrology.contact_resistance_ohm(w_big, "tungsten", "silicon")
+    assert r_small > r_big > 0
+
+
+def test_contact_resistance_no_contact_inf(wafer):
+    grid = wafer.grid
+    grid[31, 20, 20] = materials.BY_NAME["tungsten"].id  # シリコンに非接触
+    grid[35, 10, 10] = materials.BY_NAME["silicon"].id
+    assert metrology.contact_resistance_ohm(
+        wafer, "tungsten", "silicon"
+    ) == float("inf")
+
+
+def test_contact_resistance_bad_rho_raises(wafer):
+    import pytest
+
+    grid = wafer.grid
+    grid[30, 20, 20] = materials.BY_NAME["silicon"].id
+    grid[31, 20, 20] = materials.BY_NAME["tungsten"].id
+    with pytest.raises(ValueError):
+        metrology.contact_resistance_ohm(
+            wafer, "tungsten", "silicon", specific_contact_resistivity_ohm_um2=0.0
+        )
+
+
+
 
 
 

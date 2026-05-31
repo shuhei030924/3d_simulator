@@ -854,6 +854,49 @@ def min_spacing_um(wafer: Wafer, name_a, name_b) -> float:
     return float(dist[mask_a].min()) * wafer.config.pitch_um
 
 
+def contact_area_um2(wafer: Wafer, name_a, name_b) -> float:
+    """材料 A と B が接する界面の面積 (µm²) を面ペア数で正確に数える。
+
+    interface_width_um が A ボクセル数を数えるのに対し、こちらは A-B の
+    隣接「面」の総数 × pitch² を返す（1 ボクセルが複数面で接していれば複数
+    カウント）。コンタクト/ビアの実効接触面積として contact_resistance_ohm に
+    使う。周期境界はラップさせない。接触が無ければ 0。
+    """
+    a = materials.get(name_a).id
+    b = materials.get(name_b).id
+    grid = wafer.grid
+    mask_a = grid == a
+    mask_b = grid == b
+    faces = 0
+    for axis in range(3):
+        sa = [slice(None)] * 3
+        sb = [slice(None)] * 3
+        sa[axis] = slice(0, -1)
+        sb[axis] = slice(1, None)
+        a_lo, b_hi = mask_a[tuple(sa)], mask_b[tuple(sb)]
+        a_hi, b_lo = mask_a[tuple(sb)], mask_b[tuple(sa)]
+        faces += int((a_lo & b_hi).sum()) + int((a_hi & b_lo).sum())
+    return float(faces) * (wafer.config.pitch_um ** 2)
+
+
+def contact_resistance_ohm(
+    wafer: Wafer, name_a, name_b, specific_contact_resistivity_ohm_um2: float = 10.0
+) -> float:
+    """A-B コンタクトの接触抵抗 (Ω) を Rc = ρc / A で推定する。
+
+    ρc は比接触抵抗（Ω·µm², 既定 10 ≈ 1e-7 Ω·cm² の金属-シリコン典型値）、
+    A は contact_area_um2 で求めた実効接触面積。接触面積が大きいほど抵抗は
+    小さい。接触が無ければ inf。コンタクト/ビアのサイズ不足による抵抗増大
+    （オープン気味）の評価に使う。
+    """
+    if specific_contact_resistivity_ohm_um2 <= 0:
+        raise ValueError("比接触抵抗は正の値が必要です。")
+    area = contact_area_um2(wafer, name_a, name_b)
+    if area <= 0:
+        return float("inf")
+    return float(specific_contact_resistivity_ohm_um2 / area)
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
