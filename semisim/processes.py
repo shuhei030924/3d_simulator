@@ -1505,18 +1505,23 @@ class DRIE(Process):
     # RIE ラグ / ARDE（0〜1）。開口が狭いほどエッチが浅くなる現象を再現する。
     # 0=幅に依存せず全開口が同深さ。1=最狭開口の到達深さがほぼ 0 になる。
     lag: float = 0.0
+    # 再付着 / 側壁パシベーション（Bosch プロセス）。エッチ生成物が
+    # トレンチ側壁に再堆積してトレンチを狭める厚み（µm、0=無効）。
+    redeposit_um: float = 0.0
 
     def summary(self) -> str:
         sc = "" if self.scallop_um <= 0 else f"  scallop{self.scallop_um:.2f}µm"
         lg = "" if self.lag <= 0 else f"  RIEラグ{self.lag:.0%}"
+        rd = "" if self.redeposit_um <= 0 else f"  再付着{self.redeposit_um:.2f}µm"
         return (
             f"DRIE  {materials.get(self.target).label}"
-            f"  深さ{self.depth_um:.2f}µm{sc}{lg}"
+            f"  深さ{self.depth_um:.2f}µm{sc}{lg}{rd}"
         )
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "深さ")
         _require_range(self.lag, 0.0, 1.0, "RIEラグ")
+        _require_non_negative(self.redeposit_um, "再付着厚")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         target_id = materials.get(self.target).id
@@ -1569,6 +1574,26 @@ class DRIE(Process):
                 bulge = ring & (grid == target_id)
                 grid[bulge] = materials.AIR
 
+        # 再付着 / 側壁パシベーション: エッチ生成物がトレンチ側壁に
+        # 再堆積してトレンチを狭める。底面より側壁を優先するため、
+        # 水平（x,y）方向だけの距離で壁近傍の空気をターゲット材で埋める。
+        rd = wafer.um_to_vox(self.redeposit_um) if self.redeposit_um > 0 else 0
+        if rd > 0:
+            surface_level = int(z_top0[opening].max())
+            target_mask = grid == target_id
+            # z 方向の距離を実質無限大にして水平距離のみを評価。
+            lat_dist = ndimage.distance_transform_edt(
+                ~target_mask, sampling=(1e6, 1.0, 1.0)
+            )
+            z_idx = np.arange(nz)[:, None, None]
+            coat = (
+                (grid == materials.AIR)
+                & (lat_dist > 0)
+                & (lat_dist <= rd)
+                & (z_idx <= surface_level)
+            )
+            grid[coat] = target_id
+
     def params_dict(self) -> dict:
         return {
             "target": self.target,
@@ -1576,6 +1601,7 @@ class DRIE(Process):
             "scallop_um": self.scallop_um,
             "scallop_pitch_um": self.scallop_pitch_um,
             "lag": self.lag,
+            "redeposit_um": self.redeposit_um,
         }
 
     @classmethod
@@ -1586,6 +1612,7 @@ class DRIE(Process):
             scallop_um=float(d.get("scallop_um", 0.0)),
             scallop_pitch_um=float(d.get("scallop_pitch_um", 0.5)),
             lag=float(d.get("lag", 0.0)),
+            redeposit_um=float(d.get("redeposit_um", 0.0)),
         )
 
 
