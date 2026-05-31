@@ -50,6 +50,7 @@ _MATERIALS: list[Material] = [
     Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False),
     Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80)),
     Material(15, "tan", "バリア (TaN)", (0.50, 0.48, 0.55)),
+    Material(16, "silicide", "シリサイド (NiSi)", (0.78, 0.70, 0.30)),
 ]
 
 # 名前 / ID での高速参照

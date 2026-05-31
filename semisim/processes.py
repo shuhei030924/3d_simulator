@@ -1092,6 +1092,67 @@ class Oxidation(Process):
             consume_fraction=float(d.get("consume_fraction", 0.45)),
             beak_fraction=float(d.get("beak_fraction", 0.0)),
         )
+
+
+# === SALICIDE（自己整合シリサイド形成）=====================================
+@register
+@dataclass
+class Silicidation(Process):
+    """自己整合シリサイド（SALICIDE）形成。
+
+    金属（Ni/Co/Ti 等）を全面成膜してアニールすると、露出シリコン／ポリ
+    シリコンと接した部分のみが反応してシリサイド（低抵抗）になり、酸化膜・
+    窒化膜上の未反応金属は選択エッチで除去される。本モデルでは露出 Si／
+    ポリの上面から thickness_um 分をシリサイドへ変換する（自己整合）。
+    """
+
+    type = "SALICIDE"
+    label = "シリサイド形成"
+
+    thickness_um: float = 0.05
+    react_poly: bool = True  # ゲートポリも反応させるか（ゲートシリサイド）
+
+    def summary(self) -> str:
+        pl = "" if self.react_poly else "  (ポリ非反応)"
+        return f"SALICIDE  シリサイド{self.thickness_um:.3f}µm形成{pl}"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.thickness_um, "シリサイド厚")
+        grid = wafer.grid
+        sil_id = materials.BY_NAME["silicide"].id
+        si_like = [
+            materials.BY_NAME["silicon"].id,
+            materials.BY_NAME["doped_n"].id,
+            materials.BY_NAME["doped_p"].id,
+        ]
+        if self.react_poly:
+            si_like.append(materials.BY_NAME["poly"].id)
+        t = wafer.um_to_vox(self.thickness_um)
+        # 露出した Si／ポリ列のみ反応（自己整合）。
+        _, top_id = _top_material(wafer)
+        eligible = np.isin(top_id, si_like)  # (ny, nx)
+        work_top = wafer.top_surface_z().copy()
+        for _ in range(t):
+            ys, xs = np.nonzero(eligible & (work_top >= 0))
+            if ys.size == 0:
+                break
+            zt = work_top[ys, xs]
+            react = np.isin(grid[zt, ys, xs], si_like)
+            grid[zt[react], ys[react], xs[react]] = sil_id
+            work_top[ys[react], xs[react]] -= 1
+
+    def params_dict(self) -> dict:
+        return {
+            "thickness_um": self.thickness_um,
+            "react_poly": self.react_poly,
+        }
+
+    @classmethod
+    def _from_params(cls, d: dict) -> Silicidation:
+        return cls(
+            thickness_um=float(d.get("thickness_um", 0.05)),
+            react_poly=bool(d.get("react_poly", True)),
+        )
 # === IMPLANT（イオン注入）==================================================
 @register
 @dataclass
@@ -2047,7 +2108,7 @@ def available_types() -> list[tuple[str, str]]:
         "PHOTO", "CVD", "ALD", "PVD", "EPI",
         "DRY", "WET", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "RTP", "OXIDE",
-        "FILL", "SPINON", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
+        "SALICIDE", "FILL", "SPINON", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
     ]
     out = []
     for t in order:

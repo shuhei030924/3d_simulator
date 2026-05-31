@@ -34,6 +34,7 @@ from .processes import (
     Process,
     RapidThermalAnneal,
     Reflow,
+    Silicidation,
     SpinCoat,
     SputterEtch,
     Strip,
@@ -488,6 +489,16 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "SALICIDE":
+            self.thick = _spin(getattr(e, "thickness_um", 0.05), 0.01, 2.0, 0.01, 3)
+            self.form.addRow("シリサイド厚 (µm)", self.thick)
+            self.react_poly = QtWidgets.QCheckBox("ゲートポリも反応させる")
+            self.react_poly.setChecked(bool(getattr(e, "react_poly", True)))
+            self.form.addRow(self.react_poly)
+            note = QtWidgets.QLabel("露出 Si／ポリ上のみシリサイド化（自己整合）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
         elif t == "EPI":
             self.material = QtWidgets.QComboBox()
             for name in ("epi_si", "silicon"):
@@ -754,6 +765,11 @@ class ProcessDialog(QtWidgets.QDialog):
             )
         if t == "OXIDE":
             return Oxidation(thickness_um=self.thick.value(), beak_fraction=self.beak.value())
+        if t == "SALICIDE":
+            return Silicidation(
+                thickness_um=self.thick.value(),
+                react_poly=self.react_poly.isChecked(),
+            )
         if t == "EPI":
             return Epitaxy(
                 material=self.material.currentData(),

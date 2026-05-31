@@ -12,7 +12,7 @@
   IMPLANT（イオン注入）/ ANNEAL（ドライブイン拡散）/ EPI（選択エピ成長）/
   KOH（異方性ウェット・斜め側壁）/ FILL（ダマシン埋込）/ LIFTOFF / DRIE（深掘りエッチ）/
   SPUTTER（イオンミリング）/ REFLOW（熱リフロー）/ CLEAN（プラズマクリーン）。
-  材料は High-k(HfO₂) や TaN バリアなど 15 種に対応。
+  材料は High-k(HfO₂)・TaN バリア・シリサイド(NiSi) など 16 種に対応。
 - **任意角度パターン**: 回転矩形・帯・周期ライン（グレーティング）。
 - **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD に加え、表面粗さ(RMS)・側壁角・界面面積・トレンチ閉塞(ボイド)判定・ビア充填品質(`via_fill_quality`)・側壁ボーイング(`sidewall_bowing_um`)・段差被覆性(`conformality_pct`)・パターン密度(`pattern_density_map`/`pattern_density_stats`)・サーマルバジェット(`thermal_budget`)など計測ヘルパ（`semisim/metrology.py`）。
   人が読めるテキスト計測レポート（`metrology.report`）も生成できます。
@@ -115,6 +115,7 @@ py tools\render_gallery.py
 | ANNEAL | アニール | ドーパントのドライブイン（等方再分布） |
 | RTP | 急速熱処理 | 浅く横拡散を抑えた活性化（スパイクアニール、`lateral_factor`で横/縦比を制御） |
 | OXIDE | 熱酸化 | 露出 Si を消費し SiO₂ 成長（消費比は可変、既定 45/55 則） |
+| SALICIDE | シリサイド形成 | 露出 Si／ポリ上のみ自己整合でシリサイド化（`react_poly`でゲート反応を制御） |
 | EPI | エピ成長 | 露出シリコン上のみに選択的単結晶成長 |
 | KOH | 異方性ウェット | 結晶面に沿った斜め側壁（V 溝・台形） |
 | FILL | 埋込（ダマシン） | 開口・トレンチをボトムアップで金属充填。高 AR でキーホール空隙 |
@@ -152,6 +153,8 @@ py tools\render_gallery.py
 | RTP | `depth_um` / `lateral_factor` | 急速熱処理。縦に depth、横に depth×lateral_factor だけ異方拡散（0=純垂直、1=等方） |
 | OXIDE | `thickness_um` / `consume_fraction` | 生成 SiO₂ 厚と Si 消費割合（既定 0.45）。残りを上方成長（Deal–Grove 体積比）。ドープ Si も酸化 |
 | OXIDE | `beak_fraction` | LOCOS バーズビーク。窒化膜マスク端の下へ酸化膜が横方向にテーパ侵入（0=無効） |
+| SALICIDE | `thickness_um` | 露出 Si／ポリを消費して形成するシリサイド層の厚さ |
+| SALICIDE | `react_poly` | ゲートポリシリコンも反応させるか（自己整合シリサイド、既定 True） |
 | EPI | `facet_angle_deg` | 選択エピの {111} ファセット形成（0=コンフォーマル）。高さとともに footprint が収束し台形/三角キャップを形成 |
 | KOH | `side_wall_angle_deg` | 結晶面に沿う側壁角（既定 54.7°、(100)Si を想定） |
 | FILL | `overfill_um` | 充填の盛り上げ量。ボトムアップで開口/トレンチを充填 |
