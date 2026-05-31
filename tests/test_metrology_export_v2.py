@@ -207,3 +207,48 @@ def test_void_metrics_detects_buried_void(wafer):
     assert np.isclose(m["max_height_um"], 4 * wafer.config.pitch_um)
 
 
+# --- Deal-Grove 熱酸化モデル ----------------------------------------------
+def test_deal_grove_monotonic_in_time():
+    from semisim.processes import deal_grove_thickness_um
+
+    x1 = deal_grove_thickness_um(30, 1000, "dry")
+    x2 = deal_grove_thickness_um(120, 1000, "dry")
+    assert 0 < x1 < x2  # 時間が長いほど厚い
+
+
+def test_deal_grove_wet_thicker_than_dry():
+    from semisim.processes import deal_grove_thickness_um
+
+    dry = deal_grove_thickness_um(60, 1000, "dry")
+    wet = deal_grove_thickness_um(60, 1000, "wet")
+    assert wet > dry  # 水蒸気酸化の方が速い
+
+
+def test_deal_grove_zero_time_is_zero():
+    from semisim.processes import deal_grove_thickness_um
+
+    assert deal_grove_thickness_um(0, 1000, "dry") == 0.0
+
+
+def test_oxidation_time_mode_grows_oxide(wafer):
+    from semisim.processes import Oxidation, deal_grove_thickness_um
+
+    ox = Oxidation(time_min=120, temperature_c=1100, ambient="wet")
+    ox.apply(wafer)
+    # Deal-Grove 由来の厚みで酸化膜が生成される
+    assert (wafer.grid == materials.BY_NAME["oxide"].id).any()
+    assert ox._effective_thickness_um() == deal_grove_thickness_um(120, 1100, "wet")
+
+
+def test_oxidation_time_mode_roundtrip():
+    from semisim.processes import Oxidation, Process
+
+    ox = Oxidation(time_min=90, temperature_c=950, ambient="wet")
+    d = ox.to_dict()
+    ox2 = Process.from_dict(d)
+    assert ox2.time_min == 90
+    assert ox2.ambient == "wet"
+    assert ox2._effective_thickness_um() == ox._effective_thickness_um()
+
+
+

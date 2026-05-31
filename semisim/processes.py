@@ -64,6 +64,41 @@ def _isotropic_dilate(mask: np.ndarray, radius: int) -> np.ndarray:
     return dist <= radius
 
 
+def deal_grove_thickness_um(
+    time_min: float, temperature_c: float, ambient: str = "dry"
+) -> float:
+    """Deal-Grove モデルで熱酸化膜厚 (µm) を求める。
+
+    x² + A·x = B·(t+τ) を解く（初期酸化 τ は無視, x0=0）。
+    線形速度定数 B/A と放物線速度定数 B は Arrhenius 形（教科書値, <100> Si）。
+    ambient="dry"（乾燥 O2）または "wet"（水蒸気）。time_min は分。
+
+    A = B / (B/A) より x = (A/2)(√(1 + 4B·t/A²) − 1)。
+    """
+    _require_non_negative(time_min, "酸化時間")
+    if time_min <= 0:
+        return 0.0
+    k = 8.617e-5  # ボルツマン定数 [eV/K]
+    t_k = float(temperature_c) + 273.15
+    if t_k <= 0:
+        raise ValueError("温度は絶対零度より高い必要があります。")
+    amb = str(ambient).lower()
+    if amb == "wet":
+        # 水蒸気酸化（µm²/hr, µm/hr）
+        b = 3.86e2 * math.exp(-0.78 / (k * t_k))
+        b_over_a = 1.63e8 * math.exp(-2.05 / (k * t_k))
+    elif amb == "dry":
+        # 乾燥酸素酸化
+        b = 7.72e2 * math.exp(-1.23 / (k * t_k))
+        b_over_a = 6.23e6 * math.exp(-2.0 / (k * t_k))
+    else:
+        raise ValueError(f"ambient は 'dry' または 'wet'（指定値: {ambient}）。")
+    t_hr = time_min / 60.0
+    a = b / b_over_a  # µm
+    x = (a / 2.0) * (math.sqrt(1.0 + 4.0 * b * t_hr / (a * a)) - 1.0)
+    return float(x)
+
+
 class Process:
     """全工程の基底クラス。"""
 
@@ -1146,13 +1181,31 @@ class Oxidation(Process):
     # Si 表面でテーパ状に食い込む。beak_fraction は横侵入距離を酸化膜厚に対する
     # 比で与える（0=無効、典型 0.5〜1.0）。
     beak_fraction: float = 0.0
+    # Deal-Grove モード: time_min>0 のとき thickness_um は無視し、酸化時間と
+    # 温度・雰囲気から物理的に膜厚を計算する（x²+Ax=B(t+τ)）。
+    time_min: float = 0.0
+    temperature_c: float = 1000.0
+    ambient: str = "dry"
+
+    def _effective_thickness_um(self) -> float:
+        """Deal-Grove モードなら計算膜厚、そうでなければ指定膜厚を返す。"""
+        if self.time_min > 0:
+            return deal_grove_thickness_um(self.time_min, self.temperature_c, self.ambient)
+        return self.thickness_um
 
     def summary(self) -> str:
         bk = "" if self.beak_fraction <= 0 else "  +バーズビーク"
-        return f"OXIDE  酸化膜{self.thickness_um:.2f}µm成長{bk}"
+        tox = self._effective_thickness_um()
+        if self.time_min > 0:
+            return (
+                f"OXIDE  酸化膜{tox:.3f}µm成長"
+                f"({self.ambient} {self.temperature_c:.0f}℃ {self.time_min:.0f}分){bk}"
+            )
+        return f"OXIDE  酸化膜{tox:.2f}µm成長{bk}"
 
     def apply(self, wafer: Wafer) -> None:
-        _require_positive(self.thickness_um, "酸化膜厚")
+        thickness_um = self._effective_thickness_um()
+        _require_positive(thickness_um, "酸化膜厚")
         _require_range(self.consume_fraction, 0.0, 0.95, "消費比")
         _require_non_negative(self.beak_fraction, "バーズビーク比")
         grid = wafer.grid
@@ -1161,7 +1214,7 @@ class Oxidation(Process):
         ox_id = materials.BY_NAME["oxide"].id
         # ドープされたシリコンも熱酸化される（物理的に正しい）。
         si_like = [si_id, materials.BY_NAME["doped_n"].id, materials.BY_NAME["doped_p"].id]
-        total = wafer.um_to_vox(self.thickness_um)
+        total = wafer.um_to_vox(thickness_um)
         # 熱酸化の体積則: 生成 SiO2 厚の consume_fraction 分の Si が消費され、
         # 残りが元の Si 表面より上方へ成長する（Deal-Grove の体積膨張比に由来）。
         frac = float(np.clip(self.consume_fraction, 0.0, 0.95))
@@ -1226,6 +1279,9 @@ class Oxidation(Process):
             "thickness_um": self.thickness_um,
             "consume_fraction": self.consume_fraction,
             "beak_fraction": self.beak_fraction,
+            "time_min": self.time_min,
+            "temperature_c": self.temperature_c,
+            "ambient": self.ambient,
         }
 
     @classmethod
@@ -1234,6 +1290,9 @@ class Oxidation(Process):
             thickness_um=float(d.get("thickness_um", 0.3)),
             consume_fraction=float(d.get("consume_fraction", 0.45)),
             beak_fraction=float(d.get("beak_fraction", 0.0)),
+            time_min=float(d.get("time_min", 0.0)),
+            temperature_c=float(d.get("temperature_c", 1000.0)),
+            ambient=str(d.get("ambient", "dry")),
         )
 
 
