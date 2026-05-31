@@ -650,6 +650,11 @@ class DryEtch(Process):
     # 下層）に到達すると、絶縁膜の帯電で入射イオンが横へ偏向し、界面直上の
     # 側壁にノッチ（横アンダーカット）が生じる。SOI エッチ等で問題になる。
     notch_um: float = 0.0
+    # ARDE / RIE ラグ（µm, 0=無効）。アスペクト比依存エッチング: 狭い開口は
+    # イオン/中性種の供給律速で削れにくく、浅くなる。各列の到達深さに
+    # 係数 f = W/(W+arde_lag_um) を掛ける（W=局所開口幅）。狭いほど f→0、
+    # 広いほど f→1。値が大きいほどラグが強い。
+    arde_lag_um: float = 0.0
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
@@ -658,7 +663,8 @@ class DryEtch(Process):
         sel = "  選択比あり" if self.selectivity else ""
         tp = "" if self.taper_deg <= 0 else f"  テーパ{self.taper_deg:.0f}°"
         nt = "" if self.notch_um <= 0 else f"  ノッチ{self.notch_um:.2f}µm"
-        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}{tp}{nt}"
+        ar = "" if self.arde_lag_um <= 0 else f"  ARDE{self.arde_lag_um:.2f}µm"
+        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}{tp}{nt}{ar}"
 
     def _rate_map(self, top_id: np.ndarray) -> np.ndarray:
         """各列の最上面材料に対する相対エッチ速度マップ（既定 1.0）。"""
@@ -675,6 +681,7 @@ class DryEtch(Process):
         _require_non_negative(self.mask_erosion, "マスク消耗比")
         _require_range(self.taper_deg, 0.0, 89.0, "テーパ角")
         _require_non_negative(self.notch_um, "RIEノッチ量")
+        _require_non_negative(self.arde_lag_um, "ARDEラグ量")
         for name, rv in self.selectivity.items():
             _require_range(rv, 0.0, 1.0, f"選択比[{name}]")
         grid = wafer.grid
@@ -695,6 +702,25 @@ class DryEtch(Process):
             depth_cap = np.where(eligible, np.minimum(depth, edge_dist / tan_t), 0.0)
         else:
             depth_cap = np.full((ny, nx), float(depth))
+
+        # ARDE / RIE ラグ: 局所開口幅 W が狭い列ほど到達深さを減らす。
+        # 各連結開口領域の代表幅を「最大内接円直径 = 2×max(EDT)」で見積もり、
+        # 係数 f = W/(W + L)（L=arde_lag のボクセル換算）を depth_cap に掛ける。
+        if self.arde_lag_um > 0 and eligible.any():
+            edt = ndimage.distance_transform_edt(eligible)
+            labels, nlab = ndimage.label(eligible)
+            width = np.zeros((ny, nx), dtype=float)
+            if nlab > 0:
+                # 領域ごとの最大 EDT（=内接半径）→ 幅 = 2×半径
+                maxr = ndimage.maximum(edt, labels, index=np.arange(1, nlab + 1))
+                maxr = np.atleast_1d(maxr)
+                region_w = 2.0 * maxr  # ボクセル
+                for li in range(1, nlab + 1):
+                    width[labels == li] = region_w[li - 1]
+            ll = max(1.0, float(wafer.um_to_vox(self.arde_lag_um)))
+            with np.errstate(invalid="ignore"):
+                factor = np.where(width > 0, width / (width + ll), 1.0)
+            depth_cap = depth_cap * factor
         etched = np.zeros((ny, nx), dtype=float)  # 列ごとの除去ボクセル数
 
         # 選択比を 1 列あたりのエッチ予算（ボクセル）で表現する。
@@ -802,6 +828,7 @@ class DryEtch(Process):
             "mask_erosion": self.mask_erosion,
             "taper_deg": self.taper_deg,
             "notch_um": self.notch_um,
+            "arde_lag_um": self.arde_lag_um,
         }
 
     @classmethod
@@ -817,6 +844,7 @@ class DryEtch(Process):
             mask_erosion=float(d.get("mask_erosion", 0.0)),
             taper_deg=float(d.get("taper_deg", 0.0)),
             notch_um=float(d.get("notch_um", 0.0)),
+            arde_lag_um=float(d.get("arde_lag_um", 0.0)),
         )
 
 

@@ -1,6 +1,8 @@
 """界面粗さ・接合深さ・ドーパントプロファイル計測と CSV エクスポートのテスト。"""
 from __future__ import annotations
 
+import numpy as np
+
 from semisim import export, materials, metrology
 from semisim.cli import main as cli_main
 from semisim.grid import WaferConfig
@@ -249,6 +251,56 @@ def test_oxidation_time_mode_roundtrip():
     assert ox2.time_min == 90
     assert ox2.ambient == "wet"
     assert ox2._effective_thickness_um() == ox._effective_thickness_um()
+
+
+# --- ARDE / RIE ラグ -------------------------------------------------------
+def _arde_wafer():
+    from semisim.grid import Wafer
+
+    cfg = WaferConfig(nx=60, ny=20, nz=60, pitch_um=0.1, substrate_um=4.0)
+    w = Wafer(cfg)
+    grid = w.grid
+    sid = materials.BY_NAME["silicon"].id
+    rid = next(m.id for m in materials.all_materials() if m.is_resist)
+    # シリコン上面にレジストを被せ、広い開口(幅16)と狭い開口(幅3)を空ける
+    top = (grid[:, 0, 0] == sid).nonzero()[0].max()
+    grid[top + 1 : top + 4, :, :] = rid  # レジスト層
+    grid[top + 1 : top + 4, :, 5:21] = materials.AIR  # 広い開口
+    grid[top + 1 : top + 4, :, 35:38] = materials.AIR  # 狭い開口
+    return w, top
+
+
+def _depth_in(wafer, x0, x1, top):
+    # 開口内のシリコン上面の平均エッチ深さ(ボクセル) = top - 現在の最上シリコン
+    from semisim import materials as M
+
+    grid = wafer.grid
+    sid = M.BY_NAME["silicon"].id
+    col = grid[:, :, x0:x1]
+    sil = col == sid
+    z_top = np.where(sil.any(axis=0), sil.shape[0] - 1 - np.argmax(sil[::-1], axis=0), -1)
+    return top - float(np.mean(z_top))
+
+
+def test_arde_narrow_etches_shallower():
+    w, top = _arde_wafer()
+    from semisim.processes import DryEtch
+
+    DryEtch(targets=["silicon"], depth_um=2.0, arde_lag_um=0.6).apply(w)
+    wide = _depth_in(w, 5, 21, top)
+    narrow = _depth_in(w, 35, 38, top)
+    assert wide > narrow > 0  # 広い開口の方が深く、狭い開口も多少は削れる
+
+
+def test_arde_off_equal_depth():
+    w, top = _arde_wafer()
+    from semisim.processes import DryEtch
+
+    DryEtch(targets=["silicon"], depth_um=1.0, arde_lag_um=0.0).apply(w)
+    wide = _depth_in(w, 5, 21, top)
+    narrow = _depth_in(w, 35, 38, top)
+    assert abs(wide - narrow) < 1.0  # ラグ無しなら深さは等しい
+
 
 
 

@@ -157,6 +157,7 @@ py tools\render_gallery.py
 | DRY | `mask_erosion` | マスク消耗比。ターゲットを depth 削る間にレジストが mask_erosion×depth だけ上面から減る（実機 0.3〜0.5） |
 | DRY | `taper_deg` | 側壁テーパ角（度, 垂直から）。0=垂直。正で深さ d の後退量 d×tan(taper) の上広がり台形プロファイルを再現 |
 | DRY | `notch_um` | RIE ノッチング。ストップ層（選択比で削れない下層）界面で帯電によりイオンが横偏向し、側壁直上が抉れる（SOI エッチ等の foot/notch、0=無効） |
+| DRY | `arde_lag_um` | ARDE / RIE ラグ。狭い開口ほど供給律速で浅くなる。到達深さに係数 W/(W+arde_lag) を掛ける（W=局所開口幅, 0=無効） |
 | WET | `targets` / `lateral_ratio` | エッチ対象材料。障壁材料は貫通しない（前線伝播でアンダーカット再現）。`lateral_ratio`（0〜1）で横アンダーカット/縦エッチ比を調整（1=完全等方、0=ほぼ垂直） |
 | IMPLANT | `range_um` / `straggle_um` / `lateral_straggle_um` / `threshold` | 投影飛程 Rp と縦/横ストラグルのガウス濃度分布。`threshold`（既定 ±1.5σ 相当）以上を埋込ドープ。横ストラグルでマスク端の下へ回り込む。レジスト下は遮蔽 |
 | IMPLANT | `channeling_fraction` / `tail_decay_um` | 結晶軸チャネリングによる Rp より深い指数裾。`channeling_fraction`（0〜1）が裾の相対振幅、`tail_decay_um`（0 で Rp×0.5）が減衰長 |
