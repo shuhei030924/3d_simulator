@@ -182,3 +182,28 @@ def test_dominant_wavelength_matches_period(wafer):
     # 支配波長は周期 8px × pitch に近いはず
     assert abs(wl - period * wafer.config.pitch_um) < wafer.config.pitch_um
 
+
+# --- ボイド連結成分統計 ---------------------------------------------------
+def test_void_metrics_none(wafer):
+    CVD(material="oxide", thickness_um=0.5).apply(wafer)
+    m = metrology.void_metrics(wafer)
+    assert m["count"] == 0
+    assert m["largest_um3"] == 0.0
+
+
+def test_void_metrics_detects_buried_void(wafer):
+    import numpy as np
+
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    grid[:] = materials.AIR
+    sid = materials.BY_NAME["silicon"].id
+    # 厚い固体ブロックの内部に閉塞空気のボイドを 1 つ作る
+    grid[:20, :, :] = sid
+    grid[8:12, 18:22, 18:22] = materials.AIR
+    m = metrology.void_metrics(wafer)
+    assert m["count"] == 1
+    assert m["largest_um3"] > 0.0
+    assert np.isclose(m["max_height_um"], 4 * wafer.config.pitch_um)
+
+

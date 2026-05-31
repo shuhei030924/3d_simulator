@@ -217,6 +217,38 @@ def void_volume_um3(wafer: Wafer) -> float:
     return float(buried_air.sum()) * (wafer.config.pitch_um ** 3)
 
 
+def void_metrics(wafer: Wafer) -> dict:
+    """埋め込み空隙（ボイド）の連結成分統計を返す。
+
+    void_volume_um3 と同じく「最上固体より下にある空気」を閉塞空隙とみなし、
+    6 近傍連結でラベリングして個数・最大体積・最大ボイドの縦方向高さを返す。
+    シーム/ボイドの深刻度評価に使う。
+    返り値: {"count", "total_um3", "largest_um3", "max_height_um"}。
+    """
+    grid = wafer.grid
+    nz = grid.shape[0]
+    solid = grid != materials.AIR
+    has_solid = solid.any(axis=0)
+    top = np.where(has_solid, nz - 1 - np.argmax(solid[::-1, :, :], axis=0), -1)
+    z_idx = np.arange(nz)[:, None, None]
+    buried_air = (grid == materials.AIR) & (z_idx < top[None, :, :])
+    vox = wafer.config.pitch_um ** 3
+    if not buried_air.any():
+        return {"count": 0, "total_um3": 0.0, "largest_um3": 0.0, "max_height_um": 0.0}
+    structure = ndimage.generate_binary_structure(3, 1)  # 6 近傍
+    labels, n = ndimage.label(buried_air, structure=structure)
+    sizes = np.bincount(labels.ravel())[1:]  # ラベル 0(背景)除く
+    largest = int(sizes.argmax()) + 1
+    zs = np.where(labels == largest)[0]
+    max_height = float(zs.max() - zs.min() + 1) * wafer.config.pitch_um
+    return {
+        "count": int(n),
+        "total_um3": float(sizes.sum()) * vox,
+        "largest_um3": float(sizes.max()) * vox,
+        "max_height_um": max_height,
+    }
+
+
 def cmp_uniformity_pct(wafer: Wafer) -> float:
     """表面高さの不均一性 (3σ/平均, %) を返す。CMP 平坦性評価の指標。
 
