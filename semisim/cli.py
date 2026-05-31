@@ -41,6 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="中央断面(Y)を PNG 出力（要 matplotlib）",
     )
     p.add_argument(
+        "--csv-column",
+        metavar="PATH",
+        help="中央列の縦方向材料スタックを CSV 出力（依存なし）",
+    )
+    p.add_argument(
         "--no-resist",
         action="store_true",
         help="STL/PNG 出力時にレジストを除外",
@@ -209,6 +214,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.png:
         _export_png(wafer, args.png, include_resist)
         print(f"PNG を保存しました: {args.png}", file=sys.stderr)
+    if args.csv_column:
+        from . import export
+
+        n = export.to_csv_column(
+            wafer, args.csv_column, wafer.config.nx // 2, wafer.config.ny // 2
+        )
+        print(
+            f"CSV 列プロファイルを保存しました（{n} 行）: {args.csv_column}",
+            file=sys.stderr,
+        )
 
     return 0
 

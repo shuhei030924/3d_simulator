@@ -583,6 +583,69 @@ def dishing_depth_um(wafer: Wafer, name_or_id) -> float:
     return max(0.0, field_h - soft_h)
 
 
+def interface_roughness_um(wafer: Wafer, name_a, name_b) -> float:
+    """材料 A（下）と材料 B（上）の境界面の高さ揺らぎ (RMS, µm) を返す。
+
+    各列で「直上に B が乗っている最上の A ボクセル」を境界とみなし、その境界
+    高さの標準偏差（RMS）を界面粗さとする。表面粗さ surface_roughness_um と
+    異なり、埋もれた層間（例: 基板/エピ、バリア/Cu）の凹凸を評価できる。
+    境界が 2 列未満しか取れなければ 0。
+    """
+    a = materials.get(name_a).id
+    b = materials.get(name_b).id
+    grid = wafer.grid
+    nz = grid.shape[0]
+    mask_a = grid == a
+    # 直上が B である A ボクセル（z 方向に B が A の 1 つ上）
+    b_above = np.zeros_like(mask_a)
+    b_above[:-1] = grid[1:] == b
+    boundary = mask_a & b_above  # (nz, ny, nx)
+    has = boundary.any(axis=0)
+    if int(has.sum()) < 2:
+        return 0.0
+    # 各列で最上の境界 z
+    top_boundary = nz - 1 - np.argmax(boundary[::-1, :, :], axis=0)
+    heights = top_boundary[has].astype(float) * wafer.config.pitch_um
+    return float(np.sqrt(np.mean((heights - heights.mean()) ** 2)))
+
+
+def junction_depth_um(wafer: Wafer, dopant) -> float:
+    """ドープ層（doped_n/doped_p 等）の接合深さ (µm) の中央値を返す。
+
+    各列で、最上固体表面から当該ドーパントの最深ボクセルまでの垂直距離を
+    求め、ドーパントを含む列にわたる中央値を接合深さ Xj とみなす。
+    ドーパントが無ければ 0。
+    """
+    did = materials.get(dopant).id
+    grid = wafer.grid
+    mask = grid == did
+    has = mask.any(axis=0)
+    if not has.any():
+        return 0.0
+    z_top = wafer.top_surface_z()  # 固体なし=-1
+    # 各列の最深ドーパント z（最初に True になる下からの位置）
+    deepest = np.argmax(mask, axis=0)
+    cols = has & (z_top >= 0)
+    if not cols.any():
+        return 0.0
+    depth_vox = (z_top[cols] - deepest[cols]).astype(float)
+    depth_vox = np.clip(depth_vox, 0.0, None)
+    return float(np.median(depth_vox)) * wafer.config.pitch_um
+
+
+def dopant_depth_profile(wafer: Wafer, dopant) -> np.ndarray:
+    """高さ z ごとの当該ドーパントを含むボクセルの割合 (0..1) を長さ nz で返す。
+
+    縦方向の存在率プロファイル。ピーク位置（飛程 Rp 相当）や分布の広がりの
+    確認に使う。ドーパントが無ければ全 0。
+    """
+    did = materials.get(dopant).id
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    frac = (grid == did).reshape(nz, ny * nx).mean(axis=1)
+    return frac.astype(np.float64)
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {

@@ -105,3 +105,32 @@ def to_stl(wafer: Wafer, path: str, name_or_id=None, solid_name: str = "wafer") 
         f.write(text)
     # facet 数 = "facet normal" 行数
     return text.count("facet normal")
+
+
+def column_profile_csv(wafer: Wafer, x_index: int, y_index: int) -> str:
+    """指定列 (x, y) の縦方向材料スタックを CSV 文字列で返す。
+
+    列: z_index, z_um, material_id, material_name。底(z=0)から上へ並ぶ。
+    SEM/TEM 断面や深さプロファイルとの比較に使える。
+    """
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    x = int(np.clip(x_index, 0, nx - 1))
+    y = int(np.clip(y_index, 0, ny - 1))
+    p = wafer.config.pitch_um
+    col = grid[:, y, x]
+    lines = ["z_index,z_um,material_id,material_name"]
+    for z in range(nz):
+        mid = int(col[z])
+        name = materials.BY_ID[mid].name if mid in materials.BY_ID else "unknown"
+        lines.append(f"{z},{z * p:.4f},{mid},{name}")
+    return "\n".join(lines) + "\n"
+
+
+def to_csv_column(wafer: Wafer, path: str, x_index: int, y_index: int) -> int:
+    """列 (x, y) の縦材料プロファイルを CSV に書き出し、行数（ヘッダ除く）を返す。"""
+    text = column_profile_csv(wafer, x_index, y_index)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return text.count("\n") - 1  # ヘッダ行を除いたデータ行数
+
