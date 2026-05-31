@@ -901,5 +901,38 @@ def report(wafer: Wafer) -> str:
             f"膜厚 平均={stats['mean']:.3f} 最大={stats['max']:.3f}µm  "
             f"被覆={stats['coverage'] * 100:.0f}%"
         )
+
+    # 電気/DRC セクション: グリッドに存在する導体材料を自動検出して表示。
+    conductors = [
+        m
+        for m in materials.all_materials()
+        if m.resistivity_ohm_um > 0 and (wafer.grid == m.id).any()
+    ]
+    if conductors:
+        lines.append("")
+        lines.append("電気特性 (導体):")
+        for m in conductors:
+            rs = sheet_resistance_ohm_sq(wafer, m.name)
+            cont = electrical_continuity(wafer, m.name, "x")
+            rs_txt = "∞" if rs == float("inf") else f"{rs:.3f}"
+            conn = "導通" if cont["connected"] else "オープン"
+            lines.append(
+                f"  {m.name:<12} シート抵抗={rs_txt}Ω/sq  "
+                f"x方向={conn}  連結成分={cont['n_components']}"
+            )
+        # 導体ペア間の最小間隔（ショート/近接リスク）
+        pair_lines: list[str] = []
+        for i in range(len(conductors)):
+            for j in range(i + 1, len(conductors)):
+                a, b = conductors[i], conductors[j]
+                sp = min_spacing_um(wafer, a.name, b.name)
+                if sp != float("inf"):
+                    flag = "  ★接触/ショート" if sp == 0.0 else ""
+                    pair_lines.append(
+                        f"  {a.name}-{b.name} 最小間隔={sp:.3f}µm{flag}"
+                    )
+        if pair_lines:
+            lines.append("導体間 最小間隔 (DRC):")
+            lines.extend(pair_lines)
     return "\n".join(lines)
 

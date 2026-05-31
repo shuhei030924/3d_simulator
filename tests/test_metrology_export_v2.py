@@ -535,6 +535,28 @@ def test_sheet_resistance_nonconductor_inf(wafer):
     assert metrology.sheet_resistance_ohm_sq(wafer, "oxide") == float("inf")
 
 
+def test_report_includes_electrical_section(wafer):
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    nx = grid.shape[2]
+    grid[30, 20, 0:nx] = cu  # x 方向に貫通する Cu 配線
+    txt = metrology.report(wafer)
+    assert "電気特性" in txt
+    assert "metal_cu" in txt
+    assert "導通" in txt
+
+
+def test_report_flags_short(wafer):
+    grid = wafer.grid
+    cu = materials.BY_NAME["metal_cu"].id
+    al = materials.BY_NAME["metal_al"].id
+    grid[30, 20, 10] = cu
+    grid[30, 20, 11] = al  # 隣接（ショート）
+    txt = metrology.report(wafer)
+    assert "ショート" in txt or "★" in txt
+
+
+
 
 
 
