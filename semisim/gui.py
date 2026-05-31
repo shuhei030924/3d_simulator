@@ -33,6 +33,7 @@ from .processes import (
     PlasmaClean,
     Process,
     Reflow,
+    SpinCoat,
     SputterEtch,
     Strip,
     WetEtch,
@@ -498,6 +499,21 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "SPINON":
+            self.material = QtWidgets.QComboBox()
+            for m in materials.deposit_materials():
+                self.material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.material.findData(e.material)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("塗布材料", self.material)
+            self.cap = _spin(getattr(e, "cap_um", 0.3), 0.0, 10.0, 0.05, 3)
+            self.form.addRow("キャップ厚 (µm)", self.cap)
+            note = QtWidgets.QLabel("スピンオンで全面を覆い上面を平坦化（SOG/SOD）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
         elif t == "LIFTOFF":
             note = QtWidgets.QLabel("レジストとその上の膜を一括除去します。")
             note.setStyleSheet("color: gray;")
@@ -625,6 +641,11 @@ class ProcessDialog(QtWidgets.QDialog):
             return Fill(
                 material=self.material.currentData(),
                 overfill_um=self.overfill.value(),
+            )
+        if t == "SPINON":
+            return SpinCoat(
+                material=self.material.currentData(),
+                cap_um=self.cap.value(),
             )
         if t == "LIFTOFF":
             return LiftOff()

@@ -114,6 +114,7 @@ py tools\render_gallery.py
 | EPI | エピ成長 | 露出シリコン上のみに選択的単結晶成長 |
 | KOH | 異方性ウェット | 結晶面に沿った斜め側壁（V 溝・台形） |
 | FILL | 埋込（ダマシン） | 開口・トレンチをボトムアップで金属充填 |
+| SPINON | スピンオン平坦化 | 全面を液状材料で覆い上面を平坦化（SOG/SOD） |
 | DRIE | 深掘りエッチ | 高アスペクト比の深掘り（スキャロップ） |
 | SPUTTER | スパッタエッチ | 材料非選択の指向性物理エッチ（イオンミリング、等方成分で横アンダーカット） |
 | REFLOW | 熱リフロー | 角を丸めて表面を平滑化（モルフォロジ閉/開処理） |
@@ -138,6 +139,7 @@ py tools\render_gallery.py
 | OXIDE | `thickness_um` / `consume_fraction` | 生成 SiO₂ 厚と Si 消費割合（既定 0.45）。残りを上方成長（Deal–Grove 体積比）。ドープ Si も酸化 |
 | KOH | `side_wall_angle_deg` | 結晶面に沿う側壁角（既定 54.7°、(100)Si を想定） |
 | FILL | `overfill_um` | 充填の盛り上げ量。ボトムアップで開口/トレンチを充填 |
+| SPINON | `cap_um` | 最高点+キャップ厚まで全面を埋めて平坦化（FILL と違い空列も覆う） |
 | DRIE | `scallop_pitch_um` | Bosch サイクルに対応するスキャロップ周期 |
 | SPUTTER | `depth_um` / `isotropic` | 物理ミリング量と横方向成分（0=純垂直 / 1=深さと同等のアンダーカット）。基板最下層は保護 |
 | CLEAN | `target` / `thickness_um` | 対象材料を表面から等方的に薄く除去 |

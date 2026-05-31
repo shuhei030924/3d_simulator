@@ -994,6 +994,57 @@ class Fill(Process):
         )
 
 
+# === SPINON（スピンオン平坦化膜）===========================================
+@register
+@dataclass
+class SpinCoat(Process):
+    """スピンオン塗布による自己平坦化膜（SOG/SOD）。
+
+    液状材料を塗布・硬化させるため、窪みを厚く・凸部を薄く埋めて上面を
+    平坦化する。最も高い表面 + cap_um の高さまで一様に空気を充填し、
+    結果として平坦な上面を得る。CVD（コンフォーマル）とは対照的。
+    """
+
+    type = "SPINON"
+    label = "スピンオン平坦化"
+
+    material: str = "low_k"
+    cap_um: float = 0.3
+
+    def summary(self) -> str:
+        m = materials.get(self.material)
+        return f"SPINON  {m.label}  上面+{self.cap_um:.2f}µm平坦化"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_non_negative(self.cap_um, "キャップ厚")
+        grid = wafer.grid
+        nz = grid.shape[0]
+        mat_id = materials.get(self.material).id
+        z_top = wafer.top_surface_z()
+        if int(z_top.max()) < 0:
+            return
+        # 最も高い表面 + cap の高さまで、各列の空気を埋めて平坦化する。
+        # スピンオンはウェハ全面を覆うため、固体が無い列も含めて埋める。
+        level = min(nz - 1, int(z_top.max()) + wafer.um_to_vox(self.cap_um))
+        z_idx = np.arange(nz)[:, None, None]
+        deposit = (
+            (z_idx > z_top[None, :, :])
+            & (z_idx <= level)
+            & (grid == materials.AIR)
+        )
+        grid[deposit] = mat_id
+
+    def params_dict(self) -> dict:
+        return {"material": self.material, "cap_um": self.cap_um}
+
+    @classmethod
+    def _from_params(cls, d: dict) -> SpinCoat:
+        return cls(
+            material=d.get("material", "low_k"),
+            cap_um=float(d.get("cap_um", 0.3)),
+        )
+
+
 # === LIFTOFF（リフトオフ）==================================================
 @register
 @dataclass
@@ -1270,7 +1321,7 @@ def available_types() -> list[tuple[str, str]]:
         "PHOTO", "CVD", "ALD", "PVD", "EPI",
         "DRY", "WET", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "OXIDE",
-        "FILL", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
+        "FILL", "SPINON", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
     ]
     out = []
     for t in order:
