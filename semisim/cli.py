@@ -54,6 +54,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "複数実行し、CSV を標準出力に出す"
         ),
     )
+    p.add_argument(
+        "--thermal-budget",
+        action="store_true",
+        help="熱工程のサーマルバジェット（実効拡散長）を表示して終了",
+    )
     return p
 
 
@@ -175,6 +180,15 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             print(f"エラー: {exc}", file=sys.stderr)
             return 1
+
+    if args.thermal_budget:
+        tb = metrology.thermal_budget(recipe.steps)
+        print("=== サーマルバジェット ===")
+        for c in tb["steps"]:
+            print(f"  {c['type']:9s} Dt={c['dt_um2']:.4f} um^2  {c['label']}")
+        print(f"合計 Dt = {tb['total_dt_um2']:.4f} um^2")
+        print(f"実効拡散長 L_eff = {tb['effective_length_um']:.4f} um")
+        return 0
 
     wafer = recipe.simulate()
     report = metrology.report(wafer)

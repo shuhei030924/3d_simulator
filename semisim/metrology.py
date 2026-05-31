@@ -333,6 +333,40 @@ def feature_width_variants(
     }
 
 
+def thermal_budget(steps) -> dict:
+    """レシピの熱履歴（サーマルバジェット）を拡散長ベースで集計する。
+
+    拡散長 L=√(Dt) より Dt ∝ L²。各熱工程（DIFFUSION/ANNEAL/RTP）の
+    特性拡散長を depth_um とみなし、Dt 等価量を depth_um² で表す。
+    拡散長は二乗和で合成されるため、合計 Dt から実効拡散長
+    L_eff=√(ΣLᵢ²) が得られる（複数の熱処理を 1 回に換算した目安）。
+
+    引数 steps: Process の列（recipe.steps を渡す）。
+    返り値: {"total_dt_um2", "effective_length_um", "by_type", "steps"}。
+      by_type: {工程タイプ: Dt 合計}
+      steps:   [{"label", "type", "dt_um2"}] の寄与リスト
+    """
+    thermal_types = {"DIFFUSION", "ANNEAL", "RTP"}
+    by_type: dict[str, float] = {}
+    contributions: list[dict] = []
+    total = 0.0
+    for s in steps:
+        stype = getattr(s, "type", "")
+        if stype not in thermal_types:
+            continue
+        depth = float(getattr(s, "depth_um", 0.0) or 0.0)
+        dt = depth * depth
+        total += dt
+        by_type[stype] = by_type.get(stype, 0.0) + dt
+        contributions.append({"label": s.summary(), "type": stype, "dt_um2": dt})
+    return {
+        "total_dt_um2": total,
+        "effective_length_um": float(np.sqrt(total)),
+        "by_type": by_type,
+        "steps": contributions,
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {

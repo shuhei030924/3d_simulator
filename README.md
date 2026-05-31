@@ -66,6 +66,9 @@ py -m semisim --list-presets
 
 # レシピ JSON を実行し、レポート・STL・断面 PNG を出力
 py -m semisim recipe.json --report out.txt --stl shape.stl --png slice.png
+
+# 熱工程のサーマルバジェット（実効拡散長）を表示
+py -m semisim --preset "拡散＋アニール" --thermal-budget
 ```
 
 ## テスト
