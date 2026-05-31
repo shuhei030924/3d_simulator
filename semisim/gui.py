@@ -29,7 +29,10 @@ from .processes import (
     LiftOff,
     Oxidation,
     Photo,
+    PlasmaClean,
     Process,
+    Reflow,
+    SputterEtch,
     Strip,
     WetEtch,
 )
@@ -467,6 +470,52 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "SPUTTER":
+            self.depth = _spin(getattr(e, "depth_um", 0.3), 0.05, 20.0, 0.1)
+            self.form.addRow("エッチ量 (µm)", self.depth)
+            self.isotropic = _spin(
+                getattr(e, "isotropic", 0.0) * 100.0, 0.0, 100.0, 5.0, 0
+            )
+            self.isotropic.setSuffix(" %")
+            self.form.addRow("等方成分", self.isotropic)
+            note = QtWidgets.QLabel("材料を問わず物理的に削ります（イオンミリング）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "CLEAN":
+            self.material = QtWidgets.QComboBox()
+            skip = {"air", "silicon"}
+            for m in materials.all_materials():
+                if m.name not in skip:
+                    self.material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.material.findData(e.target)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("対象材料", self.material)
+            self.thick = _spin(getattr(e, "thickness_um", 0.05), 0.01, 2.0, 0.01, 3)
+            self.form.addRow("除去量 (µm)", self.thick)
+            note = QtWidgets.QLabel("露出表面を薄く等方除去（デスカム/残渣）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "REFLOW":
+            self.material = QtWidgets.QComboBox()
+            skip = {"air", "silicon"}
+            for m in materials.all_materials():
+                if m.name not in skip:
+                    self.material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.material.findData(e.target)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("対象材料", self.material)
+            self.radius = _spin(getattr(e, "radius_um", 0.2), 0.05, 5.0, 0.05, 3)
+            self.form.addRow("平滑化半径 (µm)", self.radius)
+            note = QtWidgets.QLabel("熱リフローで角を丸めて平滑化します。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
     # -- 結果取得 ----------------------------------------------------------
     def build_process(self) -> Process:
         t = self.proc_type
@@ -537,6 +586,21 @@ class ProcessDialog(QtWidgets.QDialog):
             )
         if t == "LIFTOFF":
             return LiftOff()
+        if t == "SPUTTER":
+            return SputterEtch(
+                depth_um=self.depth.value(),
+                isotropic=self.isotropic.value() / 100.0,
+            )
+        if t == "CLEAN":
+            return PlasmaClean(
+                target=self.material.currentData(),
+                thickness_um=self.thick.value(),
+            )
+        if t == "REFLOW":
+            return Reflow(
+                target=self.material.currentData(),
+                radius_um=self.radius.value(),
+            )
         raise ValueError(t)
 
 

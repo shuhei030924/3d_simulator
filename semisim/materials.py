@@ -48,6 +48,8 @@ _MATERIALS: list[Material] = [
     Material(11, "tin", "バリア (TiN)", (0.65, 0.62, 0.45)),
     Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78)),
     Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False),
+    Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80)),
+    Material(15, "tan", "バリア (TaN)", (0.50, 0.48, 0.55)),
 ]
 
 # 名前 / ID での高速参照
@@ -69,10 +71,22 @@ def deposit_materials() -> list[Material]:
 
 
 def get(name_or_id) -> Material:
-    """名前または ID から Material を取得する。"""
+    """名前または ID から Material を取得する。
+
+    未知の名前 / ID の場合は、原因が分かる ValueError を投げる。
+    """
     if isinstance(name_or_id, str):
-        return BY_NAME[name_or_id]
-    return BY_ID[int(name_or_id)]
+        try:
+            return BY_NAME[name_or_id]
+        except KeyError as exc:
+            known = ", ".join(sorted(BY_NAME))
+            raise ValueError(
+                f"未知の材料名: {name_or_id!r}（利用可能: {known}）"
+            ) from exc
+    try:
+        return BY_ID[int(name_or_id)]
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f"未知の材料 ID: {name_or_id!r}") from exc
 
 
 def color_lookup() -> tuple[list[tuple[float, float, float]], list[float]]:

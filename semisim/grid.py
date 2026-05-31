@@ -32,6 +32,22 @@ class WaferConfig:
     pitch_um: float = 0.10
     substrate_um: float = 3.0
 
+    def __post_init__(self) -> None:
+        for name, val in (("nx", self.nx), ("ny", self.ny), ("nz", self.nz)):
+            if not isinstance(val, (int, np.integer)) or val < 1:
+                raise ValueError(
+                    f"{name} は 1 以上の整数である必要があります（指定値: {val}）。"
+                )
+        if not np.isfinite(self.pitch_um) or self.pitch_um <= 0:
+            raise ValueError(
+                f"pitch_um は正の有限値である必要があります（指定値: {self.pitch_um}）。"
+            )
+        if not np.isfinite(self.substrate_um) or self.substrate_um < 0:
+            raise ValueError(
+                f"substrate_um は 0 以上の有限値である必要があります"
+                f"（指定値: {self.substrate_um}）。"
+            )
+
     def to_dict(self) -> dict:
         return {
             "nx": self.nx,

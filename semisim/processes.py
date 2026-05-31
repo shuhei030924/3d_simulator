@@ -33,6 +33,22 @@ def _require_positive(value: float, name: str) -> float:
     return float(value)
 
 
+def _require_non_negative(value: float, name: str) -> float:
+    """0 以上でなければ ValueError。"""
+    if not np.isfinite(value) or value < 0:
+        raise ValueError(f"{name} は 0 以上の有限値である必要があります（指定値: {value}）。")
+    return float(value)
+
+
+def _require_range(value: float, lo: float, hi: float, name: str) -> float:
+    """[lo, hi] の範囲外なら ValueError。"""
+    if not np.isfinite(value) or value < lo or value > hi:
+        raise ValueError(
+            f"{name} は {lo}〜{hi} の範囲である必要があります（指定値: {value}）。"
+        )
+    return float(value)
+
+
 def _isotropic_dilate(mask: np.ndarray, radius: int) -> np.ndarray:
     """半径 radius ボクセルでマスクを等方的（真円/真球）に膨張させる。
 
@@ -221,6 +237,7 @@ class PVD(Process):
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "膜厚")
+        _require_range(self.step_coverage, 0.0, 1.0, "ステップカバレッジ")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
@@ -295,6 +312,7 @@ class DryEtch(Process):
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "エッチ量")
+        _require_non_negative(self.overetch_pct, "オーバーエッチ率")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         target_ids = set(_resolve_targets(self.targets))
@@ -511,7 +529,10 @@ class CMP(Process):
             return
         max_top = int(z_top.max())
         cut = max_top - wafer.um_to_vox(self.remove_um)
-        cut = max(-1, min(nz - 1, cut))
+        # 基板は研磨で消えない（CMP は表面層を平坦化する工程）。
+        # 研磨量が大きすぎても基板上面より下は削らないよう下限を設ける。
+        substrate_top = max(0, wafer.um_to_vox(wafer.config.substrate_um) - 1)
+        cut = max(substrate_top, min(nz - 1, cut))
         # cut より上の全ボクセルを空気にして上面を平坦化
         if cut + 1 < nz:
             grid[cut + 1:, :, :] = materials.AIR
@@ -542,6 +563,7 @@ class Oxidation(Process):
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "酸化膜厚")
+        _require_range(self.consume_fraction, 0.0, 0.95, "消費比")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         si_id = materials.BY_NAME["silicon"].id
@@ -626,6 +648,9 @@ class Implant(Process):
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.range_um, "投影飛程")
+        _require_non_negative(self.straggle_um, "ストラグル")
+        _require_non_negative(self.lateral_straggle_um, "横ストラグル")
+        _require_range(self.threshold, 0.0, 1.0, "しきい値")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         si_id = materials.BY_NAME["silicon"].id
@@ -803,6 +828,7 @@ class AnisoWetEtch(Process):
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "エッチ深さ")
+        _require_range(self.sidewall_angle_deg, 5.0, 89.9, "側壁角")
         grid = wafer.grid
         target_id = materials.get(self.target).id
         depth = wafer.um_to_vox(self.depth_um)
@@ -1008,13 +1034,171 @@ class DRIE(Process):
         )
 
 
+# === SPUTTER（スパッタエッチ / イオンミリング）============================
+@register
+@dataclass
+class SputterEtch(Process):
+    """物理スパッタによる非選択の指向性エッチ（イオンミリング）。
+
+    材料種を問わず上方から物理的に削る（レジストは保護膜として残す）。
+    isotropic（0..1）で横方向成分を持たせ、側壁のアンダーカット/ファセットを
+    簡易再現する。
+    """
+
+    type = "SPUTTER"
+    label = "スパッタエッチ"
+
+    depth_um: float = 0.3
+    isotropic: float = 0.0
+
+    def summary(self) -> str:
+        iso = "" if self.isotropic <= 0 else f"  等方{self.isotropic:.0%}"
+        return f"SPUTTER  深さ{self.depth_um:.2f}µm{iso}"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.depth_um, "エッチ量")
+        _require_range(self.isotropic, 0.0, 1.0, "等方成分")
+        grid = wafer.grid
+        depth = wafer.um_to_vox(self.depth_um)
+        resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
+
+        # 露出している非レジスト固体の列のみミリング対象
+        z_top0, top_id0 = _top_material(wafer)
+        eligible = (z_top0 >= 0) & ~np.isin(top_id0, resist_ids)
+
+        for _ in range(depth):
+            z_top, top_id = _top_material(wafer)
+            do = eligible & (z_top >= 0) & ~np.isin(top_id, resist_ids)
+            do &= top_id != materials.AIR
+            # 基板最下層は物理的に残す（ウェハ全体を削り切らない）
+            do &= z_top > 0
+            if not do.any():
+                break
+            ys, xs = np.nonzero(do)
+            grid[z_top[ys, xs], ys, xs] = materials.AIR
+
+        # 横方向成分: 生成した空気から側壁へ等方的に削る（アンダーカット）
+        lat = int(round(depth * self.isotropic))
+        if lat > 0:
+            air = grid == materials.AIR
+            grown = ndimage.distance_transform_edt(~air) <= lat
+            erode = grown & ~np.isin(grid, resist_ids) & (grid != materials.AIR)
+            # 基板底面は残す（最下層は削らない）
+            erode[0, :, :] = False
+            grid[erode] = materials.AIR
+
+    def params_dict(self) -> dict:
+        return {"depth_um": self.depth_um, "isotropic": self.isotropic}
+
+    @classmethod
+    def _from_params(cls, d: dict) -> SputterEtch:
+        return cls(
+            depth_um=float(d.get("depth_um", 0.3)),
+            isotropic=float(d.get("isotropic", 0.0)),
+        )
+
+
+# === CLEAN（プラズマクリーン / デスカム）===================================
+@register
+@dataclass
+class PlasmaClean(Process):
+    """露出表面を薄く等方的に除去する軽いクリーニング（デスカム/残渣除去）。
+
+    対象材料を指定でき（既定はレジスト残渣）、表面から thickness_um 分だけ
+    等方的に削る。下地は保護される。
+    """
+
+    type = "CLEAN"
+    label = "プラズマクリーン"
+
+    target: str = "photoresist"
+    thickness_um: float = 0.05
+
+    def summary(self) -> str:
+        return f"CLEAN  {materials.get(self.target).label}  {self.thickness_um:.3f}µm除去"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.thickness_um, "除去量")
+        grid = wafer.grid
+        target_id = materials.get(self.target).id
+        t = wafer.um_to_vox(self.thickness_um)
+        # 空気に接する対象材料の表面から t 以内を除去（等方デスカム）
+        target = grid == target_id
+        if not target.any():
+            return
+        air = grid == materials.AIR
+        dist_from_air = ndimage.distance_transform_edt(~air)
+        remove = target & (dist_from_air <= t)
+        grid[remove] = materials.AIR
+
+    def params_dict(self) -> dict:
+        return {"target": self.target, "thickness_um": self.thickness_um}
+
+    @classmethod
+    def _from_params(cls, d: dict) -> PlasmaClean:
+        return cls(
+            target=d.get("target", "photoresist"),
+            thickness_um=float(d.get("thickness_um", 0.05)),
+        )
+
+
+# === REFLOW（熱リフロー / 表面平滑化）======================================
+@register
+@dataclass
+class Reflow(Process):
+    """対象材料を熱リフローし、表面張力で角を丸めて平滑化する。
+
+    モルフォロジのクロージング＋オープニングで凹凸を丸める。radius_um が
+    大きいほど強く平滑化される。リフロー金属やレジストのリフローに使う。
+    """
+
+    type = "REFLOW"
+    label = "熱リフロー"
+
+    target: str = "photoresist"
+    radius_um: float = 0.2
+
+    def summary(self) -> str:
+        return f"REFLOW  {materials.get(self.target).label}  r{self.radius_um:.2f}µm平滑化"
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.radius_um, "平滑化半径")
+        grid = wafer.grid
+        target_id = materials.get(self.target).id
+        r = wafer.um_to_vox(self.radius_um)
+        mask = grid == target_id
+        if not mask.any():
+            return
+        # クロージング(凹を埋める)→オープニング(凸を削る)で角を丸める
+        closed = ndimage.binary_dilation(mask, iterations=r)
+        closed = ndimage.binary_erosion(closed, iterations=r, border_value=1)
+        smoothed = ndimage.binary_erosion(closed, iterations=r, border_value=1)
+        smoothed = ndimage.binary_dilation(smoothed, iterations=r)
+        # 増えた分は空気のみを埋める（他材料は侵さない）
+        gained = smoothed & (grid == materials.AIR)
+        # 減った分（凸の出っ張り）は空気へ戻す
+        lost = mask & ~smoothed
+        grid[gained] = target_id
+        grid[lost] = materials.AIR
+
+    def params_dict(self) -> dict:
+        return {"target": self.target, "radius_um": self.radius_um}
+
+    @classmethod
+    def _from_params(cls, d: dict) -> Reflow:
+        return cls(
+            target=d.get("target", "photoresist"),
+            radius_um=float(d.get("radius_um", 0.2)),
+        )
+
+
 def available_types() -> list[tuple[str, str]]:
     """(type, label) のリストを表示順で返す。"""
     order = [
         "PHOTO", "CVD", "PVD", "EPI",
-        "DRY", "WET", "KOH", "DRIE",
+        "DRY", "WET", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "OXIDE",
-        "FILL", "CMP", "LIFTOFF", "STRIP",
+        "FILL", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
     ]
     out = []
     for t in order:

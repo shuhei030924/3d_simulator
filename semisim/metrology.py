@@ -128,11 +128,83 @@ def aspect_ratio(wafer: Wafer, name_or_id, z_index: int, y_index: int) -> float:
     return step_height_um(wafer) / width
 
 
+def surface_roughness_um(wafer: Wafer) -> float:
+    """表面高さの RMS 粗さ (µm)。平坦面ほど 0 に近い。"""
+    height = surface_height_map(wafer)
+    valid = height[~np.isnan(height)]
+    if valid.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean((valid - valid.mean()) ** 2)))
+
+
+def sidewall_angle_deg(wafer: Wafer, name_or_id, y_index: int) -> float:
+    """指定行(y)の断面で、対象材料が作る側壁の平均傾斜角(度)を返す。
+
+    各高さ z での対象材料の最小 x（左壁）の z に対する変化から傾きを推定する。
+    垂直壁なら 90° に近く、テーパ（KOH 等）では小さくなる。対象が無ければ 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    y = int(np.clip(y_index, 0, ny - 1))
+    plane = grid[:, y, :] == mat.id  # (nz, nx)
+    left_x: list[int] = []
+    zs: list[int] = []
+    for z in range(nz):
+        xs = np.flatnonzero(plane[z])
+        if xs.size:
+            left_x.append(int(xs.min()))
+            zs.append(z)
+    if len(zs) < 2:
+        return 0.0
+    dz = zs[-1] - zs[0]
+    dx = abs(left_x[-1] - left_x[0])
+    if dx == 0:
+        return 90.0
+    return float(np.degrees(np.arctan2(dz, dx)))
+
+
+def interface_width_um(wafer: Wafer, name_a, name_b) -> float:
+    """材料 A と B が隣接する界面の接触面積相当 (µm²) を返す。
+
+    A と B の接触ボクセル対の数 × pitch² を界面の広がりの目安とする。
+    拡散層と基板の界面評価などに使う。接触が無ければ 0。
+    """
+    a = materials.get(name_a).id
+    b = materials.get(name_b).id
+    grid = wafer.grid
+    mask_a = grid == a
+    mask_b = grid == b
+    contact = np.zeros_like(mask_a)
+    for axis in range(3):
+        contact |= mask_a & np.roll(mask_b, 1, axis=axis)
+        contact |= mask_a & np.roll(mask_b, -1, axis=axis)
+    return float(contact.sum()) * (wafer.config.pitch_um ** 2)
+
+
+def trench_is_closed(wafer: Wafer, x_index: int, y_index: int) -> bool:
+    """指定列 (x, y) の最上固体より下に空気が挟まれている（閉塞/ボイド）かを返す。
+
+    Fill のオーバーハングによるボイド検出などに使う。
+    """
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    x = int(np.clip(x_index, 0, nx - 1))
+    y = int(np.clip(y_index, 0, ny - 1))
+    col = grid[:, y, x]
+    solid = np.flatnonzero(col != materials.AIR)
+    if solid.size == 0:
+        return False
+    top = int(solid.max())
+    return bool((col[:top] == materials.AIR).any())
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
         "solid_fraction": solid_fraction(wafer),
         "step_height_um": step_height_um(wafer),
+        "surface_roughness_um": surface_roughness_um(wafer),
         "materials": material_counts(wafer),
     }
 
@@ -152,6 +224,7 @@ def report(wafer: Wafer) -> str:
     )
     lines.append(f"固体率: {solid_fraction(wafer) * 100:.1f}%")
     lines.append(f"表面段差: {step_height_um(wafer):.3f}µm")
+    lines.append(f"表面粗さ(RMS): {surface_roughness_um(wafer):.3f}µm")
     lines.append("")
     lines.append("材料別 体積/膜厚:")
     counts = material_counts(wafer)
