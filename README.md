@@ -105,9 +105,9 @@ py tools\render_gallery.py
 | DRY | ドライエッチ | 異方性エッチ（垂直・オーバーエッチ対応） |
 | WET | ウェットエッチ | 等方エッチ（アンダーカット） |
 | DIFFUSION | 拡散 | 表面からの不純物拡散 |
-| IMPLANT | イオン注入 | 投影飛程＋ストラグルのガウス分布で埋込ドープ |
+| IMPLANT | イオン注入 | 投影飛程＋縦/横ストラグルのガウス濃度分布で埋込ドープ |
 | ANNEAL | アニール | ドーパントのドライブイン（等方再分布） |
-| OXIDE | 熱酸化 | 露出 Si を消費し SiO₂ 成長（45/55 則） |
+| OXIDE | 熱酸化 | 露出 Si を消費し SiO₂ 成長（消費比は可変、既定 45/55 則） |
 | EPI | エピ成長 | 露出シリコン上のみに選択的単結晶成長 |
 | KOH | 異方性ウェット | 結晶面に沿った斜め側壁（V 溝・台形） |
 | FILL | 埋込（ダマシン） | 開口・トレンチをボトムアップで金属充填 |
@@ -127,9 +127,9 @@ py tools\render_gallery.py
 | PVD | `step_coverage` | 0=完全シャドーイング（窪み底に成膜されない）/ 1=完全コンフォーマル。窪み深さに比例して膜厚を減衰 |
 | DRY | `overetch_pct` | ターゲット枯渇後に下層を削る割合（%）。0 で下層を保護 |
 | WET | `targets` | エッチ対象材料。障壁材料は貫通しない（前線伝播でアンダーカット再現） |
-| IMPLANT | `range_um` / `straggle_um` | 投影飛程 Rp とばらつき ΔRp。Rp±1.5σ の帯を埋込ドープ。レジスト下は遮蔽 |
+| IMPLANT | `range_um` / `straggle_um` / `lateral_straggle_um` / `threshold` | 投影飛程 Rp と縦/横ストラグルのガウス濃度分布。`threshold`（既定 ±1.5σ 相当）以上を埋込ドープ。横ストラグルでマスク端の下へ回り込む。レジスト下は遮蔽 |
 | ANNEAL | `depth_um` | ドライブイン量。ユークリッド距離で等方（真円状）に拡散 |
-| OXIDE | `thickness_um` | 生成 SiO₂ 厚。約 45% 分の Si を消費し 55% を上方成長（Deal–Grove 体積比）。ドープ Si も酸化 |
+| OXIDE | `thickness_um` / `consume_fraction` | 生成 SiO₂ 厚と Si 消費割合（既定 0.45）。残りを上方成長（Deal–Grove 体積比）。ドープ Si も酸化 |
 | KOH | `side_wall_angle_deg` | 結晶面に沿う側壁角（既定 54.7°、(100)Si を想定） |
 | FILL | `overfill_um` | 充填の盛り上げ量。ボトムアップで開口/トレンチを充填 |
 | DRIE | `scallop_pitch_um` | Bosch サイクルに対応するスキャロップ周期 |

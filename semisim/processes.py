@@ -534,6 +534,8 @@ class Oxidation(Process):
     label = "熱酸化"
 
     thickness_um: float = 0.3
+    # 生成 SiO2 厚に対し消費される Si の割合（Deal-Grove の体積膨張比に由来、約 0.45）。
+    consume_fraction: float = 0.45
 
     def summary(self) -> str:
         return f"OXIDE  酸化膜{self.thickness_um:.2f}µm成長"
@@ -547,9 +549,10 @@ class Oxidation(Process):
         # ドープされたシリコンも熱酸化される（物理的に正しい）。
         si_like = [si_id, materials.BY_NAME["doped_n"].id, materials.BY_NAME["doped_p"].id]
         total = wafer.um_to_vox(self.thickness_um)
-        # 熱酸化の体積則: 生成 SiO2 厚の約 45% 分の Si が消費され、残り約 55%
-        # が元の Si 表面より上方へ成長する（Deal-Grove の体積膨張比に由来）。
-        consume = max(0, int(round(total * 0.45)))
+        # 熱酸化の体積則: 生成 SiO2 厚の consume_fraction 分の Si が消費され、
+        # 残りが元の Si 表面より上方へ成長する（Deal-Grove の体積膨張比に由来）。
+        frac = float(np.clip(self.consume_fraction, 0.0, 0.95))
+        consume = max(0, int(round(total * frac)))
         grow = max(1, total - consume)
 
         # 露出シリコン（ドープ含む）列のみ酸化
@@ -580,13 +583,17 @@ class Oxidation(Process):
         grid[deposit] = ox_id
 
     def params_dict(self) -> dict:
-        return {"thickness_um": self.thickness_um}
+        return {
+            "thickness_um": self.thickness_um,
+            "consume_fraction": self.consume_fraction,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> Oxidation:
-        return cls(thickness_um=float(d.get("thickness_um", 0.3)))
-
-
+        return cls(
+            thickness_um=float(d.get("thickness_um", 0.3)),
+            consume_fraction=float(d.get("consume_fraction", 0.45)),
+        )
 # === IMPLANT（イオン注入）==================================================
 @register
 @dataclass
@@ -594,7 +601,13 @@ class Implant(Process):
     """イオン注入。投影飛程 Rp を中心としたガウス的な深さ分布で埋込ドープする。
 
     range_um (Rp): 表面からの投影飛程。
-    straggle_um (ΔRp): 飛程のばらつき（標準偏差）。±1.5σ の帯を注入領域とする。
+    straggle_um (ΔRp): 飛程のばらつき（縦方向標準偏差）。
+    lateral_straggle_um: 横方向のばらつき（マスク端での横散乱）。
+    threshold: ピーク濃度に対する変換しきい値（0–1）。既定 0.3247 は
+        縦方向ガウスの ±1.5σ 等高線に相当する。
+    ガウス濃度プロファイル C(z) = exp(-(depth-Rp)^2 / 2σ^2) を計算し、
+    マスク端では横方向ガウスでにじませた被覆率を掛ける。C >= threshold の
+    シリコン（既ドープ含む）ボクセルをドーパントへ変換する。
     レジストで覆われた列はイオンが止められ、下地は保護される。
     """
 
@@ -604,6 +617,8 @@ class Implant(Process):
     dopant: str = "doped_n"
     range_um: float = 0.4
     straggle_um: float = 0.1
+    lateral_straggle_um: float = 0.0
+    threshold: float = 0.3247  # exp(-1.5^2 / 2): ±1.5σ 等高線
 
     def summary(self) -> str:
         m = materials.get(self.dopant)
@@ -614,25 +629,43 @@ class Implant(Process):
         grid = wafer.grid
         nz, ny, nx = grid.shape
         si_id = materials.BY_NAME["silicon"].id
+        dn_id = materials.BY_NAME["doped_n"].id
+        dp_id = materials.BY_NAME["doped_p"].id
         dop_id = materials.get(self.dopant).id
         rp = wafer.um_to_vox(self.range_um)
-        sigma = max(1, wafer.um_to_vox(max(self.straggle_um, 1e-6)))
-        band = int(round(1.5 * sigma))  # ±1.5σ の注入帯
-        lo_d = max(0, rp - band)
-        hi_d = rp + band
+        sigma = max(1.0, float(wafer.um_to_vox(max(self.straggle_um, 1e-6))))
+        thr = float(np.clip(self.threshold, 1e-6, 1.0))
+
+        si_like = [si_id, dn_id, dp_id]
+        sil_mask = np.isin(grid, si_like)
+        any_si = sil_mask.any(axis=0)
+        # シリコン系の上面 z（レジスト等が上に乗っていてもその下のシリコン表面）
+        sil_surface = (nz - 1) - np.argmax(sil_mask[::-1, :, :], axis=0)
+        sil_surface = np.where(any_si, sil_surface, -1)
 
         z_top, top_id = _top_material(wafer)
         resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
-        eligible = (z_top >= 0) & ~np.isin(top_id, resist_ids)  # (ny, nx)
+        # 列ごとの被覆率（1=露出してイオンが入射, 0=レジスト等で遮蔽）
+        cover = ((z_top >= 0) & ~np.isin(top_id, resist_ids)).astype(float)
 
+        # 縦方向ガウス濃度（シリコン表面基準）。露出列のみ線源を持つ。
         z_idx = np.arange(nz)[:, None, None]
-        depth_below = z_top[None, :, :] - z_idx  # 表面からの深さ(vox)
-        in_band = (depth_below >= lo_d) & (depth_below <= hi_d)
-        # シリコン（および既ドープ）を注入帯の範囲で変換する
-        convertible = (grid == si_id) | (grid == materials.BY_NAME["doped_n"].id) | (
-            grid == materials.BY_NAME["doped_p"].id
-        )
-        implant = in_band & convertible & eligible[None, :, :]
+        depth_si = sil_surface[None, :, :] - z_idx  # シリコン表面からの深さ vox
+        vert = np.exp(-((depth_si - rp) ** 2) / (2.0 * sigma * sigma))
+        vert[depth_si < 0] = 0.0
+        vert[np.broadcast_to(sil_surface[None, :, :] < 0, vert.shape)] = 0.0
+        conc = vert * cover[None, :, :]  # 規格化ガウス濃度（ピーク=1）
+
+        # 横方向ストラグル: 面内ガウスで濃度をにじませ、マスク端の下へ回り込む
+        sig_lat = float(wafer.um_to_vox(max(self.lateral_straggle_um, 0.0)))
+        if sig_lat > 0:
+            conc = ndimage.gaussian_filter(
+                conc, sigma=(0.0, sig_lat, sig_lat), mode="nearest"
+            )
+
+        # シリコン（および既ドープ）を濃度しきい値で変換
+        convertible = np.isin(grid, si_like)
+        implant = (conc >= thr) & convertible
         grid[implant] = dop_id
 
     def params_dict(self) -> dict:
@@ -640,6 +673,8 @@ class Implant(Process):
             "dopant": self.dopant,
             "range_um": self.range_um,
             "straggle_um": self.straggle_um,
+            "lateral_straggle_um": self.lateral_straggle_um,
+            "threshold": self.threshold,
         }
 
     @classmethod
@@ -648,6 +683,8 @@ class Implant(Process):
             dopant=d.get("dopant", "doped_n"),
             range_um=float(d.get("range_um", 0.4)),
             straggle_um=float(d.get("straggle_um", 0.1)),
+            lateral_straggle_um=float(d.get("lateral_straggle_um", 0.0)),
+            threshold=float(d.get("threshold", 0.3247)),
         )
 
 
