@@ -518,6 +518,10 @@ class DryEtch(Process):
     # 側壁テーパ角（度, 垂直からの傾き）。0=完全垂直。正でホールが上広がりの
     # 台形になる（深さ d で開口端から d×tan(taper) だけ内側に後退）。
     taper_deg: float = 0.0
+    # RIE ノッチング（µm, 0=無効）。エッチがストップ層（選択比で削れない
+    # 下層）に到達すると、絶縁膜の帯電で入射イオンが横へ偏向し、界面直上の
+    # 側壁にノッチ（横アンダーカット）が生じる。SOI エッチ等で問題になる。
+    notch_um: float = 0.0
 
     def summary(self) -> str:
         tgt = "/".join(self.targets) if self.targets else "露出材料"
@@ -525,7 +529,8 @@ class DryEtch(Process):
         lat = "" if self.lateral_um <= 0 else f"  横{self.lateral_um:.2f}µm"
         sel = "  選択比あり" if self.selectivity else ""
         tp = "" if self.taper_deg <= 0 else f"  テーパ{self.taper_deg:.0f}°"
-        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}{tp}"
+        nt = "" if self.notch_um <= 0 else f"  ノッチ{self.notch_um:.2f}µm"
+        return f"DRY  {tgt}  深さ{self.depth_um:.2f}µm{oe}{lat}{sel}{tp}{nt}"
 
     def _rate_map(self, top_id: np.ndarray) -> np.ndarray:
         """各列の最上面材料に対する相対エッチ速度マップ（既定 1.0）。"""
@@ -541,6 +546,7 @@ class DryEtch(Process):
         _require_non_negative(self.lateral_um, "横方向バイアス")
         _require_non_negative(self.mask_erosion, "マスク消耗比")
         _require_range(self.taper_deg, 0.0, 89.0, "テーパ角")
+        _require_non_negative(self.notch_um, "RIEノッチ量")
         for name, rv in self.selectivity.items():
             _require_range(rv, 0.0, 1.0, f"選択比[{name}]")
         grid = wafer.grid
@@ -615,6 +621,32 @@ class DryEtch(Process):
             undercut[0, :, :] = False  # 基板最下層は保護
             grid[undercut] = materials.AIR
 
+        # RIE ノッチング: エッチがストップ層に到達した界面で、帯電による
+        # イオン偏向で側壁が横方向に抉られる。トレンチ底（直下がストップ層
+        # ＝ターゲットでも空気でもレジストでもない固体）の空気を界面の高さ
+        # 帯で横方向に広げ、隣接ターゲット側壁を notch 分だけ削る。
+        notch = wafer.um_to_vox(self.notch_um) if self.notch_um > 0 else 0
+        if notch > 0:
+            resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
+            below_id = np.full_like(grid, materials.AIR)
+            below_id[1:] = grid[:-1]
+            protected = [materials.AIR, *list(target_ids), *resist_ids]
+            is_stop = (below_id != materials.AIR) & ~np.isin(below_id, protected)
+            floor_air = (grid == materials.AIR) & is_stop  # 界面直上の空気帯
+            lat_struct = np.zeros((3, 3, 3), dtype=bool)
+            lat_struct[1, 1, 1] = True
+            lat_struct[1, 1, 0] = lat_struct[1, 1, 2] = True
+            lat_struct[1, 0, 1] = lat_struct[1, 2, 1] = True
+            region = floor_air
+            for _ in range(notch):
+                region = ndimage.binary_dilation(region, structure=lat_struct)
+            notch_cut = (
+                region
+                & np.isin(grid, list(target_ids))
+                & ~np.isin(grid, resist_ids)
+            )
+            grid[notch_cut] = materials.AIR
+
         # マスク消耗: レジストを上面から mask_erosion×depth 分だけ削る。
         # 実機ではエッチ中にマスクも消費され、過度だと被覆が失われ CD が崩れる。
         erode = (
@@ -641,6 +673,7 @@ class DryEtch(Process):
             "selectivity": dict(self.selectivity),
             "mask_erosion": self.mask_erosion,
             "taper_deg": self.taper_deg,
+            "notch_um": self.notch_um,
         }
 
     @classmethod
@@ -655,6 +688,7 @@ class DryEtch(Process):
             },
             mask_erosion=float(d.get("mask_erosion", 0.0)),
             taper_deg=float(d.get("taper_deg", 0.0)),
+            notch_um=float(d.get("notch_um", 0.0)),
         )
 
 

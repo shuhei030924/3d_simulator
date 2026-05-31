@@ -412,6 +412,8 @@ class ProcessDialog(QtWidgets.QDialog):
                 )
                 self.taper.setSuffix(" °")
                 self.form.addRow("側壁テーパ角", self.taper)
+                self.notch = _spin(getattr(e, "notch_um", 0.0), 0.0, 2.0, 0.02, 3)
+                self.form.addRow("RIE ノッチ (µm)", self.notch)
             else:  # WET
                 self.lateral_ratio = _spin(
                     getattr(e, "lateral_ratio", 1.0), 0.0, 1.0, 0.05, 2
@@ -733,6 +735,7 @@ class ProcessDialog(QtWidgets.QDialog):
                     selectivity=_parse_selectivity(self.selectivity.text()),
                     mask_erosion=self.mask_erosion.value(),
                     taper_deg=self.taper.value(),
+                    notch_um=self.notch.value(),
                 )
             return WetEtch(targets=tgts, depth_um=self.depth.value(),
                            lateral_ratio=self.lateral_ratio.value())
