@@ -545,6 +545,8 @@ class ProcessDialog(QtWidgets.QDialog):
                 getattr(e, "scallop_pitch_um", 0.5), 0.05, 5.0, 0.05, 3
             )
             self.form.addRow("スキャロップ周期 (µm)", self.scallop_pitch)
+            self.lag = _spin(getattr(e, "lag", 0.0), 0.0, 1.0, 0.05, 2)
+            self.form.addRow("RIE ラグ", self.lag)
             note = QtWidgets.QLabel("高アスペクト比の垂直深掘り（Bosch）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -716,6 +718,7 @@ class ProcessDialog(QtWidgets.QDialog):
                 depth_um=self.depth.value(),
                 scallop_um=self.scallop.value(),
                 scallop_pitch_um=self.scallop_pitch.value(),
+                lag=self.lag.value(),
             )
         if t == "FILL":
             return Fill(

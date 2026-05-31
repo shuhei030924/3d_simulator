@@ -1314,13 +1314,21 @@ class DRIE(Process):
     depth_um: float = 2.0
     scallop_um: float = 0.0
     scallop_pitch_um: float = 0.5
+    # RIE ラグ / ARDE（0〜1）。開口が狭いほどエッチが浅くなる現象を再現する。
+    # 0=幅に依存せず全開口が同深さ。1=最狭開口の到達深さがほぼ 0 になる。
+    lag: float = 0.0
 
     def summary(self) -> str:
         sc = "" if self.scallop_um <= 0 else f"  scallop{self.scallop_um:.2f}µm"
-        return f"DRIE  {materials.get(self.target).label}  深さ{self.depth_um:.2f}µm{sc}"
+        lg = "" if self.lag <= 0 else f"  RIEラグ{self.lag:.0%}"
+        return (
+            f"DRIE  {materials.get(self.target).label}"
+            f"  深さ{self.depth_um:.2f}µm{sc}{lg}"
+        )
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "深さ")
+        _require_range(self.lag, 0.0, 1.0, "RIEラグ")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         target_id = materials.get(self.target).id
@@ -1332,18 +1340,37 @@ class DRIE(Process):
         if not opening.any():
             return
 
+        # RIE ラグ: 各開口（連結成分）の幅に応じて到達深さを制限する。
+        # 開口内の最大ハーフ幅を特徴幅とし、最広開口で正規化。狭い開口ほど
+        # depth_cap を小さくして浅く止める（ARDE / アスペクト比依存エッチ）。
+        if self.lag > 0:
+            halfw = ndimage.distance_transform_edt(opening)
+            labels, n = ndimage.label(opening)
+            depth_cap = np.full((ny, nx), float(depth))
+            if n > 0:
+                feat_max = ndimage.maximum(halfw, labels, index=range(1, n + 1))
+                gmax = max(float(np.max(feat_max)), 1e-9)
+                lut = np.concatenate(([0.0], np.asarray(feat_max, dtype=float)))
+                w_norm = lut[labels] / gmax  # 開口ごとの正規化幅 (0〜1)
+                cap = depth * (1.0 - self.lag * (1.0 - w_norm))
+                depth_cap = np.where(opening, np.maximum(cap, 0.0), float(depth))
+        else:
+            depth_cap = np.full((ny, nx), float(depth))
+        etched = np.zeros((ny, nx), dtype=float)
+
         amp = wafer.um_to_vox(self.scallop_um) if self.scallop_um > 0 else 0
         pitch = max(2, wafer.um_to_vox(self.scallop_pitch_um))
         struct = ndimage.generate_binary_structure(3, 1)
 
         for d in range(depth):
             z_top, top_id = _top_material(wafer)
-            do = opening & (z_top >= 0) & (top_id == target_id)
+            do = opening & (z_top >= 0) & (top_id == target_id) & (etched < depth_cap)
             if not do.any():
                 break
             ys, xs = np.nonzero(do)
             zz = z_top[ys, xs]
             grid[zz, ys, xs] = materials.AIR
+            etched[do] += 1.0
             # スキャロップ: 周期の中央付近でその層だけ側壁を横へ膨らませる。
             # 直近に掘った 1 層分のみを横方向に拡張するため、深さに比例した
             # 累積的なテーパは生じず、垂直側壁に局所的な凹凸が付く。
@@ -1360,6 +1387,7 @@ class DRIE(Process):
             "depth_um": self.depth_um,
             "scallop_um": self.scallop_um,
             "scallop_pitch_um": self.scallop_pitch_um,
+            "lag": self.lag,
         }
 
     @classmethod
@@ -1369,6 +1397,7 @@ class DRIE(Process):
             depth_um=float(d.get("depth_um", 2.0)),
             scallop_um=float(d.get("scallop_um", 0.0)),
             scallop_pitch_um=float(d.get("scallop_pitch_um", 0.5)),
+            lag=float(d.get("lag", 0.0)),
         )
 
 
