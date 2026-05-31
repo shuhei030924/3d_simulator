@@ -336,6 +336,44 @@ def line_width_roughness_um(wafer: Wafer, name_or_id, z_index: int) -> float:
     return float(np.std(widths)) * wafer.config.pitch_um
 
 
+def cd_uniformity(wafer: Wafer, name_or_id, z_index: int) -> dict:
+    """指定高さでの限界寸法均一性 (CDU) を返す。
+
+    各 y 行で対象材料が存在する区間の幅（右端-左端+1）を CD とみなし、
+    その平均・標準偏差・範囲(最大-最小)・3σ・サンプル行数をまとめる。
+    LWR が標準偏差のみなのに対し、CDU は平均 CD と 3σ を含むフルセットで、
+    ウェハ内寸法ばらつき（フォト/エッチの均一性）を評価する代表的なファブ指標。
+    対象が無ければ全て 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    z = int(np.clip(z_index, 0, nz - 1))
+    plane = grid[z] == mat.id  # (ny, nx)
+    widths: list[int] = []
+    for y in range(ny):
+        xs = np.flatnonzero(plane[y])
+        if xs.size:
+            widths.append(int(xs.max() - xs.min() + 1))
+    if not widths:
+        return {
+            "mean_um": 0.0,
+            "std_um": 0.0,
+            "range_um": 0.0,
+            "three_sigma_um": 0.0,
+            "n": 0,
+        }
+    arr = np.asarray(widths, dtype=float) * wafer.config.pitch_um
+    std = float(arr.std())
+    return {
+        "mean_um": float(arr.mean()),
+        "std_um": std,
+        "range_um": float(arr.max() - arr.min()),
+        "three_sigma_um": 3.0 * std,
+        "n": int(arr.size),
+    }
+
+
 def overlay_error_um(wafer: Wafer, ref_material, measure_material) -> float:
     """2 つの材料層の重心ずれ（オーバレイ誤差, µm）を xy 面内で返す。
 

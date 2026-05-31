@@ -342,6 +342,40 @@ def test_lwr_absent_zero(wafer):
     assert metrology.line_width_roughness_um(wafer, "tungsten", 25) == 0.0
 
 
+# --- CDU (限界寸法均一性) --------------------------------------------------
+def test_cdu_uniform_line(wafer):
+    grid = wafer.grid
+    poly = materials.BY_NAME["poly"].id
+    z = 25
+    grid[z, :, 18:23] = poly  # 全 y で一定幅 5
+    r = metrology.cd_uniformity(wafer, "poly", z)
+    assert abs(r["mean_um"] - 5 * wafer.config.pitch_um) < 1e-9
+    assert r["std_um"] == 0.0
+    assert r["three_sigma_um"] == 0.0
+    assert r["n"] == grid.shape[1]
+
+
+def test_cdu_variable_line_positive(wafer):
+    grid = wafer.grid
+    poly = materials.BY_NAME["poly"].id
+    z = 25
+    ny = grid.shape[1]
+    for y in range(ny):
+        w = 4 + (y % 3)
+        grid[z, y, 18 : 18 + w] = poly
+    r = metrology.cd_uniformity(wafer, "poly", z)
+    assert r["std_um"] > 0.0
+    assert r["range_um"] > 0.0
+    assert abs(r["three_sigma_um"] - 3.0 * r["std_um"]) < 1e-12
+
+
+def test_cdu_absent_zero(wafer):
+    r = metrology.cd_uniformity(wafer, "tungsten", 25)
+    assert r["n"] == 0
+    assert r["mean_um"] == 0.0
+
+
+
 # --- ARDE / RIE ラグ -------------------------------------------------------
 def _arde_wafer():
     from semisim.grid import Wafer
