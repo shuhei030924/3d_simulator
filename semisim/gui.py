@@ -518,6 +518,9 @@ class ProcessDialog(QtWidgets.QDialog):
                 getattr(e, "tail_decay_um", 0.0), 0.0, 10.0, 0.05, 3
             )
             self.form.addRow("裾減衰長 (µm, 0=Rp×0.5)", self.tail_decay)
+            self.tilt = _spin(getattr(e, "tilt_deg", 0.0), 0.0, 60.0, 1.0, 1)
+            self.tilt.setSuffix(" °")
+            self.form.addRow("チルト角", self.tilt)
             note = QtWidgets.QLabel("Rp を中心に埋込ドープ（レジストで遮蔽）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -740,6 +743,7 @@ class ProcessDialog(QtWidgets.QDialog):
                 straggle_um=self.straggle.value(),
                 channeling_fraction=self.channeling.value(),
                 tail_decay_um=self.tail_decay.value(),
+                tilt_deg=self.tilt.value(),
             )
         if t == "ANNEAL":
             return Anneal(depth_um=self.depth.value())

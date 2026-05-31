@@ -1020,13 +1020,18 @@ class Implant(Process):
     # 相対振幅（0〜1）、tail_decay_um は裾の減衰長（0以下なら Rp×0.5 を採用）。
     channeling_fraction: float = 0.0
     tail_decay_um: float = 0.0
+    # 注入チルト角（度, 垂直から +x 方向への傾き）。0=垂直注入。
+    # 背の高いマスク/ゲートの +x 側に影（シャドーイング）を作り、注入領域を
+    # +x へずらす（ハロー/ポケット注入や LDD の非対称分布を模擬）。
+    tilt_deg: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.dopant)
         ch = "" if self.channeling_fraction <= 0 else "  +チャネリング裾"
+        tl = "" if self.tilt_deg <= 0 else f"  チルト{self.tilt_deg:.0f}°"
         return (
             f"IMPLANT  {m.label}"
-            f"  Rp{self.range_um:.2f}±{self.straggle_um:.2f}µm{ch}"
+            f"  Rp{self.range_um:.2f}±{self.straggle_um:.2f}µm{ch}{tl}"
         )
 
     def apply(self, wafer: Wafer) -> None:
@@ -1036,6 +1041,7 @@ class Implant(Process):
         _require_range(self.threshold, 0.0, 1.0, "しきい値")
         _require_range(self.channeling_fraction, 0.0, 1.0, "チャネリング比")
         _require_non_negative(self.tail_decay_um, "チャネリング減衰長")
+        _require_range(self.tilt_deg, 0.0, 60.0, "チルト角")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         si_id = materials.BY_NAME["silicon"].id
@@ -1058,6 +1064,23 @@ class Implant(Process):
         # 列ごとの被覆率（1=露出してイオンが入射, 0=レジスト等で遮蔽）
         cover = ((z_top >= 0) & ~np.isin(top_id, resist_ids)).astype(float)
 
+        # チルト注入のシャドーイング: 背の高い表面形状（マスク/ゲート）が
+        # 傾いたビームを遮り、+x 側の隣接列に影を落とす。
+        tan_t = float(np.tan(np.deg2rad(np.clip(self.tilt_deg, 0.0, 60.0))))
+        if tan_t > 0:
+            zt = np.where(z_top >= 0, z_top, 0).astype(float)
+            shadowed = np.zeros((ny, nx), dtype=bool)
+            span = float(zt.max() - zt.min())
+            maxk = int(min(nx - 1, np.ceil(span * tan_t)))
+            for k in range(1, maxk + 1):
+                shifted = np.full((ny, nx), -1.0)
+                shifted[:, k:] = z_top[:, :-k]  # -x 側 k 列の上面高さ
+                advantage = shifted - z_top
+                # ビームは -x へ k 進むと k/tan_t だけ高くなる。その高さを
+                # 超える形状があれば遮蔽される。
+                shadowed |= (shifted >= 0) & (advantage >= k / tan_t)
+            cover[shadowed] = 0.0
+
         # 縦方向ガウス濃度（シリコン表面基準）。露出列のみ線源を持つ。
         z_idx = np.arange(nz)[:, None, None]
         depth_si = sil_surface[None, :, :] - z_idx  # シリコン表面からの深さ vox
@@ -1077,6 +1100,14 @@ class Implant(Process):
             vert = vert + self.channeling_fraction * tail
 
         conc = vert * cover[None, :, :]  # 規格化ガウス濃度（ピーク=1）
+
+        # チルトによる横方向オフセット: ビームが深く進むほど +x へずれるため、
+        # 注入領域を Rp 相当だけ横シフトする（マスク端下への回り込み）。
+        if tan_t > 0:
+            shift = int(round(rp * tan_t))
+            if shift > 0:
+                conc = np.roll(conc, shift, axis=2)
+                conc[:, :, :shift] = 0.0
 
         # 横方向ストラグル: 面内ガウスで濃度をにじませ、マスク端の下へ回り込む
         sig_lat = float(wafer.um_to_vox(max(self.lateral_straggle_um, 0.0)))
@@ -1099,6 +1130,7 @@ class Implant(Process):
             "threshold": self.threshold,
             "channeling_fraction": self.channeling_fraction,
             "tail_decay_um": self.tail_decay_um,
+            "tilt_deg": self.tilt_deg,
         }
 
     @classmethod
@@ -1111,6 +1143,7 @@ class Implant(Process):
             threshold=float(d.get("threshold", 0.3247)),
             channeling_fraction=float(d.get("channeling_fraction", 0.0)),
             tail_decay_um=float(d.get("tail_decay_um", 0.0)),
+            tilt_deg=float(d.get("tilt_deg", 0.0)),
         )
 
 
