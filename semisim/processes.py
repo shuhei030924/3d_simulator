@@ -213,6 +213,62 @@ class CVD(Process):
         )
 
 
+# === ALD（原子層堆積）======================================================
+@register
+@dataclass
+class ALD(Process):
+    """原子層堆積。サイクル数×1サイクル成長量でnm精度の超コンフォーマル膜。
+
+    CVD と同じ等方堆積だが、膜厚をサイクル数で精密制御する点が特徴。
+    高アスペクト比でも均一被覆するため High-k/バリア膜に用いる。
+    """
+
+    type = "ALD"
+    label = "ALD成膜"
+
+    material: str = "hafnia"
+    cycles: int = 100
+    growth_per_cycle_nm: float = 1.0
+
+    @property
+    def thickness_um(self) -> float:
+        return self.cycles * self.growth_per_cycle_nm / 1000.0
+
+    def summary(self) -> str:
+        m = materials.get(self.material)
+        return (
+            f"ALD  {m.label}  {self.cycles}cyc×{self.growth_per_cycle_nm:.1f}nm"
+            f"={self.thickness_um * 1000:.0f}nm"
+        )
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.cycles, "サイクル数")
+        _require_positive(self.growth_per_cycle_nm, "1サイクル成長量")
+        grid = wafer.grid
+        mat_id = materials.get(self.material).id
+        t = wafer.um_to_vox(self.thickness_um)
+        air = grid == materials.AIR
+        # 固体表面からの距離 t 以内の空気に等方堆積（超コンフォーマル）
+        dist = ndimage.distance_transform_edt(air)
+        deposit = air & (dist <= t)
+        grid[deposit] = mat_id
+
+    def params_dict(self) -> dict:
+        return {
+            "material": self.material,
+            "cycles": self.cycles,
+            "growth_per_cycle_nm": self.growth_per_cycle_nm,
+        }
+
+    @classmethod
+    def _from_params(cls, d: dict) -> ALD:
+        return cls(
+            material=d.get("material", "hafnia"),
+            cycles=int(d.get("cycles", 100)),
+            growth_per_cycle_nm=float(d.get("growth_per_cycle_nm", 1.0)),
+        )
+
+
 # === PVD（指向性成膜）======================================================
 @register
 @dataclass
@@ -510,15 +566,21 @@ class Strip(Process):
 @register
 @dataclass
 class CMP(Process):
-    """上面を研磨して平坦化する。最も高い点から指定量だけ削り水平にする。"""
+    """上面を研磨して平坦化する。最も高い点から指定量だけ削り水平にする。
+
+    stop_material を指定すると、その材料（研磨ストップ層）の最高点より下は
+    削らない。STI の窒化膜ストップのような選択研磨を再現する。
+    """
 
     type = "CMP"
     label = "CMP平坦化"
 
     remove_um: float = 0.5
+    stop_material: str = ""
 
     def summary(self) -> str:
-        return f"CMP  上面から{self.remove_um:.2f}µm研磨し平坦化"
+        stop = f"  停止層={self.stop_material}" if self.stop_material else ""
+        return f"CMP  上面から{self.remove_um:.2f}µm研磨し平坦化{stop}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.remove_um, "研磨量")
@@ -533,16 +595,26 @@ class CMP(Process):
         # 研磨量が大きすぎても基板上面より下は削らないよう下限を設ける。
         substrate_top = max(0, wafer.um_to_vox(wafer.config.substrate_um) - 1)
         cut = max(substrate_top, min(nz - 1, cut))
+        # 研磨ストップ層が指定されていれば、その最高点より下は削らない。
+        if self.stop_material:
+            stop_id = materials.get(self.stop_material).id
+            zs = np.nonzero(np.any(grid == stop_id, axis=(1, 2)))[0]
+            if zs.size:
+                cut = max(cut, int(zs.max()))
+                cut = min(nz - 1, cut)
         # cut より上の全ボクセルを空気にして上面を平坦化
         if cut + 1 < nz:
             grid[cut + 1:, :, :] = materials.AIR
 
     def params_dict(self) -> dict:
-        return {"remove_um": self.remove_um}
+        return {"remove_um": self.remove_um, "stop_material": self.stop_material}
 
     @classmethod
     def _from_params(cls, d: dict) -> CMP:
-        return cls(remove_um=float(d.get("remove_um", 0.5)))
+        return cls(
+            remove_um=float(d.get("remove_um", 0.5)),
+            stop_material=d.get("stop_material", ""),
+        )
 
 
 # === OXIDE（熱酸化）========================================================
@@ -1195,7 +1267,7 @@ class Reflow(Process):
 def available_types() -> list[tuple[str, str]]:
     """(type, label) のリストを表示順で返す。"""
     order = [
-        "PHOTO", "CVD", "PVD", "EPI",
+        "PHOTO", "CVD", "ALD", "PVD", "EPI",
         "DRY", "WET", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "OXIDE",
         "FILL", "CMP", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",

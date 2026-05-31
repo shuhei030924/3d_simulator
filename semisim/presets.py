@@ -11,6 +11,7 @@ from __future__ import annotations
 from .grid import WaferConfig
 from .masks import Mask, Shape
 from .processes import (
+    ALD,
     CMP,
     CVD,
     DRIE,
@@ -129,6 +130,19 @@ def mosfet_flow() -> Recipe:
     return r
 
 
+def tsv_flow() -> Recipe:
+    """TSV（シリコン貫通ビア）: 深掘り→ライナー→バリア→Cu充填→CMP。"""
+    r = Recipe(config=WaferConfig(nx=120, ny=120, nz=160, pitch_um=0.06, substrate_um=4.0))
+    r.add(Photo(mask=_center_mask(0.25), thickness_um=1.0, polarity="positive"))
+    r.add(DRIE(target="silicon", depth_um=3.0, scallop_um=0.1, scallop_pitch_um=0.4))
+    r.add(Strip(material="photoresist"))
+    r.add(CVD(material="oxide", thickness_um=0.15))  # 絶縁ライナー
+    r.add(ALD(material="tan", cycles=80, growth_per_cycle_nm=1.0))  # バリア
+    r.add(Fill(material="metal_cu", overfill_um=0.4))
+    r.add(CMP(remove_um=0.6, stop_material="oxide"))
+    return r
+
+
 # 表示ラベル -> 生成関数（GUI メニュー/テストで使用）
 PRESETS: dict[str, callable] = {
     "イオン注入 埋込層": implant_buried_layer,
@@ -139,6 +153,7 @@ PRESETS: dict[str, callable] = {
     "Cu ダマシン配線": cu_damascene,
     "金属リフトオフ": metal_liftoff,
     "MOSFET フロー": mosfet_flow,
+    "TSV 貫通ビア": tsv_flow,
 }
 
 

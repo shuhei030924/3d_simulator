@@ -15,6 +15,7 @@ from . import materials, metrology, presets, processes, visualize
 from .grid import WaferConfig
 from .masks import Mask, Shape
 from .processes import (
+    ALD,
     CMP,
     CVD,
     DRIE,
@@ -313,6 +314,28 @@ class ProcessDialog(QtWidgets.QDialog):
                 note.setStyleSheet("color: gray;")
                 self.form.addRow(note)
 
+        elif t == "ALD":
+            self.material = QtWidgets.QComboBox()
+            for m in materials.deposit_materials():
+                self.material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.material.findData(e.material)
+                if idx >= 0:
+                    self.material.setCurrentIndex(idx)
+            self.form.addRow("材料", self.material)
+            self.cycles = QtWidgets.QSpinBox()
+            self.cycles.setRange(1, 5000)
+            self.cycles.setValue(getattr(e, "cycles", 100))
+            self.form.addRow("サイクル数", self.cycles)
+            self.gpc = _spin(
+                getattr(e, "growth_per_cycle_nm", 1.0), 0.1, 5.0, 0.1, 2
+            )
+            self.gpc.setSuffix(" nm")
+            self.form.addRow("1サイクル成長量", self.gpc)
+            note = QtWidgets.QLabel("nm 精度の超コンフォーマル膜（High-k/バリア）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
         elif t in ("DRY", "WET"):
             self.targets = QtWidgets.QListWidget()
             self.targets.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
@@ -362,6 +385,16 @@ class ProcessDialog(QtWidgets.QDialog):
         elif t == "CMP":
             self.remove = _spin(getattr(e, "remove_um", 0.5), 0.05, 20.0, 0.1)
             self.form.addRow("研磨量 (µm)", self.remove)
+            self.stop_material = QtWidgets.QComboBox()
+            self.stop_material.addItem("（なし）", "")
+            for m in materials.all_materials():
+                if m.name not in {"air", "silicon"}:
+                    self.stop_material.addItem(m.label, m.name)
+            if e is not None:
+                idx = self.stop_material.findData(getattr(e, "stop_material", ""))
+                if idx >= 0:
+                    self.stop_material.setCurrentIndex(idx)
+            self.form.addRow("研磨ストップ層", self.stop_material)
             note = QtWidgets.QLabel("最も高い点から指定量削り、上面を水平にします。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -527,6 +560,12 @@ class ProcessDialog(QtWidgets.QDialog):
             )
         if t == "CVD":
             return CVD(material=self.material.currentData(), thickness_um=self.thick.value())
+        if t == "ALD":
+            return ALD(
+                material=self.material.currentData(),
+                cycles=self.cycles.value(),
+                growth_per_cycle_nm=self.gpc.value(),
+            )
         if t == "PVD":
             return PVD(
                 material=self.material.currentData(),
@@ -550,7 +589,10 @@ class ProcessDialog(QtWidgets.QDialog):
         if t == "STRIP":
             return Strip(material=self.material.currentData())
         if t == "CMP":
-            return CMP(remove_um=self.remove.value())
+            return CMP(
+                remove_um=self.remove.value(),
+                stop_material=self.stop_material.currentData(),
+            )
         if t == "OXIDE":
             return Oxidation(thickness_um=self.thick.value())
         if t == "EPI":
