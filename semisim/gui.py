@@ -329,6 +329,10 @@ class ProcessDialog(QtWidgets.QDialog):
                     getattr(e, "loading", 0.0), 0.0, 1.0, 0.05, 2
                 )
                 self.form.addRow("負荷効果", self.loading)
+                self.roughness = _spin(
+                    getattr(e, "roughness_um", 0.0), 0.0, 2.0, 0.02, 3
+                )
+                self.form.addRow("表面粗さ RMS (µm)", self.roughness)
             if t == "PVD":
                 self.coverage = _spin(
                     getattr(e, "step_coverage", 1.0) * 100.0, 0.0, 100.0, 5.0, 0
@@ -687,6 +691,7 @@ class ProcessDialog(QtWidgets.QDialog):
                 material=self.material.currentData(),
                 thickness_um=self.thick.value(),
                 loading=self.loading.value(),
+                roughness_um=self.roughness.value(),
             )
         if t == "ALD":
             return ALD(

@@ -208,11 +208,16 @@ class CVD(Process):
     # 負荷効果（マクロローディング, 0〜1）。パターン密度が高いほど反応種が
     # 枯渇して膜が薄くなる現象を簡易再現する。0 で従来どおり一定厚。
     loading: float = 0.0
+    # 表面ラフネス（RMS, µm）。成膜表面の微小な凹凸を再現する。各列の上面を
+    # 平均 0・標準偏差 roughness_um のガウス分布で上下させる。0 で平滑。
+    roughness_um: float = 0.0
+    seed: int = 0  # ラフネス乱数シード（再現性のため）
 
     def summary(self) -> str:
         m = materials.get(self.material)
         ld = "" if self.loading <= 0 else f"  負荷{self.loading:.2f}"
-        return f"CVD  {m.label}  厚{self.thickness_um:.2f}µm{ld}"
+        rg = "" if self.roughness_um <= 0 else f"  粗さ{self.roughness_um:.2f}µm"
+        return f"CVD  {m.label}  厚{self.thickness_um:.2f}µm{ld}{rg}"
 
     def _effective_thickness_vox(self, wafer: Wafer) -> int:
         """パターン密度に応じて負荷効果で減じた実効膜厚（ボクセル）を返す。"""
@@ -227,9 +232,37 @@ class CVD(Process):
         t_eff = t * (1.0 - self.loading * density)
         return max(1, int(round(t_eff)))
 
+    def _apply_roughness(self, wafer: Wafer, mat_id: int) -> None:
+        """成膜表面に RMS ラフネスを付与する（膜上面のみ上下に揺らす）。"""
+        grid = wafer.grid
+        nz = grid.shape[0]
+        sigma_r = max(0.0, float(wafer.um_to_vox(self.roughness_um)))
+        if sigma_r <= 0:
+            return
+        rng = np.random.default_rng(int(self.seed))
+        z_top, top_id = _top_material(wafer)
+        is_film_top = (z_top >= 0) & (top_id == mat_id)
+        delta = np.round(rng.normal(0.0, sigma_r, size=z_top.shape)).astype(int)
+        ys, xs = np.nonzero(is_film_top)
+        for y, x in zip(ys.tolist(), xs.tolist()):
+            d = int(delta[y, x])
+            zt = int(z_top[y, x])
+            if d > 0:  # 凸: 上面に膜を追加
+                zmax = min(nz - 1, zt + d)
+                col = grid[zt + 1 : zmax + 1, y, x]
+                col[col == materials.AIR] = mat_id
+            elif d < 0:  # 凹: 上面の膜を削る
+                zmin = max(0, zt + d + 1)
+                for z in range(zt, zmin - 1, -1):
+                    if grid[z, y, x] == mat_id:
+                        grid[z, y, x] = materials.AIR
+                    else:
+                        break
+
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "膜厚")
         _require_range(self.loading, 0.0, 1.0, "負荷効果")
+        _require_non_negative(self.roughness_um, "ラフネス")
         grid = wafer.grid
         mat_id = materials.get(self.material).id
         t = self._effective_thickness_vox(wafer)
@@ -238,12 +271,16 @@ class CVD(Process):
         dist = ndimage.distance_transform_edt(air)
         deposit = air & (dist <= t)
         grid[deposit] = mat_id
+        if self.roughness_um > 0:
+            self._apply_roughness(wafer, mat_id)
 
     def params_dict(self) -> dict:
         return {
             "material": self.material,
             "thickness_um": self.thickness_um,
             "loading": self.loading,
+            "roughness_um": self.roughness_um,
+            "seed": self.seed,
         }
 
     @classmethod
@@ -252,6 +289,8 @@ class CVD(Process):
             material=d.get("material", "oxide"),
             thickness_um=float(d.get("thickness_um", 0.5)),
             loading=float(d.get("loading", 0.0)),
+            roughness_um=float(d.get("roughness_um", 0.0)),
+            seed=int(d.get("seed", 0)),
         )
 
 
