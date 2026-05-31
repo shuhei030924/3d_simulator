@@ -399,15 +399,22 @@ class PVD(Process):
     material: str = "metal_al"
     thickness_um: float = 0.5
     step_coverage: float = 1.0
+    # オーバーハング / ブレッドローフィング（0=無効）。指向性成膜では開口
+    # 上端の隅にフラックスが集中して庇状に横へ張り出す。狭い開口では両側
+    # の庇が合体して上部を塞ぎ、下にキーホールボイドが残る。膜厚に対する
+    # 横張り出し量の比で与える。
+    overhang: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
         sc = "" if self.step_coverage >= 0.999 else f"  被覆{self.step_coverage:.0%}"
-        return f"PVD  {m.label}  厚{self.thickness_um:.2f}µm{sc}"
+        oh = "" if self.overhang <= 0 else f"  庇{self.overhang:.1f}"
+        return f"PVD  {m.label}  厚{self.thickness_um:.2f}µm{sc}{oh}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "膜厚")
         _require_range(self.step_coverage, 0.0, 1.0, "ステップカバレッジ")
+        _require_non_negative(self.overhang, "オーバーハング")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
@@ -436,11 +443,32 @@ class PVD(Process):
         deposit &= valid[None, :, :]
         grid[deposit] = mat_id
 
+        # オーバーハング / ブレッドローフィング: 開口上端の隅から庇状に
+        # 横へ張り出す。膜の上端表面のうち「真下が空気」の隅(=開口に
+        # 面した張り出し)だけを横方向へ反復成長させる。狭い開口では両側
+        # の庇が合体して上部を塞ぎ、下にボイドが封じ込められる。
+        oh = int(round(self.overhang * t)) if self.overhang > 0 else 0
+        if oh > 0:
+            lat = np.zeros((3, 3, 3), dtype=bool)
+            lat[1, 1, 0] = lat[1, 1, 2] = lat[1, 0, 1] = lat[1, 2, 1] = True
+            for _ in range(oh):
+                film = grid == mat_id
+                grow = ndimage.binary_dilation(film, structure=lat)
+                grow &= grid == materials.AIR
+                # 庇条件: 直下が空気のボクセルのみ(開口上に張り出す部分)
+                below_air = np.zeros_like(grow)
+                below_air[1:] = grid[:-1] == materials.AIR
+                grow &= below_air
+                if not grow.any():
+                    break
+                grid[grow] = mat_id
+
     def params_dict(self) -> dict:
         return {
             "material": self.material,
             "thickness_um": self.thickness_um,
             "step_coverage": self.step_coverage,
+            "overhang": self.overhang,
         }
 
     @classmethod
@@ -449,6 +477,7 @@ class PVD(Process):
             material=d.get("material", "metal_al"),
             thickness_um=float(d.get("thickness_um", 0.5)),
             step_coverage=float(d.get("step_coverage", 1.0)),
+            overhang=float(d.get("overhang", 0.0)),
         )
 
 
