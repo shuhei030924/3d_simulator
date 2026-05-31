@@ -20,6 +20,7 @@ class Material:
         opacity: 表示時の不透明度（0-1）。
         etchable: エッチングで除去可能か。
         is_resist: フォトレジストかどうか（マスクとして機能）。
+        stress_mpa: 残留膜応力（MPa, 引張+ / 圧縮-）。反り計算に使用。
     """
 
     id: int
@@ -29,6 +30,7 @@ class Material:
     opacity: float = 1.0
     etchable: bool = True
     is_resist: bool = False
+    stress_mpa: float = 0.0
 
 
 # --- 標準材料テーブル -------------------------------------------------------
@@ -36,21 +38,21 @@ class Material:
 _MATERIALS: list[Material] = [
     Material(0, "air", "空気/真空", (1.0, 1.0, 1.0), opacity=0.0, etchable=False),
     Material(1, "silicon", "シリコン基板", (0.45, 0.45, 0.50), etchable=False),
-    Material(2, "oxide", "酸化膜 (SiO2)", (0.40, 0.78, 0.95)),
-    Material(3, "poly", "ポリシリコン", (0.80, 0.25, 0.25)),
-    Material(4, "nitride", "窒化膜 (Si3N4)", (0.30, 0.72, 0.40)),
+    Material(2, "oxide", "酸化膜 (SiO2)", (0.40, 0.78, 0.95), stress_mpa=-300.0),
+    Material(3, "poly", "ポリシリコン", (0.80, 0.25, 0.25), stress_mpa=-200.0),
+    Material(4, "nitride", "窒化膜 (Si3N4)", (0.30, 0.72, 0.40), stress_mpa=1000.0),
     Material(5, "photoresist", "フォトレジスト", (0.95, 0.82, 0.25), opacity=0.85, is_resist=True),
-    Material(6, "metal_al", "金属 (Al)", (0.82, 0.82, 0.88)),
-    Material(7, "metal_cu", "金属 (Cu)", (0.85, 0.52, 0.25)),
-    Material(8, "tungsten", "タングステン (W)", (0.55, 0.55, 0.60)),
+    Material(6, "metal_al", "金属 (Al)", (0.82, 0.82, 0.88), stress_mpa=100.0),
+    Material(7, "metal_cu", "金属 (Cu)", (0.85, 0.52, 0.25), stress_mpa=200.0),
+    Material(8, "tungsten", "タングステン (W)", (0.55, 0.55, 0.60), stress_mpa=1200.0),
     Material(9, "doped_n", "n型拡散層", (0.30, 0.45, 0.85)),
     Material(10, "doped_p", "p型拡散層", (0.85, 0.35, 0.55)),
-    Material(11, "tin", "バリア (TiN)", (0.65, 0.62, 0.45)),
-    Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78)),
+    Material(11, "tin", "バリア (TiN)", (0.65, 0.62, 0.45), stress_mpa=-500.0),
+    Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78), stress_mpa=-60.0),
     Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False),
-    Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80)),
-    Material(15, "tan", "バリア (TaN)", (0.50, 0.48, 0.55)),
-    Material(16, "silicide", "シリサイド (NiSi)", (0.78, 0.70, 0.30)),
+    Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80), stress_mpa=500.0),
+    Material(15, "tan", "バリア (TaN)", (0.50, 0.48, 0.55), stress_mpa=-1000.0),
+    Material(16, "silicide", "シリサイド (NiSi)", (0.78, 0.70, 0.30), stress_mpa=500.0),
 ]
 
 # 名前 / ID での高速参照

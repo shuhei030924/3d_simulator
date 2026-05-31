@@ -502,6 +502,63 @@ def conformality_pct(wafer: Wafer, name_or_id) -> dict:
     }
 
 
+def film_stress_thickness(wafer: Wafer) -> dict:
+    """各材料の応力×平均膜厚積（N/m）と、その合計（正味）を返す。
+
+    各材料 m について σ_m [Pa] × <t_m> [m] を計算する。<t_m> は当該材料が
+    存在する列での平均膜厚（film_thickness_map の正値平均）。応力×厚さ積は
+    反り（Stoney 則）を支配する量で、引張膜（+）はウェハを凸に、圧縮膜（-）
+    は凹に反らせる。
+
+    返り値: {"per_material": {name: {"thickness_um", "stress_mpa",
+    "stress_thickness_N_per_m"}}, "net_N_per_m"}。
+    """
+    per: dict[str, dict] = {}
+    net = 0.0
+    for m in materials.all_materials():
+        if m.stress_mpa == 0.0 or m.id == materials.AIR:
+            continue
+        tmap = film_thickness_map(wafer, m.id)
+        film = tmap[tmap > 0]
+        if film.size == 0:
+            continue
+        t_mean_um = float(film.mean())
+        st = float(m.stress_mpa) * 1e6 * (t_mean_um * 1e-6)  # Pa·m = N/m
+        per[m.name] = {
+            "thickness_um": t_mean_um,
+            "stress_mpa": float(m.stress_mpa),
+            "stress_thickness_N_per_m": st,
+        }
+        net += st
+    return {"per_material": per, "net_N_per_m": float(net)}
+
+
+def wafer_bow_um(
+    wafer: Wafer,
+    wafer_diameter_mm: float = 300.0,
+    substrate_thickness_um: float = 775.0,
+    substrate_biaxial_modulus_gpa: float = 180.6,
+) -> float:
+    """残留膜応力による等価ウェハ反り量（中心たわみ, µm）を Stoney 則で推定する。
+
+    Stoney 則の曲率 κ = 6·Σ(σ·t_f) / (M_s·t_s²)（M_s=E/(1-ν) はシリコン基板の
+    二軸弾性率, t_s は基板厚）を用い、半径 R のウェハの中心たわみ δ = κ·R²/2
+    を返す。正は引張膜による凸反り、負は圧縮膜による凹反り。シミュレーション
+    領域は微小なので、標準 300mm/775µm ウェハ全面に同じ膜が成膜された場合の
+    等価反りとして算出する（プロセス比較用の指標）。
+    """
+    st = film_stress_thickness(wafer)
+    sum_sigma_tf = st["net_N_per_m"]  # N/m
+    t_s = substrate_thickness_um * 1e-6  # m
+    m_s = substrate_biaxial_modulus_gpa * 1e9  # Pa
+    if t_s <= 0 or m_s <= 0:
+        return 0.0
+    kappa = 6.0 * sum_sigma_tf / (m_s * t_s * t_s)  # 1/m
+    radius = (wafer_diameter_mm * 1e-3) / 2.0  # m
+    bow = kappa * radius * radius / 2.0  # m
+    return float(bow * 1e6)  # µm
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
@@ -534,6 +591,10 @@ def report(wafer: Wafer) -> str:
     void = void_volume_um3(wafer)
     if void > 0:
         lines.append(f"ボイド体積: {void:.4f}µm³")
+    bow = wafer_bow_um(wafer)
+    if abs(bow) >= 0.001:
+        sign = "凸(引張)" if bow > 0 else "凹(圧縮)"
+        lines.append(f"等価ウェハ反り: {bow:+.2f}µm  {sign}")
     lines.append("")
     lines.append("材料別 体積/膜厚:")
     counts = material_counts(wafer)
