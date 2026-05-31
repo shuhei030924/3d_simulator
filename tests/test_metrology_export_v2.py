@@ -431,6 +431,52 @@ def test_continuity_axis_selectable(wafer):
     assert metrology.electrical_continuity(wafer, "tungsten", "x")["connected"] is False
 
 
+# --- 配線抵抗推定 (断面積考慮の直列抵抗) ----------------------------------
+def test_line_resistance_finite_for_full_line(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, y = 25, 20
+    nx = grid.shape[2]
+    grid[z, y, 0:nx] = w_id
+    r = metrology.line_resistance_ohm(wafer, "tungsten", "x")
+    assert np.isfinite(r) and r > 0
+
+
+def test_line_resistance_open_is_inf(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, y = 25, 20
+    nx = grid.shape[2]
+    grid[z, y, 0:nx] = w_id
+    grid[z, y, nx // 2] = materials.AIR  # 断線
+    assert metrology.line_resistance_ohm(wafer, "tungsten", "x") == float("inf")
+
+
+def test_line_resistance_narrower_is_higher(wafer):
+    # 細い配線ほど抵抗が高い（断面積が小さい）
+    from semisim.grid import Wafer
+
+    cfg = wafer.config
+    w_wide = Wafer(cfg)
+    w_narrow = Wafer(cfg)
+    w_id = materials.BY_NAME["tungsten"].id
+    nx = cfg.nx
+    z, y = 25, 20
+    w_wide.grid[z, y - 1 : y + 2, 0:nx] = w_id  # 幅3
+    w_narrow.grid[z, y, 0:nx] = w_id  # 幅1
+    r_wide = metrology.line_resistance_ohm(w_wide, "tungsten", "x")
+    r_narrow = metrology.line_resistance_ohm(w_narrow, "tungsten", "x")
+    assert r_narrow > r_wide
+
+
+def test_line_resistance_nonconductor_inf(wafer):
+    grid = wafer.grid
+    ox = materials.BY_NAME["oxide"].id
+    grid[25, 20, :] = ox
+    assert metrology.line_resistance_ohm(wafer, "oxide", "x") == float("inf")
+
+
+
 
 
 

@@ -775,6 +775,43 @@ def electrical_continuity(wafer: Wafer, name_or_id, axis: str = "x") -> dict:
     }
 
 
+def line_resistance_ohm(wafer: Wafer, name_or_id, axis: str = "x") -> float:
+    """導体配線の電気抵抗（Ω）を断面積を考慮して推定する。
+
+    指定軸（"x"/"y"）に沿って配線を薄切りし、各スライスの断面積
+    A=（材料ボクセル数×pitch²）に対し R=Σ ρ·Δl/A を積算する直列抵抗モデル。
+    幅が細る箇所ほど抵抗が増える（ネッキング/エレクトロマイグレーション
+    リスクの検出に有用）。途中で断面積 0 のスライスがあれば断線とみなし inf を返す。
+    ρ は材料の resistivity_ohm_um。非導体（ρ=0）や材料不在は inf。
+    """
+    mat = materials.get(name_or_id)
+    rho = mat.resistivity_ohm_um
+    if rho <= 0:
+        return float("inf")
+    grid = wafer.grid
+    mask = grid == mat.id
+    if not mask.any():
+        return float("inf")
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)
+    pitch = wafer.config.pitch_um
+    # 軸に垂直な各スライスの断面ボクセル数
+    other_axes = tuple(ax for ax in (0, 1, 2) if ax != a)
+    area_vox = mask.sum(axis=other_axes)  # 長さ n_axis の配列
+    # 配線が存在する範囲のみを対象（前後の空きスライスは無視）
+    present = np.nonzero(area_vox > 0)[0]
+    if present.size == 0:
+        return float("inf")
+    lo, hi = int(present.min()), int(present.max())
+    total = 0.0
+    for i in range(lo, hi + 1):
+        av = int(area_vox[i])
+        if av == 0:
+            return float("inf")  # 途中で途切れ＝オープン
+        # R_slice = ρ·Δl / A = ρ·pitch / (av·pitch²) = ρ / (av·pitch)
+        total += rho / (av * pitch)
+    return float(total)
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
