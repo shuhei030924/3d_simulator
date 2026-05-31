@@ -253,6 +253,67 @@ def test_oxidation_time_mode_roundtrip():
     assert ox2._effective_thickness_um() == ox._effective_thickness_um()
 
 
+# --- Anneal 時間/温度ドライブイン (拡散長 L=√Dt) ---------------------------
+def test_diffusion_length_monotonic_in_temp():
+    from semisim.processes import diffusion_length_um
+
+    lo = diffusion_length_um(60, 1000, "boron")
+    hi = diffusion_length_um(60, 1100, "boron")
+    assert 0 < lo < hi  # 高温ほど拡散長が大きい
+
+
+def test_diffusion_length_zero_time():
+    from semisim.processes import diffusion_length_um
+
+    assert diffusion_length_um(0, 1000, "boron") == 0.0
+
+
+def test_diffusion_length_material_alias():
+    from semisim.processes import diffusion_length_um
+
+    # 材料名 doped_p はホウ素に解決される
+    a = diffusion_length_um(60, 1000, "doped_p")
+    b = diffusion_length_um(60, 1000, "boron")
+    assert a == b
+
+
+def test_diffusion_length_bad_dopant():
+    import pytest
+
+    from semisim.processes import diffusion_length_um
+
+    with pytest.raises(ValueError):
+        diffusion_length_um(60, 1000, "unobtainium")
+
+
+def test_anneal_time_mode_drives_in(wafer):
+    from semisim.processes import Anneal, Implant
+
+    Implant(dopant="doped_p", range_um=0.3, straggle_um=0.1).apply(wafer)
+    before = int((wafer.grid == materials.BY_NAME["doped_p"].id).sum())
+    Anneal(time_min=120, temperature_c=1100).apply(wafer)
+    after = int((wafer.grid == materials.BY_NAME["doped_p"].id).sum())
+    assert after > before  # ドーパントが周囲シリコンへ広がる
+
+
+def test_anneal_time_mode_roundtrip():
+    from semisim.processes import Anneal, Process
+
+    a = Anneal(time_min=90, temperature_c=1050)
+    a2 = Process.from_dict(a.to_dict())
+    assert a2.time_min == 90
+    assert a2.temperature_c == 1050
+    assert a2._effective_depth_um("boron") == a._effective_depth_um("boron")
+
+
+def test_anneal_thermal_budget_uses_diffusion_length():
+    from semisim.processes import Anneal
+
+    tb = metrology.thermal_budget([Anneal(time_min=120, temperature_c=1100)])
+    # 時間モードでは拡散長(√Dt)由来の Dt が計上される
+    assert tb["total_dt_um2"] > 0.0
+
+
 # --- Line Width Roughness (LWR) -------------------------------------------
 def test_lwr_straight_line_is_zero(wafer):
     # まっすぐな一定幅ラインは LWR ≈ 0

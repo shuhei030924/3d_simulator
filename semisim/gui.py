@@ -598,7 +598,16 @@ class ProcessDialog(QtWidgets.QDialog):
         elif t == "ANNEAL":
             self.depth = _spin(getattr(e, "depth_um", 0.3), 0.05, 20.0, 0.1)
             self.form.addRow("ドライブイン量 (µm)", self.depth)
-            note = QtWidgets.QLabel("既存の拡散層を等方的に再分布させます。")
+            self.an_time = _spin(getattr(e, "time_min", 0.0), 0.0, 6000.0, 5.0, 1)
+            self.form.addRow("アニール時間 (分, 0=量指定)", self.an_time)
+            self.an_temp = _spin(
+                getattr(e, "temperature_c", 1000.0), 600.0, 1300.0, 10.0, 0
+            )
+            self.form.addRow("アニール温度 (℃)", self.an_temp)
+            note = QtWidgets.QLabel(
+                "既存の拡散層を等方的に再分布させます。"
+                "時間>0 で拡散長 L=√(Dt) から深さを自動計算。"
+            )
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
@@ -854,7 +863,11 @@ class ProcessDialog(QtWidgets.QDialog):
                 tilt_deg=self.tilt.value(),
             )
         if t == "ANNEAL":
-            return Anneal(depth_um=self.depth.value())
+            return Anneal(
+                depth_um=self.depth.value(),
+                time_min=self.an_time.value(),
+                temperature_c=self.an_temp.value(),
+            )
         if t == "RTP":
             return RapidThermalAnneal(
                 depth_um=self.depth.value(),

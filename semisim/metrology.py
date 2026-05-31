@@ -410,7 +410,14 @@ def thermal_budget(steps) -> dict:
         stype = getattr(s, "type", "")
         if stype not in thermal_types:
             continue
-        depth = float(getattr(s, "depth_um", 0.0) or 0.0)
+        # 時間/温度モードの Anneal は拡散長を物理計算した実効深さを使う。
+        if getattr(s, "time_min", 0.0) and hasattr(s, "_effective_depth_um"):
+            try:
+                depth = float(s._effective_depth_um("phosphorus"))
+            except Exception:
+                depth = float(getattr(s, "depth_um", 0.0) or 0.0)
+        else:
+            depth = float(getattr(s, "depth_um", 0.0) or 0.0)
         dt = depth * depth
         total += dt
         by_type[stype] = by_type.get(stype, 0.0) + dt

@@ -99,6 +99,43 @@ def deal_grove_thickness_um(
     return float(x)
 
 
+# ドーパント拡散の Arrhenius 定数（<111>/intrinsic Si, D0[cm²/s], Ea[eV]）。
+# 教科書値（Sze, Plummer 等）。ドライブインの拡散長 L=√(Dt) 計算に使う。
+_DIFFUSIVITY = {
+    "boron": (0.76, 3.46),
+    "phosphorus": (3.85, 3.66),
+    "arsenic": (0.066, 3.44),
+    "antimony": (0.214, 3.65),
+}
+# 材料名 → 代表ドーパント種（doped_p=ホウ素, doped_n=リン）
+_DOPANT_SPECIES = {"doped_p": "boron", "doped_n": "phosphorus"}
+
+
+def diffusion_length_um(time_min: float, temperature_c: float, dopant: str) -> float:
+    """ドーパントの熱拡散長 L=√(D·t) を µm で返す。
+
+    D = D0·exp(-Ea/kT)（Arrhenius）。dopant は "boron"/"phosphorus"/"arsenic"
+    /"antimony"、または材料名 "doped_p"/"doped_n"。ドライブイン（Anneal）の
+    到達深さの物理的目安に使う。time_min は分。
+    """
+    _require_non_negative(time_min, "拡散時間")
+    if time_min <= 0:
+        return 0.0
+    species = _DOPANT_SPECIES.get(str(dopant), str(dopant))
+    if species not in _DIFFUSIVITY:
+        known = ", ".join(sorted(set(_DIFFUSIVITY) | set(_DOPANT_SPECIES)))
+        raise ValueError(f"未知のドーパント: {dopant!r}（利用可能: {known}）")
+    d0, ea = _DIFFUSIVITY[species]
+    k = 8.617e-5  # eV/K
+    t_k = float(temperature_c) + 273.15
+    if t_k <= 0:
+        raise ValueError("温度は絶対零度より高い必要があります。")
+    d_cm2_s = d0 * math.exp(-ea / (k * t_k))  # cm²/s
+    t_s = time_min * 60.0
+    l_cm = math.sqrt(d_cm2_s * t_s)
+    return float(l_cm * 1.0e4)  # cm → µm
+
+
 class Process:
     """全工程の基底クラス。"""
 
@@ -1553,31 +1590,59 @@ class Anneal(Process):
     label = "アニール"
 
     depth_um: float = 0.3
+    # 時間/温度モード: time_min>0 のとき depth_um は無視し、ドーパント拡散長
+    # L=√(D·t) からドライブイン量を物理計算する（炉アニールの等方拡散）。
+    time_min: float = 0.0
+    temperature_c: float = 1000.0
+
+    def _effective_depth_um(self, dopant: str) -> float:
+        """時間/温度モードなら拡散長、そうでなければ指定 depth_um を返す。"""
+        if self.time_min > 0:
+            return diffusion_length_um(self.time_min, self.temperature_c, dopant)
+        return self.depth_um
 
     def summary(self) -> str:
+        if self.time_min > 0:
+            return (
+                f"ANNEAL  ドライブイン({self.temperature_c:.0f}℃ "
+                f"{self.time_min:.0f}分, L=√Dt)"
+            )
         return f"ANNEAL  ドライブイン{self.depth_um:.2f}µm"
 
     def apply(self, wafer: Wafer) -> None:
-        _require_positive(self.depth_um, "ドライブイン量")
+        if self.time_min <= 0:
+            _require_positive(self.depth_um, "ドライブイン量")
+        _require_non_negative(self.time_min, "アニール時間")
         grid = wafer.grid
         si_id = materials.BY_NAME["silicon"].id
-        lat = wafer.um_to_vox(self.depth_um)
-        # n / p それぞれを独立に膨張させ、隣接シリコンを同型に変換する
+        # n / p それぞれを独立に膨張させ、隣接シリコンを同型に変換する。
+        # 時間/温度モードではドーパント種ごとに拡散長が異なる。
         for name in ("doped_n", "doped_p"):
             dop_id = materials.get(name).id
             region = grid == dop_id
             if not region.any():
+                continue
+            lat = wafer.um_to_vox(self._effective_depth_um(name))
+            if lat <= 0:
                 continue
             grown = _isotropic_dilate(region, lat)
             spread = grown & (grid == si_id)
             grid[spread] = dop_id
 
     def params_dict(self) -> dict:
-        return {"depth_um": self.depth_um}
+        return {
+            "depth_um": self.depth_um,
+            "time_min": self.time_min,
+            "temperature_c": self.temperature_c,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> Anneal:
-        return cls(depth_um=float(d.get("depth_um", 0.3)))
+        return cls(
+            depth_um=float(d.get("depth_um", 0.3)),
+            time_min=float(d.get("time_min", 0.0)),
+            temperature_c=float(d.get("temperature_c", 1000.0)),
+        )
 
 
 # === RTP（急速熱処理 / スパイクアニール）====================================
