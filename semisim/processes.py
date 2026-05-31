@@ -1200,13 +1200,16 @@ class Epitaxy(Process):
 
     material: str = "epi_si"
     thickness_um: float = 0.5
+    facet_angle_deg: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
-        return f"EPI  {m.label}  厚{self.thickness_um:.2f}µm"
+        facet = f"  ファセット{self.facet_angle_deg:.0f}°" if self.facet_angle_deg > 0 else ""
+        return f"EPI  {m.label}  厚{self.thickness_um:.2f}µm{facet}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "エピ厚")
+        _require_non_negative(self.facet_angle_deg, "ファセット角")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
@@ -1220,25 +1223,54 @@ class Epitaxy(Process):
         ]
         z_top, top_id = _top_material(wafer)
         eligible = (z_top >= 0) & np.isin(top_id, seed_ids)
+        if not eligible.any():
+            return
 
-        z_idx = np.arange(nz)[:, None, None]
-        lo = z_top[None, :, :]
-        deposit = (
-            (z_idx > lo)
-            & (z_idx <= lo + t)
-            & (grid == materials.AIR)
-            & eligible[None, :, :]
-        )
-        grid[deposit] = mat_id
+        if self.facet_angle_deg <= 0:
+            # 等方的（コンフォーマル）成長
+            z_idx = np.arange(nz)[:, None, None]
+            lo = z_top[None, :, :]
+            deposit = (
+                (z_idx > lo)
+                & (z_idx <= lo + t)
+                & (grid == materials.AIR)
+                & eligible[None, :, :]
+            )
+            grid[deposit] = mat_id
+            return
+
+        # ファセット成長: 高さとともに {111} 面に沿って footprint が内側へ収束し
+        # 台形/三角形のキャップを形成する（選択エピの自己整合ファセット）。
+        angle = float(np.clip(self.facet_angle_deg, 5.0, 89.9))
+        tan_a = np.tan(np.deg2rad(angle))
+        for d in range(1, t + 1):
+            inset = int(round((d - 1) / tan_a))  # 高さに比例して内側へ後退
+            if inset > 0:
+                layer = ndimage.binary_erosion(eligible, iterations=inset)
+            else:
+                layer = eligible
+            if not layer.any():
+                break
+            zlayer = z_top + d
+            sel = layer & (zlayer < nz)
+            ys, xs = np.nonzero(sel)
+            zz = zlayer[ys, xs]
+            is_air = grid[zz, ys, xs] == materials.AIR
+            grid[zz[is_air], ys[is_air], xs[is_air]] = mat_id
 
     def params_dict(self) -> dict:
-        return {"material": self.material, "thickness_um": self.thickness_um}
+        return {
+            "material": self.material,
+            "thickness_um": self.thickness_um,
+            "facet_angle_deg": self.facet_angle_deg,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> Epitaxy:
         return cls(
             material=d.get("material", "epi_si"),
             thickness_um=float(d.get("thickness_um", 0.5)),
+            facet_angle_deg=float(d.get("facet_angle_deg", 0.0)),
         )
 
 

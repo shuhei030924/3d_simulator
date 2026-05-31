@@ -486,6 +486,8 @@ class ProcessDialog(QtWidgets.QDialog):
             self.form.addRow("材料", self.material)
             self.thick = _spin(getattr(e, "thickness_um", 0.5), 0.05, 20.0, 0.1)
             self.form.addRow("エピ厚 (µm)", self.thick)
+            self.facet = _spin(getattr(e, "facet_angle_deg", 0.0), 0.0, 89.0, 1.0, 1)
+            self.form.addRow("ファセット角 (°,0=無)", self.facet)
             note = QtWidgets.QLabel("露出シリコン上のみに選択成長します。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -723,6 +725,7 @@ class ProcessDialog(QtWidgets.QDialog):
             return Epitaxy(
                 material=self.material.currentData(),
                 thickness_um=self.thick.value(),
+                facet_angle_deg=self.facet.value(),
             )
         if t == "IMPLANT":
             return Implant(
