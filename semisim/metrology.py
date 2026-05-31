@@ -559,6 +559,30 @@ def wafer_bow_um(
     return float(bow * 1e6)  # µm
 
 
+def dishing_depth_um(wafer: Wafer, name_or_id) -> float:
+    """指定材料（Cu 等の軟材料）上面が周囲フィールドより凹んだ量 (µm) を返す。
+
+    ダマシン CMP では軟らかい金属が過研磨で凹む（ディッシング）。対象材料が
+    最上面に露出する列の代表高さ（中央値）と、それ以外（フィールド）の代表
+    高さの差を返す。凹んでいなければ 0。
+    """
+    grid = wafer.grid
+    nz = grid.shape[0]
+    soft_id = materials.get(name_or_id).id
+    z_top = wafer.top_surface_z()  # (ny, nx), 固体なし=-1
+    yy, xx = np.indices(z_top.shape)
+    ztc = np.clip(z_top, 0, nz - 1)
+    top_id = np.where(z_top >= 0, grid[ztc, yy, xx], materials.AIR)
+    height = surface_height_map(wafer)  # µm, NaN where no solid
+    is_soft_top = (z_top >= 0) & (top_id == soft_id)
+    field_mask = (z_top >= 0) & (top_id != soft_id)
+    if not is_soft_top.any() or not field_mask.any():
+        return 0.0
+    field_h = float(np.median(height[field_mask]))
+    soft_h = float(np.median(height[is_soft_top]))
+    return max(0.0, field_h - soft_h)
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
