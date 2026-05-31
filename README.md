@@ -14,7 +14,7 @@
   SPUTTER（イオンミリング）/ REFLOW（熱リフロー）/ CLEAN（プラズマクリーン）。
   材料は High-k(HfO₂) や TaN バリアなど 15 種に対応。
 - **任意角度パターン**: 回転矩形・帯・周期ライン（グレーティング）。
-- **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD に加え、表面粗さ(RMS)・側壁角・界面面積・トレンチ閉塞(ボイド)判定・ビア充填品質(`via_fill_quality`)・側壁ボーイング(`sidewall_bowing_um`)・サーマルバジェット(`thermal_budget`)など計測ヘルパ（`semisim/metrology.py`）。
+- **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD に加え、表面粗さ(RMS)・側壁角・界面面積・トレンチ閉塞(ボイド)判定・ビア充填品質(`via_fill_quality`)・側壁ボーイング(`sidewall_bowing_um`)・段差被覆性(`conformality_pct`)・サーマルバジェット(`thermal_budget`)など計測ヘルパ（`semisim/metrology.py`）。
   人が読めるテキスト計測レポート（`metrology.report`）も生成できます。
 - **プリセットレシピ**: 代表的な 9 フロー（ダマシン・MOSFET・KOH・DRIE・TSV 貫通ビア等）をメニューから即読込（`semisim/presets.py`）。
 - **設定の永続化**: 最後に使ったフォルダ・最近開いたレシピ・既定ウェハ設定・ウィンドウ位置を

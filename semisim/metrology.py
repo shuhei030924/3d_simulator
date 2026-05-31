@@ -431,6 +431,35 @@ def sidewall_bowing_um(wafer: Wafer, y_index: int) -> float:
     return float(max(0, max_w - surface_w)) * wafer.config.pitch_um
 
 
+def conformality_pct(wafer: Wafer, name_or_id) -> dict:
+    """成膜のコンフォーマリティ（段差被覆性）を %で評価する。
+
+    指定材料の膜について、平坦部（フィールド）の代表膜厚＝列ごと膜厚の
+    中央値に対する、最薄部（窪み底・側壁など最も薄い列）の膜厚比を返す。
+    コンフォーマルな CVD/ALD は 100%に近づき、指向性の PVD は窪み底が
+    薄くなるため低い値になる。トレンチ埋込で局所的に厚い列があっても
+    中央値・最小値ベースなので頑健。
+    返り値: {"field_thickness_um", "min_thickness_um", "step_coverage_pct"}。
+    膜が無ければ step_coverage_pct=0。
+    """
+    tmap = film_thickness_map(wafer, name_or_id)  # (ny, nx) µm
+    film = tmap[tmap > 0]
+    if film.size == 0:
+        return {
+            "field_thickness_um": 0.0,
+            "min_thickness_um": 0.0,
+            "step_coverage_pct": 0.0,
+        }
+    field_t = float(np.median(film))
+    min_t = float(film.min())
+    cov = 0.0 if field_t <= 0 else 100.0 * min_t / field_t
+    return {
+        "field_thickness_um": field_t,
+        "min_thickness_um": min_t,
+        "step_coverage_pct": float(np.clip(cov, 0.0, 100.0)),
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
