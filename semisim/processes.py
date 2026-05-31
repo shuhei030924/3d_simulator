@@ -870,16 +870,27 @@ class Implant(Process):
     straggle_um: float = 0.1
     lateral_straggle_um: float = 0.0
     threshold: float = 0.3247  # exp(-1.5^2 / 2): ±1.5σ 等高線
+    # チャネリングテール: 結晶軸（<100>等）に沿って深く潜るイオンが作る
+    # ガウスより深い指数裾。channeling_fraction はガウスピークに対する裾の
+    # 相対振幅（0〜1）、tail_decay_um は裾の減衰長（0以下なら Rp×0.5 を採用）。
+    channeling_fraction: float = 0.0
+    tail_decay_um: float = 0.0
 
     def summary(self) -> str:
         m = materials.get(self.dopant)
-        return f"IMPLANT  {m.label}  Rp{self.range_um:.2f}±{self.straggle_um:.2f}µm"
+        ch = "" if self.channeling_fraction <= 0 else "  +チャネリング裾"
+        return (
+            f"IMPLANT  {m.label}"
+            f"  Rp{self.range_um:.2f}±{self.straggle_um:.2f}µm{ch}"
+        )
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.range_um, "投影飛程")
         _require_non_negative(self.straggle_um, "ストラグル")
         _require_non_negative(self.lateral_straggle_um, "横ストラグル")
         _require_range(self.threshold, 0.0, 1.0, "しきい値")
+        _require_range(self.channeling_fraction, 0.0, 1.0, "チャネリング比")
+        _require_non_negative(self.tail_decay_um, "チャネリング減衰長")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         si_id = materials.BY_NAME["silicon"].id
@@ -908,6 +919,18 @@ class Implant(Process):
         vert = np.exp(-((depth_si - rp) ** 2) / (2.0 * sigma * sigma))
         vert[depth_si < 0] = 0.0
         vert[np.broadcast_to(sil_surface[None, :, :] < 0, vert.shape)] = 0.0
+
+        # チャネリングテール: Rp より深い領域に指数裾を加える（結晶軸チャネリング）。
+        if self.channeling_fraction > 0:
+            decay_um = (
+                self.tail_decay_um if self.tail_decay_um > 0 else self.range_um * 0.5
+            )
+            decay = max(1.0, float(wafer.um_to_vox(decay_um)))
+            tail = np.exp(-(depth_si - rp) / decay)
+            tail[depth_si < rp] = 0.0  # ピークより浅い側には裾を付けない
+            tail[np.broadcast_to(sil_surface[None, :, :] < 0, tail.shape)] = 0.0
+            vert = vert + self.channeling_fraction * tail
+
         conc = vert * cover[None, :, :]  # 規格化ガウス濃度（ピーク=1）
 
         # 横方向ストラグル: 面内ガウスで濃度をにじませ、マスク端の下へ回り込む
@@ -929,6 +952,8 @@ class Implant(Process):
             "straggle_um": self.straggle_um,
             "lateral_straggle_um": self.lateral_straggle_um,
             "threshold": self.threshold,
+            "channeling_fraction": self.channeling_fraction,
+            "tail_decay_um": self.tail_decay_um,
         }
 
     @classmethod
@@ -939,6 +964,8 @@ class Implant(Process):
             straggle_um=float(d.get("straggle_um", 0.1)),
             lateral_straggle_um=float(d.get("lateral_straggle_um", 0.0)),
             threshold=float(d.get("threshold", 0.3247)),
+            channeling_fraction=float(d.get("channeling_fraction", 0.0)),
+            tail_decay_um=float(d.get("tail_decay_um", 0.0)),
         )
 
 

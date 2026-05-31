@@ -489,6 +489,14 @@ class ProcessDialog(QtWidgets.QDialog):
             self.form.addRow("投影飛程 Rp (µm)", self.range_um)
             self.straggle = _spin(getattr(e, "straggle_um", 0.1), 0.01, 5.0, 0.05, 3)
             self.form.addRow("飛程ばらつき σ (µm)", self.straggle)
+            self.channeling = _spin(
+                getattr(e, "channeling_fraction", 0.0), 0.0, 1.0, 0.05, 2
+            )
+            self.form.addRow("チャネリング裾比", self.channeling)
+            self.tail_decay = _spin(
+                getattr(e, "tail_decay_um", 0.0), 0.0, 10.0, 0.05, 3
+            )
+            self.form.addRow("裾減衰長 (µm, 0=Rp×0.5)", self.tail_decay)
             note = QtWidgets.QLabel("Rp を中心に埋込ドープ（レジストで遮蔽）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -698,6 +706,8 @@ class ProcessDialog(QtWidgets.QDialog):
                 dopant=self.dopant.currentData(),
                 range_um=self.range_um.value(),
                 straggle_um=self.straggle.value(),
+                channeling_fraction=self.channeling.value(),
+                tail_decay_um=self.tail_decay.value(),
             )
         if t == "ANNEAL":
             return Anneal(depth_um=self.depth.value())
