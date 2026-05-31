@@ -26,6 +26,10 @@ class Recipe:
     config: WaferConfig = field(default_factory=WaferConfig)
     steps: list[Process] = field(default_factory=list)
     max_snapshots: int = DEFAULT_MAX_SNAPSHOTS
+    # レシピのメタデータ（任意。保存/読込でラウンドトリップする）。
+    name: str = ""
+    description: str = ""
+    author: str = ""
     # 各ステップ適用後のグリッドのスナップショット（増分計算用キャッシュ）。
     # index i = steps[0..i] を適用済みのグリッド。古いものは None で解放され得る。
     _snapshots: list[np.ndarray | None] = field(
@@ -119,6 +123,9 @@ class Recipe:
     def to_dict(self) -> dict:
         return {
             "format_version": FORMAT_VERSION,
+            "name": self.name,
+            "description": self.description,
+            "author": self.author,
             "config": self.config.to_dict(),
             "steps": [s.to_dict() for s in self.steps],
         }
@@ -135,7 +142,13 @@ class Recipe:
             )
         config = WaferConfig.from_dict(d.get("config", {}))
         steps = [Process.from_dict(s) for s in d.get("steps", [])]
-        return cls(config=config, steps=steps)
+        return cls(
+            config=config,
+            steps=steps,
+            name=str(d.get("name", "")),
+            description=str(d.get("description", "")),
+            author=str(d.get("author", "")),
+        )
 
     def save(self, path: str) -> None:
         with open(path, "w", encoding="utf-8") as f:
