@@ -50,6 +50,22 @@ pip install -e ".[dev]"
 py main.py
 ```
 
+### コマンドライン（GUI 不要）
+
+レシピ JSON や組み込みプリセットをヘッドレスで実行し、計測レポートを表示できます。
+CI やバッチ処理に便利です。
+
+```powershell
+# プリセットを実行してレポート表示
+py -m semisim --preset "MOSFET フロー"
+
+# プリセット一覧
+py -m semisim --list-presets
+
+# レシピ JSON を実行し、レポート・STL・断面 PNG を出力
+py -m semisim recipe.json --report out.txt --stl shape.stl --png slice.png
+```
+
 ## テスト
 
 エンジン部は GUI なしで完全にテストできます（pytest）。

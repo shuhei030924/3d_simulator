@@ -74,6 +74,27 @@ def test_diffusion_creates_doped_region(wafer):
     assert (wafer.grid == materials.get("doped_n").id).any()
 
 
+def test_diffusion_lateral_factor_widens(wafer):
+    from semisim.recipe import Recipe
+
+    base = Recipe(config=wafer.config)
+    base.add(Diffusion(dopant="doped_n", depth_um=0.5, lateral_factor=0.0))
+    narrow = base.simulate()
+    wide_r = Recipe(config=wafer.config)
+    wide_r.add(Diffusion(dopant="doped_n", depth_um=0.5, lateral_factor=1.0))
+    wide = wide_r.simulate()
+    dop = materials.get("doped_n").id
+    # 横方向係数を上げると拡散層のボクセル数が増える
+    assert int((wide.grid == dop).sum()) > int((narrow.grid == dop).sum())
+
+
+def test_diffusion_lateral_factor_roundtrip():
+    d = Diffusion(dopant="doped_p", depth_um=0.4, lateral_factor=0.5)
+    restored = Diffusion._from_params(d.params_dict())
+    assert restored.lateral_factor == 0.5
+    assert restored.dopant == "doped_p"
+
+
 def test_oxidation_consumes_silicon(wafer):
     si_before = int((wafer.grid == materials.get("silicon").id).sum())
     Oxidation(thickness_um=0.3).apply(wafer)

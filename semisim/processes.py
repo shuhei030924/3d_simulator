@@ -401,6 +401,8 @@ class Diffusion(Process):
 
     dopant: str = "doped_n"  # doped_n / doped_p
     depth_um: float = 0.6
+    # 横方向広がり = 縦方向拡散深さ × lateral_factor（拡散の等方性の簡易係数）
+    lateral_factor: float = 1.0 / 3.0
 
     def summary(self) -> str:
         m = materials.get(self.dopant)
@@ -435,21 +437,26 @@ class Diffusion(Process):
             work_top[sel_y, sel_x] -= 1
 
         # 横方向の広がり（拡散の等方性を簡易表現）。
-        # 経験的に縦方向拡散の約 1/3 を横方向広がりとする（簡易モデル）。
-        lat = max(0, depth // 3)
+        # 縦方向拡散深さに lateral_factor を掛けた量を横方向広がりとする。
+        lat = max(0, int(round(depth * self.lateral_factor)))
         if lat > 0 and converted.any():
             grown = _isotropic_dilate(converted, lat)
             spread = grown & (grid == si_id)
             grid[spread] = dop_id
 
     def params_dict(self) -> dict:
-        return {"dopant": self.dopant, "depth_um": self.depth_um}
+        return {
+            "dopant": self.dopant,
+            "depth_um": self.depth_um,
+            "lateral_factor": self.lateral_factor,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> Diffusion:
         return cls(
             dopant=d.get("dopant", "doped_n"),
             depth_um=float(d.get("depth_um", 0.6)),
+            lateral_factor=float(d.get("lateral_factor", 1.0 / 3.0)),
         )
 
 
