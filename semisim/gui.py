@@ -454,6 +454,12 @@ class ProcessDialog(QtWidgets.QDialog):
             self.form.addRow("軟材料(ディッシング)", self.soft_material)
             self.dishing = _spin(getattr(e, "dishing_um", 0.0), 0.0, 5.0, 0.05, 3)
             self.form.addRow("ディッシング量 (µm)", self.dishing)
+            self.erosion = _spin(getattr(e, "erosion_um", 0.0), 0.0, 5.0, 0.05, 3)
+            self.form.addRow("エロージョン量 (µm)", self.erosion)
+            self.density_radius = _spin(
+                getattr(e, "density_radius_um", 1.0), 0.1, 20.0, 0.1, 2
+            )
+            self.form.addRow("密度平均半径 (µm)", self.density_radius)
             note = QtWidgets.QLabel("最も高い点から指定量削り、上面を水平にします。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -703,6 +709,8 @@ class ProcessDialog(QtWidgets.QDialog):
                 stop_material=self.stop_material.currentData(),
                 soft_material=self.soft_material.currentData(),
                 dishing_um=self.dishing.value(),
+                erosion_um=self.erosion.value(),
+                density_radius_um=self.density_radius.value(),
             )
         if t == "OXIDE":
             return Oxidation(thickness_um=self.thick.value(), beak_fraction=self.beak.value())

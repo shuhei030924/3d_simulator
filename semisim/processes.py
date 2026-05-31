@@ -740,17 +740,26 @@ class CMP(Process):
     stop_material: str = ""
     soft_material: str = ""
     dishing_um: float = 0.0
+    # パターン密度依存エロージョン: 軟材料（Cu 等）が密集する領域ほど
+    # 余分に削れる。erosion_um は密度=1 のときの追加除去量、
+    # density_radius_um は密度を平均する近傍半径。
+    erosion_um: float = 0.0
+    density_radius_um: float = 1.0
 
     def summary(self) -> str:
         stop = f"  停止層={self.stop_material}" if self.stop_material else ""
         dish = ""
         if self.soft_material and self.dishing_um > 0:
             dish = f"  ディッシング{self.dishing_um:.2f}µm({self.soft_material})"
-        return f"CMP  上面から{self.remove_um:.2f}µm研磨し平坦化{stop}{dish}"
+        ero = ""
+        if self.soft_material and self.erosion_um > 0:
+            ero = f"  エロージョン{self.erosion_um:.2f}µm"
+        return f"CMP  上面から{self.remove_um:.2f}µm研磨し平坦化{stop}{dish}{ero}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.remove_um, "研磨量")
         _require_non_negative(self.dishing_um, "ディッシング量")
+        _require_non_negative(self.erosion_um, "エロージョン量")
         grid = wafer.grid
         nz = grid.shape[0]
         z_top = wafer.top_surface_z()
@@ -787,12 +796,38 @@ class CMP(Process):
                 is_soft = grid[zt, ys, xs] == soft_id
                 grid[zt[is_soft], ys[is_soft], xs[is_soft]] = materials.AIR
 
+        # パターン密度依存エロージョン: 軟材料が密集する領域ほど余計に削れる。
+        # 近傍の軟材料存在率（局所密度）に比例して追加除去する。
+        if self.soft_material and self.erosion_um > 0:
+            soft_id = materials.get(self.soft_material).id
+            soft2d = np.any(grid == soft_id, axis=0).astype(np.float32)
+            if soft2d.any():
+                rad = max(1, wafer.um_to_vox(self.density_radius_um))
+                density = ndimage.uniform_filter(
+                    soft2d, size=2 * rad + 1, mode="nearest"
+                )
+                ero = wafer.um_to_vox(self.erosion_um)
+                depth_map = np.round(ero * density).astype(int)  # (ny, nx)
+                max_d = int(depth_map.max())
+                for _ in range(max_d):
+                    z_top2 = wafer.top_surface_z()
+                    ys, xs = np.nonzero((z_top2 >= 0) & (depth_map > 0))
+                    if ys.size == 0:
+                        break
+                    zt = z_top2[ys, xs]
+                    is_soft = grid[zt, ys, xs] == soft_id
+                    sel_y, sel_x, sel_z = ys[is_soft], xs[is_soft], zt[is_soft]
+                    grid[sel_z, sel_y, sel_x] = materials.AIR
+                    depth_map[sel_y, sel_x] -= 1
+
     def params_dict(self) -> dict:
         return {
             "remove_um": self.remove_um,
             "stop_material": self.stop_material,
             "soft_material": self.soft_material,
             "dishing_um": self.dishing_um,
+            "erosion_um": self.erosion_um,
+            "density_radius_um": self.density_radius_um,
         }
 
     @classmethod
@@ -802,6 +837,8 @@ class CMP(Process):
             stop_material=d.get("stop_material", ""),
             soft_material=d.get("soft_material", ""),
             dishing_um=float(d.get("dishing_um", 0.0)),
+            erosion_um=float(d.get("erosion_um", 0.0)),
+            density_radius_um=float(d.get("density_radius_um", 1.0)),
         )
 
 
