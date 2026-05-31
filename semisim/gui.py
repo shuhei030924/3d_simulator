@@ -499,9 +499,27 @@ class ProcessDialog(QtWidgets.QDialog):
         elif t == "OXIDE":
             self.thick = _spin(getattr(e, "thickness_um", 0.3), 0.05, 20.0, 0.1)
             self.form.addRow("酸化膜厚 (µm)", self.thick)
+            self.consume = _spin(
+                getattr(e, "consume_fraction", 0.45), 0.0, 0.95, 0.05, 2
+            )
+            self.form.addRow("Si 消費比", self.consume)
             self.beak = _spin(getattr(e, "beak_fraction", 0.0), 0.0, 3.0, 0.1, 2)
             self.form.addRow("バーズビーク比", self.beak)
-            note = QtWidgets.QLabel("露出シリコンを熱酸化します（Si を一部消費）。")
+            # Deal-Grove モード（time_min>0 で膜厚を物理計算）
+            self.ox_time = _spin(getattr(e, "time_min", 0.0), 0.0, 6000.0, 5.0, 1)
+            self.form.addRow("酸化時間 (分, 0=厚さ指定)", self.ox_time)
+            self.ox_temp = _spin(
+                getattr(e, "temperature_c", 1000.0), 600.0, 1300.0, 10.0, 0
+            )
+            self.form.addRow("酸化温度 (℃)", self.ox_temp)
+            self.ox_ambient = QtWidgets.QComboBox()
+            self.ox_ambient.addItems(["dry", "wet"])
+            self.ox_ambient.setCurrentText(getattr(e, "ambient", "dry"))
+            self.form.addRow("雰囲気", self.ox_ambient)
+            note = QtWidgets.QLabel(
+                "露出シリコンを熱酸化します（Si を一部消費）。"
+                "時間>0 で Deal-Grove により膜厚を自動計算。"
+            )
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
@@ -801,7 +819,14 @@ class ProcessDialog(QtWidgets.QDialog):
         if t == "BACKGRIND":
             return Backgrind(thin_um=self.thin.value())
         if t == "OXIDE":
-            return Oxidation(thickness_um=self.thick.value(), beak_fraction=self.beak.value())
+            return Oxidation(
+                thickness_um=self.thick.value(),
+                consume_fraction=self.consume.value(),
+                beak_fraction=self.beak.value(),
+                time_min=self.ox_time.value(),
+                temperature_c=self.ox_temp.value(),
+                ambient=self.ox_ambient.currentText(),
+            )
         if t == "SALICIDE":
             return Silicidation(
                 thickness_um=self.thick.value(),
