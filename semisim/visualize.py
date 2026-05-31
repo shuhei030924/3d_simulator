@@ -33,19 +33,26 @@ def build_image_data(wafer: Wafer) -> pv.ImageData:
     return img
 
 
-def solid_unstructured(wafer: Wafer, include_resist: bool = True) -> pv.UnstructuredGrid:
+def solid_unstructured(
+    wafer: Wafer,
+    include_resist: bool = True,
+    hidden_ids: list[int] | None = None,
+) -> pv.UnstructuredGrid:
     """空気を除いた固体セルだけの UnstructuredGrid を返す。
 
     include_resist=False の場合、フォトレジストも除外する。
+    hidden_ids に材料 ID を渡すと、その材料も非表示（空気扱い）にする。
     """
     grid = wafer.grid
-    if include_resist:
-        scal = grid
-    else:
-        resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
+    hide = set(int(i) for i in (hidden_ids or []))
+    if not include_resist:
+        hide.update(m.id for m in materials.all_materials() if m.is_resist)
+    if hide:
         scal = grid.copy()
-        for rid in resist_ids:
+        for rid in hide:
             scal[scal == rid] = materials.AIR
+    else:
+        scal = grid
 
     img = pv.ImageData(
         dimensions=(grid.shape[2] + 1, grid.shape[1] + 1, grid.shape[0] + 1),
@@ -58,7 +65,11 @@ def solid_unstructured(wafer: Wafer, include_resist: bool = True) -> pv.Unstruct
 
 
 def slice_2d(
-    wafer: Wafer, axis: str, index: int, include_resist: bool = True
+    wafer: Wafer,
+    axis: str,
+    index: int,
+    include_resist: bool = True,
+    hidden_ids: list[int] | None = None,
 ) -> tuple[np.ndarray, float, float]:
     """断面の 2D 材料 ID 配列と物理サイズ (横µm, 縦µm) を返す。
 
@@ -66,6 +77,7 @@ def slice_2d(
     axis="Y": y=index で切った XZ 断面 (縦=Z, 横=X)
     axis="Z": z=index で切った XY 断面 (縦=Y, 横=X)
     返す配列は表示用に縦軸が下から上（Z は下が基板）になるよう整える。
+    hidden_ids に材料 ID を渡すとその材料は空気として表示から除外する。
     """
     grid = wafer.grid  # [z, y, x]
     nz, ny, nx = grid.shape
@@ -85,10 +97,11 @@ def slice_2d(
         width_um, height_um = nx * p, ny * p
 
     plane = plane.copy()
+    hide = set(int(i) for i in (hidden_ids or []))
     if not include_resist:
-        for m in materials.all_materials():
-            if m.is_resist:
-                plane[plane == m.id] = materials.AIR
+        hide.update(m.id for m in materials.all_materials() if m.is_resist)
+    for rid in hide:
+        plane[plane == rid] = materials.AIR
     return plane, width_um, height_um
 
 
@@ -104,8 +117,15 @@ def material_listed_cmap():
     return cmap, norm
 
 
-def export_stl(wafer: Wafer, path: str, include_resist: bool = True) -> None:
+def export_stl(
+    wafer: Wafer,
+    path: str,
+    include_resist: bool = True,
+    hidden_ids: list[int] | None = None,
+) -> None:
     """固体形状の外表面を三角形メッシュ化して STL に書き出す（形状のみ）。"""
-    solid = solid_unstructured(wafer, include_resist=include_resist)
+    solid = solid_unstructured(
+        wafer, include_resist=include_resist, hidden_ids=hidden_ids
+    )
     surface = solid.extract_surface().triangulate()
     surface.save(path)

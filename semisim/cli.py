@@ -51,6 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="STL/PNG 出力時にレジストを除外",
     )
     p.add_argument(
+        "--hide",
+        metavar="MATERIALS",
+        help="STL/PNG 出力時に非表示にする材料名（カンマ区切り）。例: 'oxide,poly'",
+    )
+    p.add_argument(
         "--sweep",
         metavar="SPEC",
         help=(
@@ -82,13 +87,30 @@ def _load_recipe(args: argparse.Namespace) -> Recipe:
     return Recipe.load(args.recipe)
 
 
-def _export_stl(wafer, path: str, include_resist: bool) -> None:
+def _hidden_ids(spec: str | None) -> list:
+    """'oxide,poly' のような材料名カンマ区切りを材料 ID リストに変換する。"""
+    if not spec:
+        return []
+    from . import materials
+
+    ids = []
+    for name in spec.split(","):
+        name = name.strip()
+        if not name:
+            continue
+        ids.append(materials.get(name).id)
+    return ids
+
+
+def _export_stl(wafer, path: str, include_resist: bool, hidden_ids=None) -> None:
     from . import visualize  # 遅延 import（pyvista 依存を必須にしない）
 
-    visualize.export_stl(wafer, path, include_resist=include_resist)
+    visualize.export_stl(
+        wafer, path, include_resist=include_resist, hidden_ids=hidden_ids
+    )
 
 
-def _export_png(wafer, path: str, include_resist: bool) -> None:
+def _export_png(wafer, path: str, include_resist: bool, hidden_ids=None) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -96,7 +118,13 @@ def _export_png(wafer, path: str, include_resist: bool) -> None:
 
     from . import visualize
 
-    plane, ww, hh = visualize.slice_2d(wafer, "Y", wafer.config.ny // 2)
+    plane, ww, hh = visualize.slice_2d(
+        wafer,
+        "Y",
+        wafer.config.ny // 2,
+        include_resist=include_resist,
+        hidden_ids=hidden_ids,
+    )
     cmap, norm = visualize.material_listed_cmap()
     fig, ax = plt.subplots(figsize=(5, 4), dpi=120)
     ax.imshow(
@@ -255,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     print(report)
 
     include_resist = not args.no_resist
+    hidden = _hidden_ids(args.hide)
     if args.report:
         with open(args.report, "w", encoding="utf-8") as f:
             f.write(report)
@@ -264,10 +293,10 @@ def main(argv: list[str] | None = None) -> int:
             json.dump(metrology.summary(wafer), f, ensure_ascii=False, indent=2)
         print(f"JSON レポートを保存しました: {args.json_report}", file=sys.stderr)
     if args.stl:
-        _export_stl(wafer, args.stl, include_resist)
+        _export_stl(wafer, args.stl, include_resist, hidden)
         print(f"STL を保存しました: {args.stl}", file=sys.stderr)
     if args.png:
-        _export_png(wafer, args.png, include_resist)
+        _export_png(wafer, args.png, include_resist, hidden)
         print(f"PNG を保存しました: {args.png}", file=sys.stderr)
     if args.csv_column:
         from . import export

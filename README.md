@@ -70,6 +70,9 @@ py -m semisim recipe.json --report out.txt --stl shape.stl --png slice.png
 # 中央列の縦方向材料スタックを CSV 出力（依存なし、SEM/TEM 断面比較用）
 py -m semisim --preset "MOSFET フロー" --csv-column column.csv
 
+# 特定材料を非表示にして PNG/STL 出力（例: 酸化膜を隠して下層を確認）
+py -m semisim --preset "MOSFET フロー" --png cs.png --hide oxide,poly
+
 # 2 パラメータ同時採引（実験計画法）。全組合せの計測値を CSV 出力
 py -m semisim recipe.json --sweep2 "4.depth_um:0.3:0.7:0.2,5.taper_deg:0:30:15"
 
