@@ -613,6 +613,10 @@ class ProcessDialog(QtWidgets.QDialog):
             self.form.addRow("塗布材料", self.material)
             self.cap = _spin(getattr(e, "cap_um", 0.3), 0.0, 10.0, 0.05, 3)
             self.form.addRow("キャップ厚 (µm)", self.cap)
+            self.planarization = _spin(
+                getattr(e, "planarization", 1.0), 0.0, 1.0, 0.05, 2
+            )
+            self.form.addRow("平坦化度 (1=完全)", self.planarization)
             note = QtWidgets.QLabel("スピンオンで全面を覆い上面を平坦化（SOG/SOD）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
@@ -777,6 +781,7 @@ class ProcessDialog(QtWidgets.QDialog):
             return SpinCoat(
                 material=self.material.currentData(),
                 cap_um=self.cap.value(),
+                planarization=self.planarization.value(),
             )
         if t == "LIFTOFF":
             return LiftOff()

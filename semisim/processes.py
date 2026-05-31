@@ -1501,38 +1501,54 @@ class SpinCoat(Process):
 
     material: str = "low_k"
     cap_um: float = 0.3
+    # 平坦化度 DOP（0〜1）。1=完全平坦（最高点で一律）、0=コンフォーマル
+    # （表面形状に追従）。実際の SOG/SOD は中間で、広い窪みほど平坦化が
+    # 不完全になる現象の一次近似。
+    planarization: float = 1.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
-        return f"SPINON  {m.label}  上面+{self.cap_um:.2f}µm平坦化"
+        dp = "" if self.planarization >= 0.999 else f"  DOP{self.planarization:.2f}"
+        return f"SPINON  {m.label}  上面+{self.cap_um:.2f}µm平坦化{dp}"
 
     def apply(self, wafer: Wafer) -> None:
         _require_non_negative(self.cap_um, "キャップ厚")
+        _require_range(self.planarization, 0.0, 1.0, "平坦化度")
         grid = wafer.grid
         nz = grid.shape[0]
         mat_id = materials.get(self.material).id
         z_top = wafer.top_surface_z()
         if int(z_top.max()) < 0:
             return
-        # 最も高い表面 + cap の高さまで、各列の空気を埋めて平坦化する。
-        # スピンオンはウェハ全面を覆うため、固体が無い列も含めて埋める。
-        level = min(nz - 1, int(z_top.max()) + wafer.um_to_vox(self.cap_um))
+        cap = wafer.um_to_vox(self.cap_um)
+        dop = float(np.clip(self.planarization, 0.0, 1.0))
+        # 完全平坦レベル（最高点 + cap）とコンフォーマル上面（各列 + cap）を
+        # DOP で線形補間して、列ごとの充填上面を決める。
+        flat_level = min(nz - 1, int(z_top.max()) + cap)
+        conformal_top = z_top + cap  # 各列の追従上面
+        fill_top = np.round(dop * flat_level + (1.0 - dop) * conformal_top)
+        fill_top = np.clip(fill_top, 0, nz - 1).astype(int)
         z_idx = np.arange(nz)[:, None, None]
         deposit = (
             (z_idx > z_top[None, :, :])
-            & (z_idx <= level)
+            & (z_idx <= fill_top[None, :, :])
             & (grid == materials.AIR)
         )
         grid[deposit] = mat_id
 
     def params_dict(self) -> dict:
-        return {"material": self.material, "cap_um": self.cap_um}
+        return {
+            "material": self.material,
+            "cap_um": self.cap_um,
+            "planarization": self.planarization,
+        }
 
     @classmethod
     def _from_params(cls, d: dict) -> SpinCoat:
         return cls(
             material=d.get("material", "low_k"),
             cap_um=float(d.get("cap_um", 0.3)),
+            planarization=float(d.get("planarization", 1.0)),
         )
 
 

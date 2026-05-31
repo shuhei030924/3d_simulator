@@ -153,7 +153,7 @@ py tools\render_gallery.py
 | KOH | `side_wall_angle_deg` | 結晶面に沿う側壁角（既定 54.7°、(100)Si を想定） |
 | FILL | `overfill_um` | 充填の盛り上げ量。ボトムアップで開口/トレンチを充填 |
 | FILL | `void_ar` | キーホール空隙の AR しきい値（0=無効）。深さ/幅がこれを超える狭いトレンチ中心にボイドが残る |
-| SPINON | `cap_um` | 最高点+キャップ厚まで全面を埋めて平坦化（FILL と違い空列も覆う） |
+| SPINON | `cap_um` / `planarization` | 最高点+キャップ厚まで全面を埋めて平坦化（FILL と違い空列も覆う）。`planarization`（0〜1, DOP）で平坦化度を調整（1=完全平坦、0=地形追従のコンフォーマル） |
 | DRIE | `scallop_pitch_um` | Bosch サイクルに対応するスキャロップ周期 |
 | DRIE | `lag` | RIE ラグ / ARDE（0〜1）。開口が狭いほどエッチが浅くなる（アスペクト比依存エッチ） |
 | DRIE | `redeposit_um` | 側壁再付着 / パシベーション（Bosch）。エッチ生成物がトレンチ側壁に再堆積して幅を狭める（0=無効） |
