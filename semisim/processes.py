@@ -1651,20 +1651,25 @@ class DRIE(Process):
     # 再付着 / 側壁パシベーション（Bosch プロセス）。エッチ生成物が
     # トレンチ側壁に再堆積してトレンチを狭める厚み（µm、0=無効）。
     redeposit_um: float = 0.0
+    # マイクロトレンチング（µm、0=無効）。側壁で反射したイオンがトレンチ
+    # 底の隅（フット）に集中し、開口周縁が局所的に深く掘れる現象を再現する。
+    microtrench_um: float = 0.0
 
     def summary(self) -> str:
         sc = "" if self.scallop_um <= 0 else f"  scallop{self.scallop_um:.2f}µm"
         lg = "" if self.lag <= 0 else f"  RIEラグ{self.lag:.0%}"
         rd = "" if self.redeposit_um <= 0 else f"  再付着{self.redeposit_um:.2f}µm"
+        mt = "" if self.microtrench_um <= 0 else f"  μトレンチ{self.microtrench_um:.2f}µm"
         return (
             f"DRIE  {materials.get(self.target).label}"
-            f"  深さ{self.depth_um:.2f}µm{sc}{lg}{rd}"
+            f"  深さ{self.depth_um:.2f}µm{sc}{lg}{rd}{mt}"
         )
 
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.depth_um, "深さ")
         _require_range(self.lag, 0.0, 1.0, "RIEラグ")
         _require_non_negative(self.redeposit_um, "再付着厚")
+        _require_non_negative(self.microtrench_um, "マイクロトレンチ深さ")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         target_id = materials.get(self.target).id
@@ -1717,6 +1722,24 @@ class DRIE(Process):
                 bulge = ring & (grid == target_id)
                 grid[bulge] = materials.AIR
 
+        # マイクロトレンチング: 側壁で反射したイオンが開口周縁（フット）に
+        # 集中し、その列だけ局所的に深く掘れる。開口の外周列を microtrench
+        # 分だけ余分にエッチする。
+        mt = wafer.um_to_vox(self.microtrench_um) if self.microtrench_um > 0 else 0
+        if mt > 0:
+            perim = opening & ~ndimage.binary_erosion(opening, border_value=0)
+            z_top, top_id = _top_material(wafer)
+            cols = perim & (z_top >= 0) & (top_id == target_id)
+            ys, xs = np.nonzero(cols)
+            for y, x in zip(ys.tolist(), xs.tolist()):
+                zt = int(z_top[y, x])
+                zlo = max(1, zt - mt + 1)  # 基板最下層は保護
+                for z in range(zt, zlo - 1, -1):
+                    if grid[z, y, x] == target_id:
+                        grid[z, y, x] = materials.AIR
+                    else:
+                        break
+
         # 再付着 / 側壁パシベーション: エッチ生成物がトレンチ側壁に
         # 再堆積してトレンチを狭める。底面より側壁を優先するため、
         # 水平（x,y）方向だけの距離で壁近傍の空気をターゲット材で埋める。
@@ -1745,6 +1768,7 @@ class DRIE(Process):
             "scallop_pitch_um": self.scallop_pitch_um,
             "lag": self.lag,
             "redeposit_um": self.redeposit_um,
+            "microtrench_um": self.microtrench_um,
         }
 
     @classmethod
@@ -1756,6 +1780,7 @@ class DRIE(Process):
             scallop_pitch_um=float(d.get("scallop_pitch_um", 0.5)),
             lag=float(d.get("lag", 0.0)),
             redeposit_um=float(d.get("redeposit_um", 0.0)),
+            microtrench_um=float(d.get("microtrench_um", 0.0)),
         )
 
 

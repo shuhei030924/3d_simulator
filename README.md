@@ -158,6 +158,7 @@ py tools\render_gallery.py
 | DRIE | `scallop_pitch_um` | Bosch サイクルに対応するスキャロップ周期 |
 | DRIE | `lag` | RIE ラグ / ARDE（0〜1）。開口が狭いほどエッチが浅くなる（アスペクト比依存エッチ） |
 | DRIE | `redeposit_um` | 側壁再付着 / パシベーション（Bosch）。エッチ生成物がトレンチ側壁に再堆積して幅を狭める（0=無効） |
+| DRIE | `microtrench_um` | マイクロトレンチング。側壁反射イオンが集中するトレンチ底の隅（フット）が局所的に深く掘れる（0=無効） |
 | SPUTTER | `depth_um` / `isotropic` | 物理ミリング量と横方向成分（0=純垂直 / 1=深さと同等のアンダーカット）。基板最下層は保護 |
 | CLEAN | `target` / `thickness_um` | 対象材料を表面から等方的に薄く除去 |
 | REFLOW | `target` / `radius_um` | 平滑化半径。モルフォロジ処理で角を丸める |
