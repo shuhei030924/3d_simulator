@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semisim 半導体プロセス 3D シミュレータ 使い方説明書</title>
+<style>
+ :root { --fg:#1c2530; --muted:#5a6b7b; --line:#dce3ea; --accent:#2d6cdf; --bg:#f6f8fb; }
+ * { box-sizing:border-box; }
+ body { font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;
+   margin:0; color:var(--fg); background:var(--bg); line-height:1.7; }
+ header { background:linear-gradient(120deg,#1f3b6e,#2d6cdf); color:#fff; padding:32px 24px; }
+ header h1 { margin:0 0 6px; font-size:26px; }
+ header p { margin:0; opacity:.9; }
+ .layout { display:flex; max-width:1180px; margin:0 auto; }
+ nav { width:240px; flex:0 0 240px; padding:24px 16px; position:sticky; top:0;
+   align-self:flex-start; max-height:100vh; overflow:auto; }
+ nav h2 { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+ nav a { display:block; color:var(--fg); text-decoration:none; padding:4px 8px;
+   border-radius:6px; font-size:14px; }
+ nav a:hover { background:#e7eef9; color:var(--accent); }
+ nav .cat { margin-top:14px; font-weight:700; font-size:13px; color:var(--muted); }
+ main { flex:1; padding:24px; min-width:0; }
+ section { background:#fff; border:1px solid var(--line); border-radius:12px;
+   padding:22px 24px; margin-bottom:22px; }
+ section h2 { margin-top:0; font-size:20px; border-bottom:2px solid var(--accent);
+   padding-bottom:8px; display:inline-block; }
+ .cat-badge { display:inline-block; background:#e7eef9; color:var(--accent);
+   font-size:12px; padding:2px 10px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+ img { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-top:12px; background:#fff; }
+ table.param { border-collapse:collapse; margin:14px 0; width:100%; }
+ table.param th, table.param td { border:1px solid var(--line); padding:6px 10px;
+   text-align:left; font-size:14px; }
+ table.param th { background:#f0f4f9; }
+ pre { background:#0f1b2d; color:#dbe7f5; padding:14px 16px; border-radius:8px;
+   overflow:auto; font-size:13px; }
+ code { font-family:"Cascadia Code","Consolas",monospace; }
+ p code, td code { background:#eef2f7; color:#244; padding:1px 5px; border-radius:4px; }
+ .intro code { background:#eef2f7; }
+ footer { text-align:center; color:var(--muted); padding:24px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+ <h1>semisim — 半導体プロセス 3D シミュレータ 使い方説明書</h1>
+ <p>各プロセス操作の断面スクリーンショットと説明・パラメータ・コード例</p>
+</header>
+<div class="layout">
+<nav>
+ <h2>目次</h2>
+ <a href="#intro">はじめに / 起動方法</a>
+ <div class="cat">基礎</div>
+ <a href="#substrate">ウェハ基板</a>
+ <div class="cat">リソグラフィ</div>
+ <a href="#photo">フォトリソグラフィ (Photo)</a>
+ <div class="cat">成膜</div>
+ <a href="#cvd">CVD 成膜 (CVD)</a>
+ <a href="#ald">ALD 成膜 (ALD)</a>
+ <a href="#pvd">PVD 成膜 (PVD)</a>
+ <a href="#spacer">サイドウォールスペーサ (Spacer)</a>
+ <div class="cat">エッチング</div>
+ <a href="#dryetch">ドライエッチング (DryEtch)</a>
+ <a href="#wetetch">ウェットエッチング (WetEtch)</a>
+ <a href="#anisowet">結晶異方性ウェット (AnisoWetEtch)</a>
+ <a href="#drie">深掘り RIE / Bosch (DRIE)</a>
+ <div class="cat">ドーピング・熱処理</div>
+ <a href="#oxidation">熱酸化 (Oxidation)</a>
+ <a href="#implant">イオン注入 (Implant)</a>
+ <a href="#anneal">アニール / 拡散 (Anneal)</a>
+ <div class="cat">成膜</div>
+ <a href="#epitaxy">エピタキシャル成長 (Epitaxy)</a>
+ <div class="cat">平坦化・配線</div>
+ <a href="#damascene">ダマシン配線 + CMP ディッシング (Fill / CMP)</a>
+ <a href="#liftoff">リフトオフ (LiftOff)</a>
+ <a href="#defect">不良モード検証</a>
+ <a href="#output">出力・レポート</a>
+</nav>
+<main>
+ <section id="intro" class="intro">
+  <h2>はじめに / 起動方法</h2>
+  <p><strong>semisim</strong> は半導体の前工程（成膜・リソグラフィ・エッチング・
+  ドーピング・平坦化など）を 3D ボクセル格子上で再現し、断面や 3D 形状を可視化、
+  さらに各種メトロロジで不良モードを定量検証できるシミュレータです。</p>
+  <table class="param">
+   <tr><th>用途</th><th>コマンド</th></tr>
+   <tr><td>GUI 起動（対話的にレシピ作成・3D 表示）</td><td><code>py main.py</code></td></tr>
+   <tr><td>CLI でレシピ実行＋断面 PNG 出力</td><td><code>py -m semisim.cli recipe.json --slice out.png</code></td></tr>
+   <tr><td>JSON メトロロジ／不良レポート出力</td><td><code>py -m semisim.cli recipe.json --json-report report.json</code></td></tr>
+   <tr><td>Python API でレシピ構築</td><td><code>Recipe(config=...).add(Process(...)).simulate()</code></td></tr>
+  </table>
+  <p>以下、代表的なプロセス操作ごとに、実際の出力断面（中央 Y 断面 = XZ 面、"
+  横が x・縦が z で下が基板）と説明を示します。</p>
+ </section>
+ 
+ <section id="substrate">
+  <h2>ウェハ基板<span class="cat-badge">基礎</span></h2>
+  <p>シミュレーションは 3D ボクセル格子（[z, y, x]）で表現します。最下部にシリコン基板があり、その上に各プロセスで材料を積み上げ／削っていきます。下の図は中央 Y 断面（XZ 面）で、横が x、縦が z（下が基板）です。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>nx, ny, nz</code></td><td>格子分割数</td></tr><tr><td><code>pitch_um</code></td><td>1 ボクセルの一辺[µm]</td></tr><tr><td><code>substrate_um</code></td><td>初期シリコン基板厚[µm]</td></tr></table>
+  <pre><code>from semisim.grid import WaferConfig
+from semisim.recipe import Recipe
+cfg = WaferConfig(nx=200, ny=20, nz=140, pitch_um=0.04, substrate_um=2.0)
+wafer = Recipe(config=cfg).simulate()</code></pre>
+  <img src="img/substrate.png" alt="ウェハ基板">
+ </section>
+
+ <section id="photo">
+  <h2>フォトリソグラフィ (Photo)<span class="cat-badge">リソグラフィ</span></h2>
+  <p>フォトレジストを塗布し、マスクパターンで露光・現像してレジストをパターニングします。positive では開口部（露光部）のレジストが除去され、negative では逆になります。後続のエッチ／注入のマスクになります。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>mask</code></td><td>マスク形状(rect/grating など)</td></tr><tr><td><code>thickness_um</code></td><td>レジスト膜厚[µm]</td></tr><tr><td><code>polarity</code></td><td>positive / negative</td></tr></table>
+  <pre><code>from semisim.processes import Photo
+from semisim.masks import Mask, Shape
+mask = Mask(shapes=[Shape(&#x27;grating&#x27;, {&#x27;angle&#x27;:90,&#x27;period&#x27;:0.6,&#x27;width&#x27;:0.3})])
+r.add(Photo(mask=mask, thickness_um=0.8, polarity=&#x27;positive&#x27;))</code></pre>
+  <img src="img/photo.png" alt="フォトリソグラフィ (Photo)">
+ </section>
+
+ <section id="cvd">
+  <h2>CVD 成膜 (CVD)<span class="cat-badge">成膜</span></h2>
+  <p>化学気相成長。表面から等方的に材料を堆積します。段差があってもほぼ一様な膜厚で覆い（コンフォーマル）、トレンチ内壁にも回り込みます。下図はトレンチ付き酸化膜の上に窒化膜を CVD した断面です。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>material</code></td><td>成膜材料</td></tr><tr><td><code>thickness_um</code></td><td>膜厚[µm]</td></tr><tr><td><code>conformality</code></td><td>段差被覆性(1=完全等方)</td></tr></table>
+  <pre><code>from semisim.processes import CVD
+r.add(CVD(material=&#x27;nitride&#x27;, thickness_um=0.2))</code></pre>
+  <img src="img/cvd.png" alt="CVD 成膜 (CVD)">
+ </section>
+
+ <section id="ald">
+  <h2>ALD 成膜 (ALD)<span class="cat-badge">成膜</span></h2>
+  <p>原子層堆積。1 サイクルごとに原子層 1 層を成長させ、nm 精度で膜厚を制御します。CVD より優れたコンフォーマル性で、高アスペクト比の溝でも底まで均一に被覆します。High-k やバリア膜に用います。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>material</code></td><td>成膜材料(hafnia 等)</td></tr><tr><td><code>cycles</code></td><td>サイクル数</td></tr><tr><td><code>growth_per_cycle_nm</code></td><td>1 サイクル成長量[nm]</td></tr></table>
+  <pre><code>from semisim.processes import ALD
+r.add(ALD(material=&#x27;hafnia&#x27;, cycles=150, growth_per_cycle_nm=1.0))</code></pre>
+  <img src="img/ald.png" alt="ALD 成膜 (ALD)">
+ </section>
+
+ <section id="pvd">
+  <h2>PVD 成膜 (PVD)<span class="cat-badge">成膜</span></h2>
+  <p>スパッタ／蒸着による物理気相成長。指向性が強く、段差被覆性が悪いと上端にオーバーハング（庇）ができ、トレンチ側壁・底は薄くなります。step_coverage を下げるほど側壁被覆が悪化します。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>material</code></td><td>成膜材料</td></tr><tr><td><code>thickness_um</code></td><td>平坦部膜厚[µm]</td></tr><tr><td><code>step_coverage</code></td><td>側壁/底の被覆率(0〜1)</td></tr></table>
+  <pre><code>from semisim.processes import PVD
+r.add(PVD(material=&#x27;metal_al&#x27;, thickness_um=0.3, step_coverage=0.4))</code></pre>
+  <img src="img/pvd.png" alt="PVD 成膜 (PVD)">
+ </section>
+
+ <section id="spacer">
+  <h2>サイドウォールスペーサ (Spacer)<span class="cat-badge">成膜</span></h2>
+  <p>コンフォーマル成膜＋異方性エッチバックの組合せ。水平面の膜を除去し、段差（ゲート等）の垂直側壁にだけ材料を残します。LDD やゲートスペーサを自己整合的に作る代表プロセスです。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>material</code></td><td>スペーサ材料</td></tr><tr><td><code>thickness_um</code></td><td>スペーサ幅[µm]</td></tr><tr><td><code>overetch_um</code></td><td>オーバーエッチ量[µm]</td></tr></table>
+  <pre><code>from semisim.processes import Spacer
+r.add(Spacer(material=&#x27;nitride&#x27;, thickness_um=0.08))</code></pre>
+  <img src="img/spacer.png" alt="サイドウォールスペーサ (Spacer)">
+ </section>
+
+ <section id="dryetch">
+  <h2>ドライエッチング (DryEtch)<span class="cat-badge">エッチング</span></h2>
+  <p>プラズマによる異方性エッチング。ほぼ垂直な側壁の溝／ホールを形成します。レジスト開口部の直下のみが削れ、横方向にはほとんど広がりません。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>targets</code></td><td>エッチ対象材料リスト</td></tr><tr><td><code>depth_um</code></td><td>エッチ深さ[µm]</td></tr><tr><td><code>lateral_bias_um</code></td><td>横方向バイアス</td></tr><tr><td><code>arde_lag_um</code></td><td>ARDE/RIE ラグ</td></tr></table>
+  <pre><code>from semisim.processes import DryEtch
+r.add(DryEtch(targets=[&#x27;oxide&#x27;], depth_um=0.6))</code></pre>
+  <img src="img/dryetch.png" alt="ドライエッチング (DryEtch)">
+ </section>
+
+ <section id="wetetch">
+  <h2>ウェットエッチング (WetEtch)<span class="cat-badge">エッチング</span></h2>
+  <p>薬液による等方性エッチング。縦と同程度に横方向へも削れるため、マスク（レジスト）の下に回り込むアンダーカットが生じます。lateral_ratio で等方〜異方を連続調整できます。レジストを残したまま示しています。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>targets</code></td><td>エッチ対象材料</td></tr><tr><td><code>depth_um</code></td><td>エッチ深さ[µm]</td></tr><tr><td><code>lateral_ratio</code></td><td>横/縦エッチ比(1=完全等方)</td></tr></table>
+  <pre><code>from semisim.processes import WetEtch
+r.add(WetEtch(targets=[&#x27;oxide&#x27;], depth_um=0.5, lateral_ratio=1.0))</code></pre>
+  <img src="img/wetetch.png" alt="ウェットエッチング (WetEtch)">
+ </section>
+
+ <section id="anisowet">
+  <h2>結晶異方性ウェット (AnisoWetEtch)<span class="cat-badge">エッチング</span></h2>
+  <p>KOH/TMAH による結晶面依存エッチング。Si(100) では (111) 面が現れ、54.7° のテーパを持つ V 字溝／逆ピラミッドを形成します。MEMS のマイクロ構造作製に使います。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>target</code></td><td>エッチ対象(silicon)</td></tr><tr><td><code>depth_um</code></td><td>エッチ深さ[µm]</td></tr><tr><td><code>sidewall_angle_deg</code></td><td>側壁角(54.7°=Si(111))</td></tr></table>
+  <pre><code>from semisim.processes import AnisoWetEtch
+r.add(AnisoWetEtch(target=&#x27;silicon&#x27;, depth_um=1.6, sidewall_angle_deg=54.7))</code></pre>
+  <img src="img/anisowet.png" alt="結晶異方性ウェット (AnisoWetEtch)">
+ </section>
+
+ <section id="drie">
+  <h2>深掘り RIE / Bosch (DRIE)<span class="cat-badge">エッチング</span></h2>
+  <p>Bosch プロセスによる深掘りエッチ。エッチと側壁保護を交互に繰り返すため、側壁に特徴的なスキャロップ（扇状の凹凸）が残ります。高アスペクト比のTSV やトレンチに用います。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>target</code></td><td>エッチ対象</td></tr><tr><td><code>depth_um</code></td><td>深さ[µm]</td></tr><tr><td><code>scallop_um</code></td><td>スキャロップ深さ</td></tr><tr><td><code>scallop_pitch_um</code></td><td>スキャロップ周期</td></tr></table>
+  <pre><code>from semisim.processes import DRIE
+r.add(DRIE(target=&#x27;silicon&#x27;, depth_um=3.0, scallop_um=0.12, scallop_pitch_um=0.35))</code></pre>
+  <img src="img/drie.png" alt="深掘り RIE / Bosch (DRIE)">
+ </section>
+
+ <section id="oxidation">
+  <h2>熱酸化 (Oxidation)<span class="cat-badge">ドーピング・熱処理</span></h2>
+  <p>露出シリコンを熱酸化し SiO2 に変えます。SiO2 は元の Si より体積膨張するため、約 45% の Si を消費しつつ上方へ成長します。窒化膜マスク端では酸化膜が横に侵入する LOCOS の『バーズビーク』を再現します。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>thickness_um</code></td><td>酸化膜厚[µm]</td></tr><tr><td><code>consume_fraction</code></td><td>Si 消費比(≈0.45)</td></tr><tr><td><code>beak_fraction</code></td><td>バーズビーク横侵入比</td></tr><tr><td><code>time_min/temperature_c</code></td><td>Deal-Grove モード</td></tr></table>
+  <pre><code>from semisim.processes import Oxidation
+r.add(Oxidation(thickness_um=0.4, beak_fraction=0.8))</code></pre>
+  <img src="img/oxidation.png" alt="熱酸化 (Oxidation)">
+ </section>
+
+ <section id="implant">
+  <h2>イオン注入 (Implant)<span class="cat-badge">ドーピング・熱処理</span></h2>
+  <p>ドーパントイオンを加速して打ち込みます。飛程 Rp を中心にガウス分布（ストラグル）で濃度がピークを持ち、レジスト開口部だけがドープされます。下図は n 型注入層（doped_n）の埋め込み分布です。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>dopant</code></td><td>ドーパント(doped_n/doped_p)</td></tr><tr><td><code>range_um</code></td><td>飛程 Rp[µm]</td></tr><tr><td><code>straggle_um</code></td><td>縦方向ストラグル ΔRp[µm]</td></tr><tr><td><code>tilt_deg</code></td><td>注入チルト角</td></tr></table>
+  <pre><code>from semisim.processes import Implant
+r.add(Implant(dopant=&#x27;doped_n&#x27;, range_um=0.6, straggle_um=0.18))</code></pre>
+  <img src="img/implant.png" alt="イオン注入 (Implant)">
+ </section>
+
+ <section id="anneal">
+  <h2>アニール / 拡散 (Anneal)<span class="cat-badge">ドーピング・熱処理</span></h2>
+  <p>高温熱処理でドーパントを活性化し、濃度勾配に従って拡散させます（ドライブイン）。注入直後の急峻な分布が、時間 √(D·t) に比例して縦横へ広がります。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>depth_um</code></td><td>基準ドライブイン深さ[µm]</td></tr><tr><td><code>time_min</code></td><td>アニール時間[分]</td></tr><tr><td><code>temperature_c</code></td><td>温度[℃]</td></tr></table>
+  <pre><code>from semisim.processes import Anneal
+r.add(Anneal(depth_um=0.5, time_min=60, temperature_c=1050))</code></pre>
+  <img src="img/anneal.png" alt="アニール / 拡散 (Anneal)">
+ </section>
+
+ <section id="epitaxy">
+  <h2>エピタキシャル成長 (Epitaxy)<span class="cat-badge">成膜</span></h2>
+  <p>単結晶を下地の結晶情報を引き継いで成長させます。酸化膜上には成長せず、露出シリコン上にのみ選択的に成長する選択エピを再現します（SiGe ソースドレイン等）。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>material</code></td><td>エピ材料(epi_si 等)</td></tr><tr><td><code>thickness_um</code></td><td>成長厚[µm]</td></tr><tr><td><code>selective</code></td><td>選択成長フラグ</td></tr></table>
+  <pre><code>from semisim.processes import Epitaxy
+r.add(Epitaxy(material=&#x27;epi_si&#x27;, thickness_um=0.6))</code></pre>
+  <img src="img/epitaxy.png" alt="エピタキシャル成長 (Epitaxy)">
+ </section>
+
+ <section id="damascene">
+  <h2>ダマシン配線 + CMP ディッシング (Fill / CMP)<span class="cat-badge">平坦化・配線</span></h2>
+  <p>絶縁膜にトレンチを掘り、バリア(TiN)→Cu 充填→CMP 平坦化する銅配線形成です。CMP では軟らかい Cu が過研磨で<strong>皿状に凹むディッシング</strong>が起き、<strong>中央ほど深く・縁（絶縁膜際）ほど浅い凹面</strong>になり、<strong>配線幅が広いほど深く凹みます</strong>（左の太線が右の細線より深い）。実機の幅依存ディッシングを距離変換ベースの飽和プロファイルで再現しています。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>Fill.material</code></td><td>充填材料(metal_cu)</td></tr><tr><td><code>Fill.overfill_um</code></td><td>オーバーフィル量</td></tr><tr><td><code>CMP.dishing_um</code></td><td>最大ディッシング深さ[µm]</td></tr><tr><td><code>CMP.dishing_width_um</code></td><td>幅依存の特性幅[µm]</td></tr><tr><td><code>CMP.erosion_um</code></td><td>パターン密度エロージョン</td></tr></table>
+  <pre><code>from semisim.processes import Fill, CMP
+r.add(Fill(material=&#x27;metal_cu&#x27;, overfill_um=0.4))
+r.add(CMP(remove_um=0.5, stop_material=&#x27;oxide&#x27;,
+          soft_material=&#x27;metal_cu&#x27;, dishing_um=0.25, dishing_width_um=0.3))</code></pre>
+  <img src="img/damascene.png" alt="ダマシン配線 + CMP ディッシング (Fill / CMP)">
+ </section>
+
+ <section id="liftoff">
+  <h2>リフトオフ (LiftOff)<span class="cat-badge">平坦化・配線</span></h2>
+  <p>レジストパターン上に金属を成膜し、レジストを溶解除去すると、レジスト上の金属も一緒に剥がれ、開口部の金属だけが残ります。エッチしにくい金属の微細パターン形成に使います。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>(パラメータなし)</code></td><td>直前の PVD 膜とレジストから自動処理</td></tr></table>
+  <pre><code>from semisim.processes import LiftOff
+r.add(LiftOff())</code></pre>
+  <img src="img/liftoff.png" alt="リフトオフ (LiftOff)">
+ </section>
+ <section id="defect">
+  <h2>不良モード検証 (metrology)<span class="cat-badge">検証</span></h2>
+  <p>本シミュレータは主要な半導体不良モードを計測 (metrology) で検証できます。下図は段差被覆の悪い PVD でトレンチ上端が先に塞がり、内部に空洞が残った<strong>埋め込みボイド</strong>の例です（void_metrics 個数=6 → 検出）。</p><table class='param'><tr><th>不良モード</th><th>計測関数</th></tr><tr><td>ボイド（充填不良）</td><td><code>void_metrics</code></td></tr><tr><td>エッチ残渣・ストリンガー</td><td><code>etch_residue_metrics</code></td></tr><tr><td>アンダーカット</td><td><code>undercut_um</code></td></tr><tr><td>ピンホール（貫通欠陥）</td><td><code>pinhole_metrics</code></td></tr><tr><td>オープン（断線）</td><td><code>electrical_continuity</code> / <code>line_resistance_ohm</code></td></tr><tr><td>ショート</td><td><code>min_spacing_um</code></td></tr><tr><td>ディッシング・エロージョン</td><td><code>dishing_depth_um</code></td></tr><tr><td>ウェハ反り（膜応力）</td><td><code>wafer_bow_um</code></td></tr><tr><td>一括検査</td><td><code>defect_report</code></td></tr></table><p><code>metrology.defect_report(wafer)</code> でこれらを横断検査した機械可読な辞書が得られ、CLI の <code>--json-report</code> 出力にも <code>defects</code> として含まれます。本例の検出材料数: 2。</p><pre><code>from semisim import metrology
+rep = metrology.defect_report(wafer)
+print(rep['voids'], rep['per_material'])</code></pre><img src='img/defect_void.png' alt='void'>
+ </section>
+ <section id="output">
+  <h2>出力・レポート<span class="cat-badge">出力</span></h2>
+  <p>シミュレーション結果は以下の形式で出力できます。</p>
+  <table class="param">
+   <tr><th>出力</th><th>内容</th></tr>
+   <tr><td>断面 PNG (<code>--slice</code>)</td><td>任意の XZ/YZ/XY 断面画像</td></tr>
+   <tr><td>3D STL (<code>--stl</code>)</td><td>材料ごとのソリッドメッシュ（CAD/3D 表示用）</td></tr>
+   <tr><td>テキストレポート (<code>--report</code>)</td><td>膜厚・段差・電気特性・DRC など人間可読サマリ</td></tr>
+   <tr><td>JSON レポート (<code>--json-report</code>)</td><td>メトロロジ + <code>electrical</code> + <code>defects</code> の機械可読辞書</td></tr>
+  </table>
+  <p>GUI（<code>py main.py</code>）では、レシピを 1 ステップずつ追加しながら 3D"
+  形状をリアルタイムに確認でき、任意断面のスライス表示やメトロロジ値の参照も可能です。</p>
+ </section>
+ <footer>semisim usage manual — 自動生成 (tools/build_manual.py)</footer>
+</main>
+</div>
+</body>
+</html>

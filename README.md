@@ -109,6 +109,14 @@ py tools\render_gallery.py
 | ![epitaxy](docs/gallery/epitaxy_selective.png) | 選択エピタキシャル成長（酸化膜開口部のみ） |
 | ![mosfet](docs/gallery/mosfet_flow.png) | 簡易 MOSFET フロー（ゲート＋ソース/ドレイン） |
 
+## 使い方説明書（HTML）
+
+各プロセス操作の断面スクリーンショットと説明・パラメータ・コード例をまとめた HTML マニュアルを `docs/manual/index.html` に用意しています（ブラウザで開いて閲覧）。再生成は次のコマンドです。
+
+```
+py tools/build_manual.py
+```
+
 ## 工程一覧
 
 | タイプ | 名称 | 概要 |
