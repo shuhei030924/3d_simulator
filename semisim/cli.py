@@ -291,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
         data = metrology.summary(wafer)
         data["electrical"] = metrology.electrical_report(wafer)
         data["defects"] = metrology.defect_report(wafer)
+        rth = metrology.thermal_resistance_k_w(wafer)
+        data["thermal_resistance_k_w"] = None if rth == float("inf") else rth
         with open(args.json_report, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         print(f"JSON レポートを保存しました: {args.json_report}", file=sys.stderr)

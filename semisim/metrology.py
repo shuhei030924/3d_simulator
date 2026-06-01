@@ -1401,6 +1401,9 @@ def report(wafer: Wafer) -> str:
     if abs(bow) >= 0.001:
         sign = "凸(引張)" if bow > 0 else "凹(圧縮)"
         lines.append(f"等価ウェハ反り: {bow:+.2f}µm  {sign}")
+    rth = thermal_resistance_k_w(wafer)
+    if np.isfinite(rth):
+        lines.append(f"縦方向熱抵抗(基板→表面): {rth:.3e}K/W")
     lines.append("")
     lines.append("材料別 体積/膜厚:")
     counts = material_counts(wafer)

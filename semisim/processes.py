@@ -455,6 +455,87 @@ class ALD(Process):
         )
 
 
+# === ALE（原子層エッチ）====================================================
+@register
+@dataclass
+class AtomicLayerEtch(Process):
+    """原子層エッチ（ALE）。サイクル数×1サイクル除去量で nm 精度の自己制限エッチ。
+
+    ALD の対となる工程。対象材料のみを露出面から精密・自己制限的に除去する。
+    `anisotropy` で除去の指向性を切替: 0=等方コンフォーマル（側壁も均一に後退）、
+    1=純垂直（指向性 ALE、底のみ後退）。除去量は cycles×etch_per_cycle_nm で
+    厳密に決まり（過エッチ無し）、対象以外の材料では完全停止（高選択比）。
+    最先端ノードの高精度・高選択エッチ（FinFET/GAA のリセス制御等）を模擬する。
+    """
+
+    type = "ALE"
+    label = "ALE(原子層エッチ)"
+
+    targets: list[str] = field(default_factory=list)
+    cycles: int = 30
+    etch_per_cycle_nm: float = 1.0
+    anisotropy: float = 0.0  # 0=等方コンフォーマル / 1=純垂直（指向性）
+
+    @property
+    def depth_um(self) -> float:
+        return self.cycles * self.etch_per_cycle_nm / 1000.0
+
+    def summary(self) -> str:
+        tgt = "/".join(self.targets) if self.targets else "露出材料"
+        mode = "等方" if self.anisotropy < 0.5 else "指向性"
+        return (
+            f"ALE  {tgt}  {self.cycles}cyc×{self.etch_per_cycle_nm:.1f}nm"
+            f"={self.depth_um * 1000:.0f}nm  {mode}"
+        )
+
+    def apply(self, wafer: Wafer) -> None:
+        _require_positive(self.cycles, "サイクル数")
+        _require_positive(self.etch_per_cycle_nm, "1サイクル除去量")
+        _require_range(self.anisotropy, 0.0, 1.0, "指向性")
+        grid = wafer.grid
+        target_ids = _resolve_targets(self.targets)
+        r = wafer.um_to_vox(self.depth_um)
+        # 露出面から 1 ボクセルずつ精密に前線を伝播（自己制限）。
+        # anisotropy=0 で等方（横比 1）、=1 で純垂直（横比 0）。
+        full6 = ndimage.generate_binary_structure(3, 1)
+        vert = np.zeros((3, 3, 3), dtype=bool)
+        vert[1, 1, 1] = True
+        vert[0, 1, 1] = True
+        vert[2, 1, 1] = True
+        lr = float(np.clip(1.0 - self.anisotropy, 0.0, 1.0))
+        lat_budget = 0.0
+        for _ in range(r):
+            air = grid == materials.AIR
+            lat_budget += lr
+            if lat_budget >= 1.0:
+                front = ndimage.binary_dilation(air, structure=full6)
+                lat_budget -= 1.0
+            else:
+                front = ndimage.binary_dilation(air, structure=vert)
+            remove = front & np.isin(grid, target_ids)
+            remove[0, :, :] = False  # 基板最下層は残す（貫通防止）
+            if not remove.any():
+                break
+            grid[remove] = materials.AIR
+
+    def params_dict(self) -> dict:
+        return {
+            "targets": list(self.targets),
+            "cycles": self.cycles,
+            "etch_per_cycle_nm": self.etch_per_cycle_nm,
+            "anisotropy": self.anisotropy,
+        }
+
+    @classmethod
+    def _from_params(cls, d: dict) -> AtomicLayerEtch:
+        return cls(
+            targets=list(d.get("targets", [])),
+            cycles=int(d.get("cycles", 30)),
+            etch_per_cycle_nm=float(d.get("etch_per_cycle_nm", 1.0)),
+            anisotropy=float(d.get("anisotropy", 0.0)),
+        )
+
+
 # === Spacer（サイドウォールスペーサ）======================================
 @register
 @dataclass
@@ -2627,7 +2708,7 @@ def available_types() -> list[tuple[str, str]]:
     """(type, label) のリストを表示順で返す。"""
     order = [
         "PHOTO", "CVD", "ALD", "PVD", "EPI",
-        "DRY", "WET", "KOH", "DRIE", "SPUTTER",
+        "DRY", "WET", "ALE", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "RTP", "OXIDE",
         "SALICIDE", "FILL", "SPINON", "CMP", "BACKGRIND", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
     ]

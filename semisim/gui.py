@@ -22,6 +22,7 @@ from .processes import (
     PVD,
     AnisoWetEtch,
     Anneal,
+    AtomicLayerEtch,
     Backgrind,
     Diffusion,
     DryEtch,
@@ -374,6 +375,31 @@ class ProcessDialog(QtWidgets.QDialog):
             self.ar_threshold = _spin(getattr(e, "ar_threshold", 10.0), 1.0, 100.0, 1.0, 1)
             self.form.addRow("被覆低下 AR", self.ar_threshold)
             note = QtWidgets.QLabel("nm 精度の超コンフォーマル膜（High-k/バリア）。")
+            note.setStyleSheet("color: gray;")
+            self.form.addRow(note)
+
+        elif t == "ALE":
+            self.targets = QtWidgets.QListWidget()
+            self.targets.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+            self.targets.setMaximumHeight(150)
+            sel = set(getattr(e, "targets", []) or [])
+            for m in (m for m in materials.all_materials() if m.etchable):
+                it = QtWidgets.QListWidgetItem(m.label)
+                it.setData(QtCore.Qt.UserRole, m.name)
+                self.targets.addItem(it)
+                if m.name in sel:
+                    it.setSelected(True)
+            self.form.addRow("対象材料\n(未選択=露出材料)", self.targets)
+            self.cycles = QtWidgets.QSpinBox()
+            self.cycles.setRange(1, 5000)
+            self.cycles.setValue(getattr(e, "cycles", 30))
+            self.form.addRow("サイクル数", self.cycles)
+            self.epc = _spin(getattr(e, "etch_per_cycle_nm", 1.0), 0.1, 5.0, 0.1, 2)
+            self.epc.setSuffix(" nm")
+            self.form.addRow("1サイクル除去量", self.epc)
+            self.anisotropy = _spin(getattr(e, "anisotropy", 0.0), 0.0, 1.0, 0.1, 2)
+            self.form.addRow("指向性 (0=等方/1=垂直)", self.anisotropy)
+            note = QtWidgets.QLabel("nm 精度・高選択の自己制限エッチ（ALD の対）。")
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
@@ -792,6 +818,14 @@ class ProcessDialog(QtWidgets.QDialog):
                 step_coverage=self.coverage.value() / 100.0,
                 overhang=self.overhang.value(),
                 tilt_deg=self.tilt.value(),
+            )
+        if t == "ALE":
+            tgts = [it.data(QtCore.Qt.UserRole) for it in self.targets.selectedItems()]
+            return AtomicLayerEtch(
+                targets=tgts,
+                cycles=self.cycles.value(),
+                etch_per_cycle_nm=self.epc.value(),
+                anisotropy=self.anisotropy.value(),
             )
         if t in ("DRY", "WET"):
             tgts = [
