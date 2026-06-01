@@ -253,6 +253,40 @@ def test_etch_residue_absent_material(wafer):
     assert m["max_aspect"] == 0.0
 
 
+# --- アンダーカット（マスク下の横方向エッチ）検出 -------------------------
+def test_undercut_none_when_aligned(wafer):
+    grid = wafer.grid
+    feat_id = materials.BY_NAME["tungsten"].id
+    mask_id = materials.BY_NAME["photoresist"].id
+    # 被加工材料(z 20..24)とマスク(z 25)が同じ x 範囲 → アンダーカット無し
+    grid[20:25, 5:35, 10:30] = feat_id
+    grid[25, 5:35, 10:30] = mask_id
+    m = metrology.undercut_um(wafer, "tungsten", "photoresist")
+    assert m["max_um"] == 0.0
+    assert m["n"] == 0
+
+
+def test_undercut_detected_when_feature_narrower(wafer):
+    grid = wafer.grid
+    feat_id = materials.BY_NAME["tungsten"].id
+    mask_id = materials.BY_NAME["photoresist"].id
+    # 被加工材料は内側に後退(x 12..28)、マスクは広い(x 10..30) → 両側2ボクセル後退
+    grid[20:25, 5:35, 12:28] = feat_id
+    grid[25, 5:35, 10:30] = mask_id
+    m = metrology.undercut_um(wafer, "tungsten", "photoresist")
+    assert m["max_um"] > 0.0
+    # 片側 (20-16)/2 = 2 ボクセル = 0.2µm
+    assert abs(m["max_um"] - 0.2) < 1e-9
+    assert m["n"] > 0
+
+
+def test_undercut_absent_material(wafer):
+    m = metrology.undercut_um(wafer, "tungsten", "photoresist")
+    assert m["max_um"] == 0.0
+    assert m["mean_um"] == 0.0
+    assert m["n"] == 0
+
+
 # --- Deal-Grove 熱酸化モデル ----------------------------------------------
 def test_deal_grove_monotonic_in_time():
     from semisim.processes import deal_grove_thickness_um

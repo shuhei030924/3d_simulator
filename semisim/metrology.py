@@ -295,6 +295,62 @@ def etch_residue_metrics(
     }
 
 
+def undercut_um(wafer: Wafer, feature_name_or_id, mask_name_or_id) -> dict:
+    """マスク下の横方向エッチ進行（アンダーカット不良）を計測する。
+
+    マスク材料の直下にある被加工材料が、マスク開口より内側に横方向へ
+    後退している量を測る。等方性エッチや過剰サイドエッチで生じる代表的な
+    不良モードで、マスクが被加工材料に対して庇（ひさし）状に張り出す。
+    各 y 行について、マスク最下層の x 方向幅と、その直下の被加工材料上面の
+    x 方向幅を比較し、片側後退量 (mask_width - feature_width)/2 × pitch を
+    アンダーカット量とする。
+    返り値: {"max_um", "mean_um", "n"}。
+      max_um: 最悪（最大）アンダーカット量。
+      mean_um: 後退が生じた行の平均アンダーカット量。
+      n: アンダーカットが検出された y 行数。
+    いずれかの材料が無い／重なりが無ければ全て 0。
+    """
+    feat = materials.get(feature_name_or_id)
+    mask = materials.get(mask_name_or_id)
+    grid = wafer.grid
+    pitch = wafer.config.pitch_um
+    zero = {"max_um": 0.0, "mean_um": 0.0, "n": 0}
+    mask_any = grid == mask.id
+    feat_any = grid == feat.id
+    if not mask_any.any() or not feat_any.any():
+        return zero
+    # マスクの最下層 z（被加工材料と接する側）
+    mask_zs = np.where(mask_any.any(axis=(1, 2)))[0]
+    mask_bottom = int(mask_zs.min())
+    undercuts = []
+    ny = grid.shape[1]
+    for y in range(ny):
+        mrow = np.where(grid[mask_bottom, y, :] == mask.id)[0]
+        if mrow.size == 0:
+            continue
+        mask_w = mrow.max() - mrow.min() + 1
+        # マスク直下で被加工材料の上面（最大 z, mask_bottom 未満）
+        col = grid[:mask_bottom, y, :] == feat.id
+        if not col.any():
+            continue
+        top_z = int(np.where(col.any(axis=1))[0].max())
+        frow = np.where(grid[top_z, y, :] == feat.id)[0]
+        if frow.size == 0:
+            continue
+        feat_w = frow.max() - frow.min() + 1
+        recess = (mask_w - feat_w) / 2.0
+        if recess > 0:
+            undercuts.append(recess * pitch)
+    if not undercuts:
+        return zero
+    arr = np.asarray(undercuts, dtype=float)
+    return {
+        "max_um": float(arr.max()),
+        "mean_um": float(arr.mean()),
+        "n": int(arr.size),
+    }
+
+
 def cmp_uniformity_pct(wafer: Wafer) -> float:
     """表面高さの不均一性 (3σ/平均, %) を返す。CMP 平坦性評価の指標。
 
