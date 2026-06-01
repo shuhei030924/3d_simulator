@@ -2066,11 +2066,17 @@ class Fill(Process):
         fill_to = min(nz - 1, int(z_top.max()) + wafer.um_to_vox(self.overfill_um))
         has_solid = z_top >= 0
         z_idx = np.arange(nz)[:, None, None]
+        # ECD/めっきは空洞をボトムアップで完全充填する。各セルの「真下に固体が
+        # あるか」で判定することで、テーパしたバリア側壁の庇下に取り残された
+        # エア隙間（シーム偽像）も埋める。z_top（列の最上端固体）基準だと、
+        # 庇より下の空気は z_idx>z_top を満たさず埋め残されてしまう。
+        solid = grid != materials.AIR
+        solid_below = np.zeros_like(solid)
+        solid_below[1:] = np.cumsum(solid, axis=0)[:-1] > 0
         deposit = (
-            (z_idx > z_top[None, :, :])
-            & (z_idx <= fill_to)
+            (z_idx <= fill_to)
             & (grid == materials.AIR)
-            & has_solid[None, :, :]
+            & solid_below
         )
         grid[deposit] = mat_id
 
