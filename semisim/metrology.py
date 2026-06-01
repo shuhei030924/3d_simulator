@@ -1405,6 +1405,48 @@ def joule_self_heating_k(
     }
 
 
+def antenna_ratio(
+    wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
+) -> dict:
+    """プロセスアンテナ比（プラズマ帯電損傷リスク）を判定する。
+
+    プラズマエッチ中、ゲート酸化膜に接続した導体（アンテナ）はその露出表面積に
+    比例して電荷を集め、薄いゲート酸化膜に電圧ストレスを与える。
+      アンテナ比 = 導体の露出表面積 / ゲート酸化膜面積
+    が大きいほど（広い金属＋小さいゲート）ゲート絶縁破壊リスクが高い。返す辞書:
+      - antenna_area_um2: 導体の空気露出表面積（電荷収集面積）
+      - gate_area_um2: 導体とゲート絶縁膜の接触面積
+      - ratio: アンテナ比
+      - fail: ratio_limit 超過か（既定 400, ファウンドリのアンテナ則相当）
+    導体かゲートが無い/未接続では ratio=0, fail=False。
+    """
+    cond = materials.get(conductor)
+    grid = wafer.grid
+    mask_c = grid == cond.id
+    gate_area = contact_area_um2(wafer, gate_dielectric, conductor)
+    if not mask_c.any() or gate_area <= 0:
+        return {"antenna_area_um2": 0.0, "gate_area_um2": float(gate_area),
+                "ratio": 0.0, "fail": False}
+    # 導体の空気露出面積（面ペア数×pitch²）
+    air = grid == materials.AIR
+    faces = 0
+    for axis in range(3):
+        sa = [slice(None)] * 3
+        sb = [slice(None)] * 3
+        sa[axis] = slice(0, -1)
+        sb[axis] = slice(1, None)
+        faces += int((mask_c[tuple(sa)] & air[tuple(sb)]).sum())
+        faces += int((mask_c[tuple(sb)] & air[tuple(sa)]).sum())
+    antenna_area = float(faces) * (wafer.config.pitch_um ** 2)
+    ratio = antenna_area / gate_area
+    return {
+        "antenna_area_um2": antenna_area,
+        "gate_area_um2": float(gate_area),
+        "ratio": float(ratio),
+        "fail": bool(ratio > ratio_limit),
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
