@@ -1447,6 +1447,59 @@ def antenna_ratio(
     }
 
 
+def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dict:
+    """MOS ゲート積層の容量密度 Cox と等価酸化膜厚 EOT を算出する。
+
+    ゲート電極（gate_conductor）とチャネル（channel, 既定 silicon）の間に挟まれた
+    誘電体スタックを各列で検出し、直列容量の電気的厚み d_eff=Σ tᵢ/εrᵢ を求める。
+      - Cox = ε0 / d_eff        （F/m² → fF/µm² に換算）
+      - EOT = εr(SiO2) · d_eff   （high-k 採用で物理厚より薄い EOT になる）
+    返す辞書: cox_ff_per_um2 / eot_nm / gate_area_um2 / total_cap_ff。
+    ゲートとチャネルの間に導体がある列や、誘電体が無い（直接接触＝短絡）列は
+    除外する。有効なゲート領域が無ければ全て 0。
+    """
+    gate = materials.get(gate_conductor)
+    ch = materials.get(channel)
+    grid = wafer.grid
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps_field = permittivity_field(wafer)
+    cond_ids = _conductor_ids()
+    eps0 = 8.854e-12
+    eps_sio2 = materials.BY_NAME["oxide"].rel_permittivity
+
+    d_effs: list[float] = []
+    gate_cols = np.argwhere((grid == gate.id).any(axis=0))  # (y, x) のリスト
+    for y, x in gate_cols:
+        col = grid[:, y, x]
+        gate_zs = np.nonzero(col == gate.id)[0]
+        gate_bottom = int(gate_zs.min())
+        ch_zs = np.nonzero((col == ch.id) & (np.arange(len(col)) < gate_bottom))[0]
+        if ch_zs.size == 0:
+            continue
+        ch_top = int(ch_zs.max())
+        between = range(ch_top + 1, gate_bottom)
+        if len(between) == 0:
+            continue  # 誘電体無し（直接接触＝短絡）
+        if any(int(col[z]) in cond_ids for z in between):
+            continue  # 間に別の導体 → 純粋なゲート誘電体でない
+        d_eff = sum(pitch_m / eps_field[z, y, x] for z in between)
+        d_effs.append(d_eff)
+
+    if not d_effs:
+        return {"cox_ff_per_um2": 0.0, "eot_nm": 0.0,
+                "gate_area_um2": 0.0, "total_cap_ff": 0.0}
+    d_eff_avg = float(np.mean(d_effs))
+    gate_area = len(d_effs) * (wafer.config.pitch_um ** 2)
+    cox_f_m2 = eps0 / d_eff_avg
+    cox_ff_um2 = cox_f_m2 * 1e3  # F/m² → fF/µm²
+    return {
+        "cox_ff_per_um2": float(cox_ff_um2),
+        "eot_nm": float(eps_sio2 * d_eff_avg * 1e9),
+        "gate_area_um2": float(gate_area),
+        "total_cap_ff": float(cox_ff_um2 * gate_area),
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
