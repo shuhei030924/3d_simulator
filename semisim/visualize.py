@@ -9,8 +9,12 @@
 from __future__ import annotations
 
 import numpy as np
-import pyvista as pv
 from matplotlib.colors import ListedColormap
+
+try:
+    import pyvista as pv
+except ModuleNotFoundError:  # pyvista 無し環境でも slice_2d/PNG 出力は使えるよう任意 import
+    pv = None  # 3D 系（build_image_data/solid_unstructured/export_stl）呼び出し時のみ必要
 
 from . import materials
 from .grid import Wafer
