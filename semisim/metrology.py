@@ -1316,6 +1316,55 @@ def killer_defect_count(wafer: Wafer) -> int:
     return n
 
 
+def thermal_conductivity_field(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの熱伝導率 k（W/m·K）を格納した配列を返す。
+
+    定義済み thermal_conductivity_w_mk を使用。未設定（0）の材料は空気相当
+    （0.026 W/m·K）として扱う。熱抵抗計算の補助。
+    """
+    grid = wafer.grid
+    air_k = materials.BY_NAME["air"].thermal_conductivity_w_mk
+    k = np.full(grid.shape, air_k, dtype=float)
+    for m in materials.all_materials():
+        if m.thermal_conductivity_w_mk > 0:
+            k[grid == m.id] = m.thermal_conductivity_w_mk
+    return k
+
+
+def thermal_resistance_map(wafer: Wafer) -> np.ndarray:
+    """各 (y, x) 列の縦方向熱抵抗マップ（K/W）を返す。
+
+    基板底（z=0）から各列の最上位固体ボクセルまでを、ボクセルを直列の
+    熱抵抗 R=Δz/(k·A)（Δz=A^{1/2}=pitch）と見なして積算する。各列断面は
+    pitch²。途中の空気ボイドは低 k の熱障壁として加算される（自己発熱の
+    放熱経路評価）。固体の無い列は inf。
+    """
+    kf = thermal_conductivity_field(wafer)
+    p_m = wafer.config.pitch_um * 1e-6  # µm → m
+    # R_voxel = Δz/(k·A) = p_m/(k·p_m²) = 1/(k·p_m)。列方向の累積和を取る。
+    csum = np.cumsum(1.0 / kf, axis=0)  # csum[z,y,x] = Σ_{0..z} 1/k
+    top = wafer.top_surface_z()  # (ny, nx), 固体無しは -1
+    ny, nx = top.shape
+    rmap = np.full((ny, nx), np.inf, dtype=float)
+    has = top >= 0
+    yy, xx = np.nonzero(has)
+    rmap[yy, xx] = csum[top[yy, xx], yy, xx] / p_m
+    return rmap
+
+
+def thermal_resistance_k_w(wafer: Wafer) -> float:
+    """ウェハ全体の縦方向熱抵抗（K/W）を返す（列を並列接続）。
+
+    thermal_resistance_map の各列を並列熱抵抗とみなし 1/R_total=Σ 1/R_col を
+    取る。基板→表面の実効熱抵抗で、低 k 膜が厚いほど大きい。固体が無ければ inf。
+    """
+    rmap = thermal_resistance_map(wafer)
+    finite = np.isfinite(rmap)
+    if not finite.any():
+        return float("inf")
+    return float(1.0 / np.sum(1.0 / rmap[finite]))
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
