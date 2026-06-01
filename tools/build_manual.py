@@ -57,7 +57,8 @@ OUT_DIR = os.path.join(ROOT, "docs", "manual")
 IMG_DIR = os.path.join(OUT_DIR, "img")
 
 
-def cfg(nx=200, ny=20, nz=140, pitch=0.04, sub=2.0) -> WaferConfig:
+def cfg(nx=400, ny=20, nz=280, pitch=0.02, sub=2.0) -> WaferConfig:
+    # pitch=0.02µm の細かいボクセルで断面の曲線・斜面を滑らかに描く（角つき低減）。
     return WaferConfig(nx=nx, ny=ny, nz=nz, pitch_um=pitch, substrate_um=sub)
 
 
@@ -259,7 +260,7 @@ def demos() -> list:
 
     # --- 異方性ウェット（KOH） ---
     def d_koh():
-        r = Recipe(config=cfg(nz=160, sub=3.0))
+        r = Recipe(config=cfg(nz=320, sub=3.0))
         r.add(CVD(material="nitride", thickness_um=0.3))
         r.add(Photo(mask=_center_mask(0.5), thickness_um=0.8, polarity="positive"))
         r.add(DryEtch(targets=["nitride"], depth_um=0.4))
@@ -280,7 +281,7 @@ def demos() -> list:
 
     # --- DRIE ---
     def d_drie():
-        r = Recipe(config=cfg(nz=180, sub=4.0))
+        r = Recipe(config=cfg(nz=360, sub=4.0))
         r.add(Photo(mask=_stripe_mask(0.6, 0.3), thickness_um=1.0, polarity="positive"))
         r.add(DRIE(target="silicon", depth_um=3.0, scallop_um=0.12, scallop_pitch_um=0.35))
         r.add(Strip(material="photoresist"))
@@ -375,7 +376,7 @@ def demos() -> list:
 
     # --- ダマシン Cu + CMP ディッシング（目玉） ---
     def d_damascene():
-        r = Recipe(config=cfg(nx=240, nz=160, sub=2.0))
+        r = Recipe(config=cfg(nx=480, nz=320, sub=2.0))
         r.add(CVD(material="oxide", thickness_um=1.0))
         mask = Mask(shapes=[Shape("rect", {"x0": 0.15, "y0": 0.0, "x1": 0.45, "y1": 1.0}),
                             Shape("rect", {"x0": 0.6, "y0": 0.0, "x1": 0.85, "y1": 1.0})])
@@ -428,22 +429,37 @@ def demos() -> list:
 
 def defect_section() -> tuple[str, str]:
     """不良モード検証デモ（ボイド／ピンホール）画像 + 説明 HTML を返す。"""
-    # ボイド: 狭いトレンチを段差被覆の悪い PVD で塞いで埋め込みボイドを作る
-    r = Recipe(config=cfg(nx=200, nz=160))
-    r.add(CVD(material="oxide", thickness_um=1.0))
-    r.add(Photo(mask=_stripe_mask(0.5, 0.2), thickness_um=0.8, polarity="positive"))
-    r.add(DryEtch(targets=["oxide"], depth_um=0.8))
+    # ボイド: 高アスペクト比トレンチを等角性の悪い PVD で埋め、口元が先に
+    # 塞がって内部にキーホール（ティアドロップ）状の空洞が残る様子を再現する。
+    # 細かいボクセル(pitch=0.02µm)で側壁被覆と口元の絞り込みを滑らかに描く。
+    pitch = 0.02
+    width, depth = 0.5, 1.5
+    span = 300 * pitch
+    frac = width / span
+    r = Recipe(config=WaferConfig(nx=300, ny=12, nz=240, pitch_um=pitch, substrate_um=2.0))
+    r.add(CVD(material="oxide", thickness_um=depth + 0.3))
+    r.add(Photo(
+        mask=Mask(shapes=[Shape("rect", {"x0": (1 - frac) / 2, "y0": 0.0,
+                                         "x1": (1 + frac) / 2, "y1": 1.0})]),
+        thickness_um=0.6, polarity="positive"))
+    r.add(DryEtch(targets=["oxide"], depth_um=depth))
     r.add(Strip(material="photoresist"))
-    r.add(PVD(material="metal_al", thickness_um=0.4, step_coverage=0.3, overhang=1.5))
+    r.add(PVD(material="metal_cu", thickness_um=0.7, step_coverage=0.72, overhang=0.5))
     w = r.simulate()
-    render(w, "void: 段差被覆不良で塞がれた埋め込みボイド", "defect_void.png", ylim=(1.7, 3.2))
+    render(w, "キーホールボイド: 段差被覆不良で口元が先に塞がった埋め込み空洞",
+           "defect_void.png", ylim=(1.9, 3.7))
     vm = metrology.void_metrics(w)
     rep = metrology.defect_report(w)
     has_void = "検出" if vm["count"] > 0 else "なし"
     body = (
         "<p>本シミュレータは主要な半導体不良モードを計測 (metrology) で検証できます。"
-        "下図は段差被覆の悪い PVD でトレンチ上端が先に塞がり、内部に空洞が残った"
-        f"<strong>埋め込みボイド</strong>の例です（void_metrics 個数={vm['count']} → {has_void}）。</p>"
+        "下図は段差被覆（ステップカバレッジ）の悪い PVD で高アスペクト比トレンチを"
+        "埋めた例です。側壁より口元の堆積が速いため上端が先に閉じ、内部に上方ほど"
+        "細る<strong>キーホール（ティアドロップ）状の埋め込みボイド</strong>が"
+        f"残ります（void_metrics 個数={vm['count']} → {has_void}）。"
+        "口元が塞がった瞬間に内部の空気は最上面との連結が切れ、以降フラックスが"
+        "届かず空洞として凍結する——という実プロセスの封止機構をそのまま再現して"
+        "います。</p>"
         "<table class='param'><tr><th>不良モード</th><th>計測関数</th></tr>"
         "<tr><td>ボイド（充填不良）</td><td><code>void_metrics</code></td></tr>"
         "<tr><td>エッチ残渣・ストリンガー</td><td><code>etch_residue_metrics</code></td></tr>"
@@ -464,6 +480,60 @@ def defect_section() -> tuple[str, str]:
         "<img src='img/defect_void.png' alt='void'>"
     )
     return "不良モード検証 (metrology)", body
+
+
+def gui_section() -> str:
+    """GUI 操作画面・設定ダイアログのスクリーンショット説明 HTML を返す。
+
+    画像は tools/capture_gui.py が別途生成した docs/manual/img/gui_*.png を参照する
+    （Qt と matplotlib のバックエンド競合を避けるため生成を分離している）。
+    """
+    return """
+  <p><code>py main.py</code> で GUI を起動します。左にプロセスレシピと層構成、
+  右に <strong>3D ビュー</strong>と<strong>2D 断面</strong>のタブが並ぶ操作画面です。
+  「工程を追加」から工程を選ぶと、その工程専用のパラメータ入力ダイアログが開き、
+  追加・編集するたびに 3D 形状と断面がその場で更新されます。</p>
+  <h3>操作画面（メインウィンドウ）</h3>
+  <img src="img/gui_main.png" alt="GUI メインウィンドウ操作画面">
+  <table class="param">
+   <tr><th>領域</th><th>役割</th></tr>
+   <tr><td>プロセスレシピ（左上）</td><td>工程を上から順に実行。ドラッグ/▲▼ で並べ替え、編集・複製・削除が可能。</td></tr>
+   <tr><td>工程を追加 / 編集 / 複製 / 削除</td><td>工程の追加と編集。各工程はパラメータ設定ダイアログで入力する。</td></tr>
+   <tr><td>新規 / 保存 / 読込 / STL 出力</td><td>レシピ JSON の入出力と、3D 形状の STL エクスポート。</td></tr>
+   <tr><td>プリセット / 最近のレシピ / 計測レポート</td><td>サンプルレシピの呼び出しと、メトロロジ検査レポートの表示。</td></tr>
+   <tr><td>層構成（左下）</td><td>中央列の材料スタックと各層の膜厚・合計厚を一覧表示。</td></tr>
+   <tr><td>3D ビュー / 2D 断面タブ（右）</td><td>立体形状の回転表示と、任意の XZ/YZ 断面表示。断面上 2 点クリックで距離計測。</td></tr>
+  </table>
+  <h3>ウェハ設定ダイアログ</h3>
+  <p>「新規」からウェハ（ボクセル格子）の解像度と基板厚を設定します。X/Y/Z の
+  ボクセル数とボクセル一辺の寸法（pitch）で実寸とメッシュ精度が決まります。</p>
+  <img src="img/gui_dialog_wafer.png" alt="ウェハ設定ダイアログ">
+  <h3>工程パラメータ設定ダイアログ（工程タイプごとに切替）</h3>
+  <p>「工程を追加」で工程タイプを選ぶと、その工程に必要な入力欄だけが現れます。
+  代表的な工程の設定画面を示します。</p>
+  <div>
+   <p><strong>フォトリソ (PHOTO)</strong>：レジスト厚・極性（ポジ/ネガ）・角丸め σ を
+   設定し、マスク図形エディタで矩形・円・帯・周期ラインを配置します。図形が無ければ
+   全面が対象になります。</p>
+   <img src="img/gui_dialog_photo.png" alt="フォトリソ設定ダイアログ">
+   <p><strong>CVD 成膜</strong>：材料と膜厚、ローディング効果や表面ラフネスを設定。
+   等角性の高いコンフォーマル成膜を行います。</p>
+   <img src="img/gui_dialog_cvd.png" alt="CVD 設定ダイアログ">
+   <p><strong>PVD 成膜</strong>：材料・膜厚に加え、<code>段差被覆率</code>（低いほど窪み底に
+   付きにくい）、<code>オーバーハング(庇)</code>、<code>斜め蒸着 入射角</code> を設定。
+   被覆率を下げるとキーホールボイドが発生します。</p>
+   <img src="img/gui_dialog_pvd.png" alt="PVD 設定ダイアログ">
+   <p><strong>異方性ウェット (KOH)</strong>：結晶面依存エッチの対象・深さ・側壁角
+   （Si(111) の 54.7°）を設定し、台形断面の異方性エッチを再現します。</p>
+   <img src="img/gui_dialog_koh.png" alt="KOH 設定ダイアログ">
+   <p><strong>イオン注入 (IMPLANT)</strong>：ドーパント種・飛程 Rp・ストラグル ΔRp・
+   チルト角を設定し、ガウス分布の埋め込みドープ層を形成します。</p>
+   <img src="img/gui_dialog_implant.png" alt="イオン注入 設定ダイアログ">
+   <p><strong>CMP 平坦化</strong>：研磨対象・除去量を設定し、上面を平坦化します。
+   ダマシン配線のディッシング/エロージョンも評価できます。</p>
+   <img src="img/gui_dialog_cmp.png" alt="CMP 設定ダイアログ">
+  </div>
+"""
 
 
 PAGE_TMPL = """<!DOCTYPE html>
@@ -517,6 +587,7 @@ PAGE_TMPL = """<!DOCTYPE html>
 <nav>
  <h2>目次</h2>
  <a href="#intro">はじめに / 起動方法</a>
+ <a href="#gui">GUI 操作・設定画面</a>
  {nav}
  <a href="#defect">不良モード検証</a>
  <a href="#output">出力・レポート</a>
@@ -536,6 +607,10 @@ PAGE_TMPL = """<!DOCTYPE html>
   </table>
   <p>以下、代表的なプロセス操作ごとに、実際の出力断面（中央 Y 断面 = XZ 面、"
   横が x・縦が z で下が基板）と説明を示します。</p>
+ </section>
+ <section id="gui">
+  <h2>GUI 操作・設定画面<span class="cat-badge">操作</span></h2>
+  {gui}
  </section>
  {sections}
  <section id="defect">
@@ -597,6 +672,7 @@ def main() -> None:
     page = PAGE_TMPL.format(
         nav="\n ".join(nav_parts),
         sections="\n".join(section_parts),
+        gui=gui_section(),
         defect_title=html.escape(defect_title),
         defect_body=defect_body,
     )

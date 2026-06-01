@@ -553,6 +553,24 @@ class PVD(Process):
         tl = "" if self.tilt_deg <= 0 else f"  傾斜{self.tilt_deg:.0f}°"
         return f"PVD  {m.label}  厚{self.thickness_um:.2f}µm{sc}{oh}{tl}"
 
+    @staticmethod
+    def _open_to_top(air: np.ndarray) -> np.ndarray:
+        """上面（z 最大の平面）まで空気で連結している領域を True で返す。
+
+        フラックスは開口から入るため、最上面と空気でつながった部分にしか
+        堆積しない。開口が膜で塞がれた瞬間に内部の空気は連結が切れて
+        「到達不能」となり、以降は成長せずキーホールボイドとして凍結する。
+        """
+        struct = ndimage.generate_binary_structure(3, 1)  # 6 近傍
+        lbl, n = ndimage.label(air, structure=struct)
+        if n == 0:
+            return np.zeros_like(air)
+        top_labels = np.unique(lbl[-1])
+        top_labels = top_labels[top_labels != 0]
+        if top_labels.size == 0:
+            return np.zeros_like(air)
+        return np.isin(lbl, top_labels)
+
     def apply(self, wafer: Wafer) -> None:
         _require_positive(self.thickness_um, "膜厚")
         _require_range(self.step_coverage, 0.0, 1.0, "ステップカバレッジ")
@@ -562,69 +580,113 @@ class PVD(Process):
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
         t = wafer.um_to_vox(self.thickness_um)
-        z_top = wafer.top_surface_z()  # (ny, nx) 各列の最上固体
-        valid = z_top >= 0
-
-        # シャドーイング: 各列の堆積厚を周囲との高低差で減じる。
-        # 周囲(最大プール)より低い列は、窪みの深さに比例して薄くなる。
+        if t <= 0:
+            return
         sc = float(np.clip(self.step_coverage, 0.0, 1.0))
-        if sc < 0.999:
-            zt = np.where(valid, z_top, 0).astype(np.float32)
-            neigh_max = ndimage.maximum_filter(zt, size=3, mode="nearest")
-            recess = np.clip(neigh_max - zt, 0, None)  # 窪みの深さ(vox)
-            # 窪みが深いほど被覆率を sc に向けて線形に低下させる簡易モデル。
-            # recess=0（平坦）で atten=1、recess>=膜厚で atten=sc に飽和する。
-            atten = 1.0 - (1.0 - sc) * np.clip(recess / max(t, 1), 0, 1)
-            local_t = np.maximum(0, np.round(t * atten)).astype(int)
-        else:
-            local_t = np.full((ny, nx), t, dtype=int)
+        oh = float(self.overhang)
 
-        # 斜め蒸着シャドーイング: +x からの斜め入射で、風下側の列が背の高い
-        # 構造に隠れる場合は膜が付かない（local_t=0）。鉛直から角 θ の入射は
-        # 水平距離 d 進むのに高さ d/tan(θ) を要するので、x+d 列の高さが
-        # z_top[x] + d/tan(θ) 以上なら遮蔽される。
+        # 斜め蒸着シャドーイング: +x からの斜め入射で風下(-x)側の列が背の高い
+        # 構造に隠れて膜が付かない列を求める。鉛直から角 θ の入射は水平距離 d
+        # 進むのに高さ d/tan(θ) を要するので、x+d 列が z_top[x]+d/tan(θ) 以上で遮蔽。
+        col_shadow = np.zeros((ny, nx), dtype=bool)
         if self.tilt_deg > 0:
+            z_top = wafer.top_surface_z()
+            valid = z_top >= 0
             tan_t = math.tan(math.radians(self.tilt_deg))
             ztf = np.where(valid, z_top, -(10**9)).astype(np.float64)
-            shadowed = np.zeros((ny, nx), dtype=bool)
-            zspan = 0
-            if valid.any():
-                zspan = int(z_top[valid].max() - z_top[valid].min())
+            zspan = int(z_top[valid].max() - z_top[valid].min()) if valid.any() else 0
             for d in range(1, nx):
                 needed = math.ceil(d / tan_t)
-                if needed > zspan:  # これ以上遠い遮蔽体は届かない
+                if needed > zspan:
                     break
                 shifted = np.full((ny, nx), -(10**9), dtype=np.float64)
-                shifted[:, : nx - d] = ztf[:, d:]  # x+d 列の高さを x へ
-                shadowed |= shifted >= (ztf + needed)
-            local_t = np.where(shadowed, 0, local_t)
+                shifted[:, : nx - d] = ztf[:, d:]
+                col_shadow |= shifted >= (ztf + needed)
 
-        z_idx = np.arange(nz)[:, None, None]
-        lo = z_top[None, :, :]
-        hi = (z_top + local_t)[None, :, :]
-        deposit = (z_idx > lo) & (z_idx <= hi) & (grid == materials.AIR)
-        deposit &= valid[None, :, :]
-        grid[deposit] = mat_id
+        # 横方向(側壁/庇)の成長を司る 3x3x3 構造要素（z 方向は含めない）。
+        lat = np.zeros((3, 3, 3), dtype=bool)
+        lat[1, 1, 1] = lat[1, 1, 0] = lat[1, 1, 2] = lat[1, 0, 1] = lat[1, 2, 1] = True
 
-        # オーバーハング / ブレッドローフィング: 開口上端の隅から庇状に
-        # 横へ張り出す。膜の上端表面のうち「真下が空気」の隅(=開口に
-        # 面した張り出し)だけを横方向へ反復成長させる。狭い開口では両側
-        # の庇が合体して上部を塞ぎ、下にボイドが封じ込められる。
-        oh = int(round(self.overhang * t)) if self.overhang > 0 else 0
-        if oh > 0:
-            lat = np.zeros((3, 3, 3), dtype=bool)
-            lat[1, 1, 0] = lat[1, 1, 2] = lat[1, 0, 1] = lat[1, 2, 1] = True
-            for _ in range(oh):
-                film = grid == mat_id
-                grow = ndimage.binary_dilation(film, structure=lat)
-                grow &= grid == materials.AIR
-                # 庇条件: 直下が空気のボクセルのみ(開口上に張り出す部分)
-                below_air = np.zeros_like(grow)
-                below_air[1:] = grid[:-1] == materials.AIR
-                grow &= below_air
-                if not grow.any():
-                    break
-                grid[grow] = mat_id
+        # 垂直堆積のシャドーイング: 深い窪みの列ほど上方からのフラックスが
+        # 届きにくく、底に積もる膜が薄くなる。各列の窪み深さ(周囲最大との差)
+        # から減衰係数 atten∈[sc,1] を求め、列ごとに堆積頻度を下げる。平坦な
+        # フィールド(atten=1)は毎反復堆積し、深い底は sc 倍の頻度に落ちる。
+        z_top0 = wafer.top_surface_z()
+        valid0 = z_top0 >= 0
+        zt0 = np.where(valid0, z_top0, 0).astype(np.float32)
+        # フィールド基準高さ（上面高さの 75 パーセンタイル）からの窪み深さで
+        # 評価する。狭く深いトレンチ底でも局所最大ではなくフィールド基準と
+        # 比較するため、深さ＝アスペクト比相当のシャドーイングを捉えられる。
+        if valid0.any():
+            field_ref = float(np.percentile(zt0[valid0], 75))
+        else:
+            field_ref = 0.0
+        recess = np.clip(field_ref - zt0, 0, None)
+        atten = 1.0 - (1.0 - sc) * np.clip(recess / max(t, 1), 0.0, 1.0)
+        # 列ごとの垂直堆積バジェット（ボクセル数）。フィールドは t、深い窪み底は
+        # 約 sc·t に減る。フラックスが届く露出面には最低 1 ボクセルは積もるので
+        # 0 にはしない（被覆が悪くても底に薄膜が付く実挙動）。
+        v_budget = np.maximum(np.rint(atten * t).astype(np.int64), 1)
+        v_done = np.zeros((ny, nx), dtype=np.int64)
+
+        # 反復堆積: 1 反復で膜厚 1 ボクセル相当を成長させる。
+        #  - 垂直成長: 水平面（直下が固体の開口空気）に積もる。窪み底は
+        #             バジェット(≈sc·t)で頭打ちになり薄い膜にとどまる。
+        #  - 側壁成長: 垂直面（横が固体の開口空気）には被覆率 sc の割合で堆積。
+        #  - 庇成長 : 開口上端の膜先端（真下が空気の膜＝庇）から横へ張り出し、
+        #             overhang に比例した速さで開口を塞ぐ。塞がると内部は
+        #             _open_to_top の連結が切れてボイドとして凍結する。
+        lat_acc = 0.0
+        oh_acc = 0.0
+        for _ in range(t):
+            air = grid == materials.AIR
+            open_air = self._open_to_top(air)
+            if not open_air.any():
+                break
+            solid = ~air
+
+            # 垂直成長フロント（直下が固体の開口空気）を列ごとバジェット内で
+            below_solid = np.zeros_like(air)
+            below_solid[1:] = solid[:-1]
+            can_v = v_done < v_budget
+            grow_v = open_air & below_solid & can_v[None, :, :]
+            if self.tilt_deg > 0:
+                grow_v &= ~col_shadow[None, :, :]
+            v_done += grow_v.any(axis=0)
+
+            grow = grow_v.copy()
+
+            # 側壁成長フロント（横が固体の開口空気）を被覆率 sc の頻度で
+            lat_acc += sc
+            if lat_acc >= 1.0:
+                lat_acc -= 1.0
+                side_solid = ndimage.binary_dilation(solid, structure=lat) & air
+                grow |= open_air & side_solid
+
+            grid[grow] = mat_id
+
+            # 庇（ブレッドローフィング）: 開口上端付近の側壁ほどフラックスが
+            # 集中して内側へ速く張り出す。口元バンドを余分に内側成長させると
+            # 上部が下部より先に塞がり、内部にキーホールボイドが封じ込められる。
+            # overhang を蓄積し、tick した反復だけ口元を 1 段内側へ進める
+            # （率制御）。基本等角充填が庇封止を上回るほど壁が厚くなり、
+            # 残る空洞は上部に向かって細るティアドロップ状になる。
+            oh_acc += oh
+            if oh > 0 and oh_acc >= 1.0:
+                oh_acc -= 1.0
+                air2 = grid == materials.AIR
+                open2 = self._open_to_top(air2)
+                solid2 = ~air2
+                side2 = ndimage.binary_dilation(solid2, structure=lat) & air2
+                front = open2 & side2  # 側壁成長フロント
+                if front.any():
+                    zmax = int(np.where(front.any(axis=(1, 2)))[0].max())
+                    zrange = np.arange(nz)[:, None, None]
+                    mouth = front & (zrange >= zmax - 1)  # 口元 1 バンド
+                    nxt = ndimage.binary_dilation(mouth, structure=lat)
+                    nxt &= grid == materials.AIR
+                    nxt &= self._open_to_top(grid == materials.AIR)
+                    grid[nxt] = mat_id
 
     def params_dict(self) -> dict:
         return {
