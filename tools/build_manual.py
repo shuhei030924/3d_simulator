@@ -39,6 +39,7 @@ from semisim.processes import (  # noqa: E402
     PVD,
     AnisoWetEtch,
     Anneal,
+    AtomicLayerEtch,
     DryEtch,
     Epitaxy,
     Fill,
@@ -306,6 +307,28 @@ def demos() -> list:
         d_wet, None,
     ))
 
+    # --- ALE（原子層エッチ） ---
+    def d_ale():
+        r = Recipe(config=cfg())
+        r.add(CVD(material="oxide", thickness_um=0.8))
+        r.add(Photo(mask=_stripe_mask(0.7, 0.3), thickness_um=0.8, polarity="positive"))
+        r.add(AtomicLayerEtch(targets=["oxide"], cycles=300, etch_per_cycle_nm=1.5,
+                              anisotropy=0.3))
+        return r.simulate()
+    items.append((
+        "ale", "ALE 原子層エッチ (ALE)", "エッチング",
+        "原子層エッチ。1 サイクルで原子層レベルの極薄量だけ自己制限的に除去し、"
+        "cycles×etch_per_cycle_nm で nm 精度に深さを制御します。対象以外の材料で"
+        "完全停止（高選択比）し、anisotropy で等方コンフォーマル〜純垂直を切替えます。"
+        "ALD（成膜）の対となる先端ノード向けの高精度エッチです。",
+        [("targets", "エッチ対象材料"), ("cycles", "サイクル数"),
+         ("etch_per_cycle_nm", "1 サイクル除去量[nm]"), ("anisotropy", "0=等方/1=垂直")],
+        "from semisim.processes import AtomicLayerEtch\n"
+        "r.add(AtomicLayerEtch(targets=['oxide'], cycles=300,\n"
+        "                      etch_per_cycle_nm=1.5, anisotropy=0.3))",
+        d_ale, None,
+    ))
+
     # --- 異方性ウェット（KOH） ---
     def d_koh():
         r = Recipe(config=cfg(nz=1280, sub=3.0))
@@ -530,6 +553,77 @@ def defect_section() -> tuple[str, str]:
     return "不良モード検証 (metrology)", body
 
 
+def verification_section() -> str:
+    """電気・熱・信頼性の検証メトロロジの一覧 HTML を返す（数値例つき）。"""
+    # 2 本の並走配線（Cu/W）+ Al 基準面を酸化膜中に作り、容量等を実測する。
+    cfg2 = WaferConfig(nx=80, ny=40, nz=50, pitch_um=0.05, substrate_um=0.0)
+    w = Recipe(config=cfg2).simulate()
+    g = w.grid
+    g[:] = materials.BY_NAME["oxide"].id
+    g[5:10, :, :] = materials.BY_NAME["metal_al"].id
+    g[25:33, 8:18, :] = materials.BY_NAME["metal_cu"].id
+    g[25:33, 22:32, :] = materials.BY_NAME["tungsten"].id
+    c_ll = metrology.parasitic_capacitance_ff(w, "metal_cu", "tungsten")
+    c_field = metrology.parasitic_capacitance_field_ff(w, "metal_cu", "tungsten")
+    em = metrology.electromigration_risk(w, "metal_cu", 1.0, "x")
+    mttf = metrology.electromigration_mttf(em["j_max_a_cm2"], 110)
+
+    rows = [
+        ("寄生容量（平行平板）", "parasitic_capacitance_ff",
+         f"{c_ll:.3f} fF（配線間カップリング, ε0·εr·A/d を厳密積算）"),
+        ("寄生容量（静電界ソルバ）", "parasitic_capacitance_field_ff",
+         f"{c_field:.3f} fF（∇·(εr∇φ)=0 を疎行列で解きフリンジ込み）"),
+        ("RC 遅延", "rc_delay_ps", "τ=R·C による配線遅延"),
+        ("MOS ゲート容量 / EOT", "mos_gate_capacitance",
+         "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),
+        ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
+         "断面積を考慮した直列抵抗・薄膜評価"),
+        ("電流密度 / EM リスク", "current_density_stats / electromigration_risk",
+         f"J_max={em['j_max_a_cm2']:.2e} A/cm², 余裕={em['margin']:.2f}"),
+        ("EM 寿命（Black）", "electromigration_mttf / em_lifetime_wafer",
+         f"MTTF={mttf:.3e}（相対, MTTF=A·J⁻ⁿ·exp(Ea/kT)）"),
+        ("絶縁破壊 / TDDB 寿命", "dielectric_breakdown / tddb_lifetime",
+         "E=V/g vs 破壊電界, E モデル寿命"),
+        ("アンテナ比", "antenna_ratio", "プラズマ帯電損傷 DRC（収集面積/ゲート面積）"),
+        ("縦方向熱抵抗", "thermal_resistance_k_w / thermal_resistance_map",
+         "R=ΣΔz/(k·A) を列毎に算出し並列合成"),
+        ("自己発熱 ΔT", "temperature_rise_k / joule_self_heating_k",
+         "ΔT=P·Rth, ジュール発熱 P=I²R"),
+        ("熱拡散ソルバ（温度分布）", "temperature_field_2d / peak_temperature_rise_k",
+         "∇·(k∇T)=−q で横方向ヒートスプレッディングを解く"),
+        ("局所応力集中", "stress_concentration_map / max_stress_concentration",
+         "界面 Δσ×幾何係数でクラック/剥離リスク箇所を検出"),
+        ("ウェハ反り（膜応力）", "wafer_bow_um", "Stoney 則による等価反り"),
+        ("歩留り推定", "yield_estimate", "Poisson/Murphy/Seeds モデル"),
+        ("リソ プロセスウィンドウ", "litho.bossung / process_window / meef / EPE",
+         "空間像モデルで CD・DOF・露光裕度・MEEF・EPE を評価"),
+    ]
+    table = "".join(
+        f"<tr><td>{html.escape(name)}</td><td><code>{html.escape(fn)}</code></td>"
+        f"<td>{html.escape(note)}</td></tr>"
+        for name, fn, note in rows
+    )
+    return (
+        "<p>形状だけでなく、できあがったデバイス構造の<strong>電気・熱・機械・信頼性</strong>"
+        "特性を計測 (metrology) と専用ソルバ（<code>semisim/litho.py</code> 含む）で検証できます。"
+        "代表的な検証関数と、酸化膜中の並走 Cu/W 配線＋Al 基準面の構造に対する実測値の例を"
+        "示します。</p>"
+        "<table class='param'><tr><th>検証項目</th><th>関数</th><th>内容・数値例</th></tr>"
+        f"{table}</table>"
+        "<pre><code>from semisim import metrology, litho\n"
+        "# 寄生容量と RC 遅延\n"
+        "c = metrology.parasitic_capacitance_ff(wafer, 'metal_cu', 'tungsten')\n"
+        "# 静電界ソルバ（フリンジ込み）\n"
+        "c2 = metrology.parasitic_capacitance_field_ff(wafer, 'metal_cu', 'tungsten')\n"
+        "# EM 寿命（最小断面の電流密度から）\n"
+        "life = metrology.em_lifetime_wafer(wafer, 'metal_cu', current_ma=1.0, temperature_c=110)\n"
+        "# 熱拡散による温度分布\n"
+        "T = metrology.temperature_field_2d(wafer, source_mask, total_power_w=0.1)\n"
+        "# リソ プロセスウィンドウ\n"
+        "cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></pre>"
+    )
+
+
 def gui_section() -> str:
     """GUI 操作画面・設定ダイアログのスクリーンショット説明 HTML を返す。
 
@@ -665,6 +759,10 @@ PAGE_TMPL = """<!DOCTYPE html>
   <h2>{defect_title}<span class="cat-badge">検証</span></h2>
   {defect_body}
  </section>
+ <section id="verification">
+  <h2>電気・熱・信頼性の検証 (metrology)<span class="cat-badge">検証</span></h2>
+  {verification_body}
+ </section>
  <section id="output">
   <h2>出力・レポート<span class="cat-badge">出力</span></h2>
   <p>シミュレーション結果は以下の形式で出力できます。</p>
@@ -723,6 +821,7 @@ def main() -> None:
         gui=gui_section(),
         defect_title=html.escape(defect_title),
         defect_body=defect_body,
+        verification_body=verification_section(),
     )
     out_html = os.path.join(OUT_DIR, "index.html")
     with open(out_html, "w", encoding="utf-8") as f:
