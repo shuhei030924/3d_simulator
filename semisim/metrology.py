@@ -1365,6 +1365,46 @@ def thermal_resistance_k_w(wafer: Wafer) -> float:
     return float(1.0 / np.sum(1.0 / rmap[finite]))
 
 
+def temperature_rise_k(wafer: Wafer, power_w: float) -> float:
+    """消費電力 power_w[W] による定常温度上昇 ΔT[K] を返す。
+
+    ΔT = P · R_th（R_th は thermal_resistance_k_w の縦方向熱抵抗）。
+    放熱経路が無い（R_th=inf）場合は inf。低 k 膜が厚いほど ΔT は大きい。
+    自己発熱（ジュール熱）による接合温度上昇の一次評価に使う。
+    """
+    if power_w < 0:
+        raise ValueError("消費電力は非負である必要があります。")
+    rth = thermal_resistance_k_w(wafer)
+    if rth == float("inf"):
+        return float("inf")
+    return float(power_w * rth)
+
+
+def joule_self_heating_k(
+    wafer: Wafer, conductor, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線のジュール自己発熱による温度上昇を返す。
+
+    配線抵抗 R（line_resistance_ohm）と電流 I からジュール発熱 P=I²R を求め、
+    縦方向熱抵抗 R_th を介した定常温度上昇 ΔT=P·R_th を算出する。返す辞書:
+      - power_w: ジュール発熱（W）
+      - resistance_ohm: 配線抵抗（Ω）
+      - delta_t_k: 温度上昇（K）
+    断線（R=inf）や放熱経路無しでは ΔT=inf。
+    """
+    r = line_resistance_ohm(wafer, conductor, axis)
+    i_a = abs(current_ma) * 1e-3
+    if r == float("inf"):
+        return {"power_w": float("inf"), "resistance_ohm": float("inf"),
+                "delta_t_k": float("inf")}
+    power = i_a ** 2 * r
+    return {
+        "power_w": float(power),
+        "resistance_ohm": float(r),
+        "delta_t_k": temperature_rise_k(wafer, power),
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
