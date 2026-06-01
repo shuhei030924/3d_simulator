@@ -59,9 +59,12 @@
  <a href="#ald">ALD 成膜 (ALD)</a>
  <a href="#pvd">PVD 成膜 (PVD)</a>
  <a href="#spacer">サイドウォールスペーサ (Spacer)</a>
+ <div class="cat">微細化</div>
+ <a href="#sadp">ピッチダブリング (SADP / 自己整合ダブルパターニング)</a>
  <div class="cat">エッチング</div>
  <a href="#dryetch">ドライエッチング (DryEtch)</a>
  <a href="#wetetch">ウェットエッチング (WetEtch)</a>
+ <a href="#ale">ALE 原子層エッチ (ALE)</a>
  <a href="#anisowet">結晶異方性ウェット (AnisoWetEtch)</a>
  <a href="#drie">深掘り RIE / Bosch (DRIE)</a>
  <div class="cat">ドーピング・熱処理</div>
@@ -200,6 +203,19 @@ r.add(Spacer(material=&#x27;nitride&#x27;, thickness_um=0.08))</code></pre>
   <img src="img/spacer.png" alt="サイドウォールスペーサ (Spacer)">
  </section>
 
+ <section id="sadp">
+  <h2>ピッチダブリング (SADP / 自己整合ダブルパターニング)<span class="cat-badge">微細化</span></h2>
+  <p>リソ解像限界より細かい配線ピッチを作る先端微細化プロセスです。①被パターン層の上に<strong>マンドレル（犠牲芯材）</strong>を緩いピッチでパターニング → ②コンフォーマル成膜＋異方性エッチバックで<strong>側壁スペーサ</strong>を残す → ③<strong>マンドレルを引き抜く</strong>と1 本のマンドレルから 2 本のスペーサが自立し<strong>ピッチが半分（線密度2倍）</strong>になります → ④スペーサをハードマスクに下地へ転写。本例は 3 本のマンドレルから6 本のフィンを形成しています（2×）。スペーサ幅がそのまま最終線幅になるため、露光波長に依存しないサブリソ寸法が得られます。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>マンドレル</code></td><td>Photo で緩ピッチに形成</td></tr><tr><td><code>Spacer.thickness_um</code></td><td>スペーサ幅＝最終線幅[µm]</td></tr><tr><td><code>Strip</code></td><td>マンドレル引き抜き</td></tr><tr><td><code>DryEtch.targets</code></td><td>転写する下地層</td></tr></table>
+  <pre><code>from semisim.processes import CVD, Photo, Spacer, Strip, DryEtch
+r.add(CVD(material=&#x27;poly&#x27;, thickness_um=0.30))            # 被パターン層
+r.add(Photo(mask=mandrels, thickness_um=0.30))           # マンドレル
+r.add(Spacer(material=&#x27;oxide&#x27;, thickness_um=0.08))       # 側壁スペーサ
+r.add(Strip(material=&#x27;photoresist&#x27;))                     # マンドレル引き抜き
+r.add(DryEtch(targets=[&#x27;poly&#x27;], depth_um=0.32))          # 下地へ転写</code></pre>
+  <img src="img/sadp.png" alt="ピッチダブリング (SADP / 自己整合ダブルパターニング)">
+ </section>
+
  <section id="dryetch">
   <h2>ドライエッチング (DryEtch)<span class="cat-badge">エッチング</span></h2>
   <p>プラズマによる異方性エッチング。ほぼ垂直な側壁の溝／ホールを形成します。レジスト開口部の直下のみが削れ、横方向にはほとんど広がりません。</p>
@@ -216,6 +232,16 @@ r.add(DryEtch(targets=[&#x27;oxide&#x27;], depth_um=0.6))</code></pre>
   <pre><code>from semisim.processes import WetEtch
 r.add(WetEtch(targets=[&#x27;oxide&#x27;], depth_um=0.5, lateral_ratio=1.0))</code></pre>
   <img src="img/wetetch.png" alt="ウェットエッチング (WetEtch)">
+ </section>
+
+ <section id="ale">
+  <h2>ALE 原子層エッチ (ALE)<span class="cat-badge">エッチング</span></h2>
+  <p>原子層エッチ。1 サイクルで原子層レベルの極薄量だけ自己制限的に除去し、cycles×etch_per_cycle_nm で nm 精度に深さを制御します。対象以外の材料で完全停止（高選択比）し、anisotropy で等方コンフォーマル〜純垂直を切替えます。ALD（成膜）の対となる先端ノード向けの高精度エッチです。</p>
+  <table class="param"><tr><th>主なパラメータ</th><th>説明</th></tr><tr><td><code>targets</code></td><td>エッチ対象材料</td></tr><tr><td><code>cycles</code></td><td>サイクル数</td></tr><tr><td><code>etch_per_cycle_nm</code></td><td>1 サイクル除去量[nm]</td></tr><tr><td><code>anisotropy</code></td><td>0=等方/1=垂直</td></tr></table>
+  <pre><code>from semisim.processes import AtomicLayerEtch
+r.add(AtomicLayerEtch(targets=[&#x27;oxide&#x27;], cycles=300,
+                      etch_per_cycle_nm=1.5, anisotropy=0.3))</code></pre>
+  <img src="img/ale.png" alt="ALE 原子層エッチ (ALE)">
  </section>
 
  <section id="anisowet">
@@ -296,6 +322,20 @@ r.add(LiftOff())</code></pre>
   <p>本シミュレータは主要な半導体不良モードを計測 (metrology) で検証できます。下図は段差被覆（ステップカバレッジ）の悪い PVD で高アスペクト比トレンチを埋めた例です。側壁より口元の堆積が速いため上端が先に閉じ、内部に上方ほど細る<strong>キーホール（ティアドロップ）状の埋め込みボイド</strong>が残ります（void_metrics 個数=1 → 検出）。口元が塞がった瞬間に内部の空気は最上面との連結が切れ、以降フラックスが届かず空洞として凍結する——という実プロセスの封止機構をそのまま再現しています。</p><table class='param'><tr><th>不良モード</th><th>計測関数</th></tr><tr><td>ボイド（充填不良）</td><td><code>void_metrics</code></td></tr><tr><td>エッチ残渣・ストリンガー</td><td><code>etch_residue_metrics</code></td></tr><tr><td>アンダーカット</td><td><code>undercut_um</code></td></tr><tr><td>ピンホール（貫通欠陥）</td><td><code>pinhole_metrics</code></td></tr><tr><td>オープン（断線）</td><td><code>electrical_continuity</code> / <code>line_resistance_ohm</code></td></tr><tr><td>ショート</td><td><code>min_spacing_um</code></td></tr><tr><td>ディッシング・エロージョン</td><td><code>dishing_depth_um</code></td></tr><tr><td>ウェハ反り（膜応力）</td><td><code>wafer_bow_um</code></td></tr><tr><td>一括検査</td><td><code>defect_report</code></td></tr></table><p><code>metrology.defect_report(wafer)</code> でこれらを横断検査した機械可読な辞書が得られ、CLI の <code>--json-report</code> 出力にも <code>defects</code> として含まれます。本例の検出材料数: 2。</p><pre><code>from semisim import metrology
 rep = metrology.defect_report(wafer)
 print(rep['voids'], rep['per_material'])</code></pre><img src='img/defect_void.png' alt='void'>
+ </section>
+ <section id="verification">
+  <h2>電気・熱・信頼性の検証 (metrology)<span class="cat-badge">検証</span></h2>
+  <p>形状だけでなく、できあがったデバイス構造の<strong>電気・熱・機械・信頼性</strong>特性を計測 (metrology) と専用ソルバ（<code>semisim/litho.py</code> 含む）で検証できます。代表的な検証関数と、酸化膜中の並走 Cu/W 配線＋Al 基準面の構造に対する実測値の例を示します。</p><table class='param'><tr><th>検証項目</th><th>関数</th><th>内容・数値例</th></tr><tr><td>寄生容量（平行平板）</td><td><code>parasitic_capacitance_ff</code></td><td>0.221 fF（配線間カップリング, ε0·εr·A/d を厳密積算）</td></tr><tr><td>寄生容量（静電界ソルバ）</td><td><code>parasitic_capacitance_field_ff</code></td><td>0.000 fF（∇·(εr∇φ)=0 を疎行列で解きフリンジ込み）</td></tr><tr><td>RC 遅延</td><td><code>rc_delay_ps</code></td><td>τ=R·C による配線遅延</td></tr><tr><td>MOS ゲート容量 / EOT</td><td><code>mos_gate_capacitance</code></td><td>Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化</td></tr><tr><td>配線抵抗 / シート抵抗</td><td><code>line_resistance_ohm / sheet_resistance_ohm_sq</code></td><td>断面積を考慮した直列抵抗・薄膜評価</td></tr><tr><td>電流密度 / EM リスク</td><td><code>current_density_stats / electromigration_risk</code></td><td>J_max=5.00e+05 A/cm², 余裕=4.00</td></tr><tr><td>EM 寿命（Black）</td><td><code>electromigration_mttf / em_lifetime_wafer</code></td><td>MTTF=2.756e+09（相対, MTTF=A·J⁻ⁿ·exp(Ea/kT)）</td></tr><tr><td>絶縁破壊 / TDDB 寿命</td><td><code>dielectric_breakdown / tddb_lifetime</code></td><td>E=V/g vs 破壊電界, E モデル寿命</td></tr><tr><td>アンテナ比</td><td><code>antenna_ratio</code></td><td>プラズマ帯電損傷 DRC（収集面積/ゲート面積）</td></tr><tr><td>縦方向熱抵抗</td><td><code>thermal_resistance_k_w / thermal_resistance_map</code></td><td>R=ΣΔz/(k·A) を列毎に算出し並列合成</td></tr><tr><td>自己発熱 ΔT</td><td><code>temperature_rise_k / joule_self_heating_k</code></td><td>ΔT=P·Rth, ジュール発熱 P=I²R</td></tr><tr><td>熱拡散ソルバ（温度分布）</td><td><code>temperature_field_2d / peak_temperature_rise_k</code></td><td>∇·(k∇T)=−q で横方向ヒートスプレッディングを解く</td></tr><tr><td>局所応力集中</td><td><code>stress_concentration_map / max_stress_concentration</code></td><td>界面 Δσ×幾何係数でクラック/剥離リスク箇所を検出</td></tr><tr><td>ウェハ反り（膜応力）</td><td><code>wafer_bow_um</code></td><td>Stoney 則による等価反り</td></tr><tr><td>歩留り推定</td><td><code>yield_estimate</code></td><td>Poisson/Murphy/Seeds モデル</td></tr><tr><td>リソ プロセスウィンドウ</td><td><code>litho.bossung / process_window / meef / EPE</code></td><td>空間像モデルで CD・DOF・露光裕度・MEEF・EPE を評価</td></tr></table><pre><code>from semisim import metrology, litho
+# 寄生容量と RC 遅延
+c = metrology.parasitic_capacitance_ff(wafer, 'metal_cu', 'tungsten')
+# 静電界ソルバ（フリンジ込み）
+c2 = metrology.parasitic_capacitance_field_ff(wafer, 'metal_cu', 'tungsten')
+# EM 寿命（最小断面の電流密度から）
+life = metrology.em_lifetime_wafer(wafer, 'metal_cu', current_ma=1.0, temperature_c=110)
+# 熱拡散による温度分布
+T = metrology.temperature_field_2d(wafer, source_mask, total_power_w=0.1)
+# リソ プロセスウィンドウ
+cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></pre>
  </section>
  <section id="output">
   <h2>出力・レポート<span class="cat-badge">出力</span></h2>

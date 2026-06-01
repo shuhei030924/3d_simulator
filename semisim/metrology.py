@@ -1419,6 +1419,136 @@ def joule_self_heating_k(
     }
 
 
+def temperature_field_2d(
+    wafer: Wafer, source_mask: np.ndarray, total_power_w: float, y_index: int | None = None
+) -> np.ndarray:
+    """2.5D 熱拡散ソルバで XZ 断面の温度上昇分布 ΔT[K] を返す。
+
+    指定 y 断面で定常熱伝導方程式 ∇·(k∇T)=−q を有限体積・疎行列直接解法で解く。
+    基板最下行（z=0）を温度基準（ヒートシンク, ΔT=0）の Dirichlet 境界、他境界は
+    断熱（Neumann）とする。発熱は source_mask（3D bool, True が発熱領域）の当該
+    断面ボクセルに、単位 y 長あたり total_power_w/Ly を均等分配する。横方向の熱拡散
+    （ヒートスプレッディング）を捉え、均一全面発熱では 1D 熱抵抗の ΔT=P·R_th に一致する。
+    返り値は (nz, nx) の ΔT[K] 配列。
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import spsolve
+
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    if y_index is None:
+        y_index = ny // 2
+    kf = thermal_conductivity_field(wafer)[:, y_index, :]  # (nz, nx) W/m·K
+    src2d = source_mask[:, y_index, :]
+    pitch_m = wafer.config.pitch_um * 1e-6
+    ly_m = ny * pitch_m
+    n_src = int(src2d.sum())
+    # 単位 y 長あたり発熱 [W/m]、各発熱セルに均等分配
+    p_per_depth = (total_power_w / ly_m) if ly_m > 0 else 0.0
+    s_cell = (p_per_depth / n_src) if n_src > 0 else 0.0
+
+    sink = np.zeros((nz, nx), dtype=bool)
+    sink[0, :] = True  # 基板底=ヒートシンク
+    idx = -np.ones((nz, nx), dtype=int)
+    unk = np.argwhere(~sink)
+    for k, (i, j) in enumerate(unk):
+        idx[i, j] = k
+    m = len(unk)
+    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def k_face(i, j, ii, jj):
+        a, c = kf[i, j], kf[ii, jj]
+        return 2.0 * a * c / (a + c) if (a + c) > 0 else 0.0
+
+    rows: list[int] = []
+    cols: list[int] = []
+    data: list[float] = []
+    b = np.zeros(m)
+    for k, (i, j) in enumerate(unk):
+        diag = 0.0
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < nz and 0 <= jj < nx):
+                continue
+            kfc = k_face(i, j, ii, jj)
+            diag += kfc
+            if sink[ii, jj]:
+                pass  # ΔT=0 のシンク → 寄与 0
+            else:
+                rows.append(k)
+                cols.append(idx[ii, jj])
+                data.append(-kfc)
+        rows.append(k)
+        cols.append(k)
+        data.append(diag)
+        if src2d[i, j]:
+            b[k] += s_cell  # 発熱（W/m depth）
+    mat = csr_matrix((data, (rows, cols)), shape=(m, m))
+    t_unk = spsolve(mat, b)
+    t = np.zeros((nz, nx))
+    t[~sink] = t_unk
+    return t
+
+
+def peak_temperature_rise_k(
+    wafer: Wafer, source_mask: np.ndarray, total_power_w: float, y_index: int | None = None
+) -> float:
+    """2.5D 熱拡散ソルバによる断面内の最大温度上昇 ΔT_max[K] を返す。"""
+    return float(temperature_field_2d(wafer, source_mask, total_power_w, y_index).max())
+
+
+# ボルツマン定数（eV/K）
+_K_BOLTZMANN_EV = 8.617333e-5
+
+
+def electromigration_mttf(
+    j_a_cm2: float, temperature_c: float,
+    *, n: float = 2.0, ea_ev: float = 0.9, a_const: float = 1.0e9,
+) -> float:
+    """Black の式による配線 EM の平均故障時間 MTTF を返す（相対寿命指標）。
+
+    MTTF = A · J^(−n) · exp(Ea / (k·T))。電流密度 J[A/cm²] が高いほど、温度 T が
+    高いほど寿命が短い。n は電流密度指数（Cu/Al で 1〜2）、Ea は活性化エネルギー
+    （eV, Cu EM で ~0.9）、A は工程定数。返り値は a_const に依存する相対時間。
+    J<=0 では inf（電流なし＝劣化なし）。
+    """
+    if j_a_cm2 <= 0:
+        return float("inf")
+    t_k = temperature_c + 273.15
+    return float(a_const * j_a_cm2 ** (-n) * np.exp(ea_ev / (_K_BOLTZMANN_EV * t_k)))
+
+
+def tddb_lifetime(
+    field_mv_cm: float, temperature_c: float,
+    *, gamma: float = 4.0, ea_ev: float = 0.6, a_const: float = 1.0e3,
+) -> float:
+    """E モデルによる絶縁膜の経時破壊（TDDB）寿命 TTF を返す（相対寿命指標）。
+
+    TTF = A · exp(−γ·E) · exp(Ea / (k·T))。電界 E[MV/cm] が高いほど、温度 T が
+    高いほど寿命が短い。γ は電界加速係数（cm/MV, SiO2 で ~4）、Ea は活性化
+    エネルギー（eV）。返り値は a_const に依存する相対時間。E<=0 では inf。
+    """
+    if field_mv_cm <= 0:
+        return float("inf")
+    t_k = temperature_c + 273.15
+    return float(a_const * np.exp(-gamma * field_mv_cm) * np.exp(ea_ev / (_K_BOLTZMANN_EV * t_k)))
+
+
+def em_lifetime_wafer(
+    wafer: Wafer, conductor, current_ma: float, temperature_c: float,
+    axis: str = "x", **black_kw,
+) -> dict:
+    """配線の EM 寿命を Black の式で評価する（current_density_stats と結合）。
+
+    最小断面（ネッキング箇所）の最大電流密度 J_max を用いて MTTF を求める。返す
+    辞書: j_max_a_cm2 / mttf / temperature_c。断線/非導体では j_max=inf, mttf=0。
+    """
+    st = current_density_stats(wafer, conductor, current_ma, axis)
+    j = st["j_max_a_cm2"]
+    mttf = 0.0 if j == float("inf") else electromigration_mttf(j, temperature_c, **black_kw)
+    return {"j_max_a_cm2": j, "mttf": mttf, "temperature_c": temperature_c}
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:
