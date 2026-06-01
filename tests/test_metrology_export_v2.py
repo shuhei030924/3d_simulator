@@ -287,6 +287,32 @@ def test_undercut_absent_material(wafer):
     assert m["n"] == 0
 
 
+# --- ピンホール（薄膜貫通欠陥）検出 ---------------------------------------
+def test_pinhole_none_for_continuous_film(wafer):
+    CVD(material="tungsten", thickness_um=0.3).apply(wafer)
+    m = metrology.pinhole_metrics(wafer, "tungsten")
+    assert m["count"] == 0
+    assert m["total_area_um2"] == 0.0
+
+
+def test_pinhole_detects_hole(wafer):
+    CVD(material="tungsten", thickness_um=0.3).apply(wafer)
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    air = materials.AIR
+    # 膜の中央に貫通穴を開ける（全 z で W を除去）
+    grid[grid[:, 20, 20] == w_id, 20, 20] = air
+    m = metrology.pinhole_metrics(wafer, "tungsten")
+    assert m["count"] == 1
+    assert abs(m["largest_area_um2"] - wafer.config.pitch_um ** 2) < 1e-9
+
+
+def test_pinhole_absent_material(wafer):
+    m = metrology.pinhole_metrics(wafer, "tungsten")
+    assert m["count"] == 0
+    assert m["largest_area_um2"] == 0.0
+
+
 # --- Deal-Grove 熱酸化モデル ----------------------------------------------
 def test_deal_grove_monotonic_in_time():
     from semisim.processes import deal_grove_thickness_um

@@ -366,6 +366,40 @@ def cmp_uniformity_pct(wafer: Wafer) -> float:
     return float(3.0 * valid.std() / mean * 100.0)
 
 
+def pinhole_metrics(wafer: Wafer, name_or_id) -> dict:
+    """薄膜を貫通するピンホール（被覆欠陥）を検出する。
+
+    指定材料が各 (x, y) 位置で膜として存在するかの被覆マップを作り、膜に
+    取り囲まれているのに膜が抜けている内部の穴をピンホールとみなす。膜の
+    外縁（パターンエッジ）は穴に数えず、`binary_fill_holes` で塞がる
+    閉じた抜けだけを拾う。堆積カバレッジ不良やパーティクル起因の貫通欠陥
+    （下地が露出しリーク/腐食の起点になる）を評価する。
+    返り値: {"count", "total_area_um2", "largest_area_um2"}。
+      count: ピンホールの個数。
+      total_area_um2: 全ピンホールの平面投影面積。
+      largest_area_um2: 最大ピンホールの面積。
+    膜が無い／ピンホールが無ければ全て 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    area_per = wafer.config.pitch_um ** 2
+    zero = {"count": 0, "total_area_um2": 0.0, "largest_area_um2": 0.0}
+    present = (grid == mat.id).any(axis=0)  # (y, x) 被覆マップ
+    if not present.any():
+        return zero
+    filled = ndimage.binary_fill_holes(present)
+    holes = filled & ~present  # 膜に囲まれた内部の抜け
+    if not holes.any():
+        return zero
+    labels, n = ndimage.label(holes)
+    sizes = np.bincount(labels.ravel())[1:]
+    return {
+        "count": int(n),
+        "total_area_um2": float(sizes.sum()) * area_per,
+        "largest_area_um2": float(sizes.max()) * area_per,
+    }
+
+
 def etch_depth_uniformity(wafer: Wafer, name_or_id) -> dict:
     """指定材料の上面高さの分布統計を返す（エッチ/堆積均一性の評価）。
 
