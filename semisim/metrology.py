@@ -249,6 +249,52 @@ def void_metrics(wafer: Wafer) -> dict:
     }
 
 
+def etch_residue_metrics(
+    wafer: Wafer, name_or_id, max_island_um3: float = 0.02
+) -> dict:
+    """エッチ残渣／ストリンガー／ブロックエッチ残りの孤立小片を検出する。
+
+    指定材料を 6 近傍でラベリングし、体積が max_island_um3 以下の連結成分を
+    「残渣（除去しきれずに残った小片）」とみなして統計化する。本来の配線/膜
+    （大きな連結成分）は閾値を超えるため除外され、段差側壁に残ったストリンガー
+    や、エッチ不足で孤立して残った材料島だけを拾う。
+    返り値: {"count", "total_um3", "largest_um3", "max_aspect"}。
+      count: 残渣島の個数。
+      total_um3: 残渣の総体積。
+      largest_um3: 最大残渣の体積。
+      max_aspect: 最大残渣の縦横比（高さ/最大水平広がり）。
+        ストリンガー（細長く背の高い側壁残り）ほど大きい。
+    残渣が無ければ全て 0。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    mask = grid == mat.id
+    vox = wafer.config.pitch_um ** 3
+    zero = {"count": 0, "total_um3": 0.0, "largest_um3": 0.0, "max_aspect": 0.0}
+    if not mask.any():
+        return zero
+    structure = ndimage.generate_binary_structure(3, 1)  # 6 近傍
+    labels, n = ndimage.label(mask, structure=structure)
+    sizes = np.bincount(labels.ravel())[1:]  # ラベル 0(背景)除く
+    thr_vox = max_island_um3 / vox
+    residue_labels = np.flatnonzero(sizes <= thr_vox) + 1
+    if residue_labels.size == 0:
+        return zero
+    total_vox = float(sizes[residue_labels - 1].sum())
+    largest_lbl = int(residue_labels[np.argmax(sizes[residue_labels - 1])])
+    # 最大残渣の縦横比（高さ / 水平方向の最大広がり）
+    zs, ys, xs = np.where(labels == largest_lbl)
+    height = float(zs.max() - zs.min() + 1)
+    span = float(max(ys.max() - ys.min() + 1, xs.max() - xs.min() + 1))
+    aspect = height / span if span > 0 else 0.0
+    return {
+        "count": int(residue_labels.size),
+        "total_um3": total_vox * vox,
+        "largest_um3": float(sizes[largest_lbl - 1]) * vox,
+        "max_aspect": float(aspect),
+    }
+
+
 def cmp_uniformity_pct(wafer: Wafer) -> float:
     """表面高さの不均一性 (3σ/平均, %) を返す。CMP 平坦性評価の指標。
 

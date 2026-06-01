@@ -209,6 +209,50 @@ def test_void_metrics_detects_buried_void(wafer):
     assert np.isclose(m["max_height_um"], 4 * wafer.config.pitch_um)
 
 
+# --- エッチ残渣／ストリンガー検出 -----------------------------------------
+def test_etch_residue_none_for_large_film(wafer):
+    # 大きな連続膜は残渣として検出されない
+    CVD(material="tungsten", thickness_um=0.5).apply(wafer)
+    m = metrology.etch_residue_metrics(wafer, "tungsten", max_island_um3=0.02)
+    assert m["count"] == 0
+    assert m["total_um3"] == 0.0
+
+
+def test_etch_residue_detects_small_island(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    # 小さな孤立片（2x2x2 ボクセル）を残渣として配置
+    grid[30:32, 10:12, 10:12] = w_id
+    m = metrology.etch_residue_metrics(wafer, "tungsten", max_island_um3=0.02)
+    assert m["count"] == 1
+    assert m["largest_um3"] > 0.0
+
+
+def test_etch_residue_stringer_high_aspect(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    # 細長く背の高いストリンガー（高さ6, 幅1）→ 縦横比 > 1
+    grid[28:34, 15, 15] = w_id
+    m = metrology.etch_residue_metrics(wafer, "tungsten", max_island_um3=0.02)
+    assert m["count"] == 1
+    assert m["max_aspect"] > 1.0
+
+
+def test_etch_residue_threshold_excludes_big(wafer):
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    grid[30:32, 10:12, 10:12] = w_id  # 8 ボクセル = 0.008µm³
+    # 閾値を島より小さくすると検出されない
+    m = metrology.etch_residue_metrics(wafer, "tungsten", max_island_um3=0.001)
+    assert m["count"] == 0
+
+
+def test_etch_residue_absent_material(wafer):
+    m = metrology.etch_residue_metrics(wafer, "tungsten")
+    assert m["count"] == 0
+    assert m["max_aspect"] == 0.0
+
+
 # --- Deal-Grove 熱酸化モデル ----------------------------------------------
 def test_deal_grove_monotonic_in_time():
     from semisim.processes import deal_grove_thickness_um
