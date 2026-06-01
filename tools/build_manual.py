@@ -72,6 +72,15 @@ def _stripe_mask(period=0.4, width=0.2) -> Mask:
     return Mask(shapes=[Shape("grating", {"angle": 90.0, "period": period, "width": width})])
 
 
+def _mandrel_mask(centers, w=0.10) -> Mask:
+    """正規化 x 中心位置のリストに、幅 w の縦ライン（マンドレル）を置く。"""
+    half = w / 2.0
+    return Mask(shapes=[
+        Shape("rect", {"x0": c - half, "y0": 0.0, "x1": c + half, "y1": 1.0})
+        for c in centers
+    ])
+
+
 def render(wafer: Wafer, title: str, fname: str, ylim=None) -> None:
     """中央 Y 断面（XZ 面）を PNG 保存する。"""
     plane, width_um, height_um = visualize.slice_2d(wafer, "Y", wafer.config.ny // 2)
@@ -219,6 +228,44 @@ def demos() -> list:
         "from semisim.processes import Spacer\n"
         "r.add(Spacer(material='nitride', thickness_um=0.08))",
         d_spacer, None,
+    ))
+
+    # --- SADP（ピッチダブリング）---
+    def d_sadp():
+        r = Recipe(config=cfg())
+        # 被パターン層（ポリシリコン）
+        r.add(CVD(material="poly", thickness_um=0.30))
+        # マンドレル（犠牲レジスト）をリソ解像度の緩いピッチで 3 本形成
+        r.add(Photo(mask=_mandrel_mask([0.28, 0.5, 0.72], 0.10),
+                    thickness_um=0.30, polarity="positive"))
+        # コンフォーマル成膜＋エッチバックでマンドレル側壁にスペーサを残す
+        r.add(Spacer(material="oxide", thickness_um=0.08, overetch_um=0.02))
+        # マンドレル引き抜き → 自立スペーサ（1 マンドレルあたり 2 本＝ピッチ半減）
+        r.add(Strip(material="photoresist"))
+        # スペーサをハードマスクに被パターン層へ転写
+        r.add(DryEtch(targets=["poly"], depth_um=0.32))
+        return r.simulate()
+    items.append((
+        "sadp", "ピッチダブリング (SADP / 自己整合ダブルパターニング)", "微細化",
+        "リソ解像限界より細かい配線ピッチを作る先端微細化プロセスです。"
+        "①被パターン層の上に<strong>マンドレル（犠牲芯材）</strong>を緩いピッチで"
+        "パターニング → ②コンフォーマル成膜＋異方性エッチバックで"
+        "<strong>側壁スペーサ</strong>を残す → ③<strong>マンドレルを引き抜く</strong>と"
+        "1 本のマンドレルから 2 本のスペーサが自立し<strong>ピッチが半分（線密度2倍）</strong>に"
+        "なります → ④スペーサをハードマスクに下地へ転写。本例は 3 本のマンドレルから"
+        "6 本のフィンを形成しています（2×）。スペーサ幅がそのまま最終線幅になるため、"
+        "露光波長に依存しないサブリソ寸法が得られます。",
+        [("マンドレル", "Photo で緩ピッチに形成"),
+         ("Spacer.thickness_um", "スペーサ幅＝最終線幅[µm]"),
+         ("Strip", "マンドレル引き抜き"),
+         ("DryEtch.targets", "転写する下地層")],
+        "from semisim.processes import CVD, Photo, Spacer, Strip, DryEtch\n"
+        "r.add(CVD(material='poly', thickness_um=0.30))            # 被パターン層\n"
+        "r.add(Photo(mask=mandrels, thickness_um=0.30))           # マンドレル\n"
+        "r.add(Spacer(material='oxide', thickness_um=0.08))       # 側壁スペーサ\n"
+        "r.add(Strip(material='photoresist'))                     # マンドレル引き抜き\n"
+        "r.add(DryEtch(targets=['poly'], depth_um=0.32))          # 下地へ転写",
+        d_sadp, (1.8, 2.8),
     ))
 
     # --- ドライエッチ ---
