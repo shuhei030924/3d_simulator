@@ -17,6 +17,10 @@ env/
 *.json
 !**/sample*.json
 
+# スクラッチ診断スクリプト / 視覚検証の一時出力（コミットしない）
+tools/_*.py
+docs/verify/
+
 # OS / エディタ
 .DS_Store
 Thumbs.db

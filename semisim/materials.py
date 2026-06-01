@@ -22,6 +22,8 @@ class Material:
         is_resist: フォトレジストかどうか（マスクとして機能）。
         stress_mpa: 残留膜応力（MPa, 引張+ / 圧縮-）。反り計算に使用。
         resistivity_ohm_um: 電気抵抗率（Ω·µm）。配線抵抗推定に使用。0=非導体扱い。
+        rel_permittivity: 比誘電率 εr（無次元）。寄生容量/RC 推定に使用。
+            導体は 0（誘電体として扱わない）。空気/真空は 1.0。0=未設定（容量計算で 1.0 扱い）。
     """
 
     id: int
@@ -33,17 +35,23 @@ class Material:
     is_resist: bool = False
     stress_mpa: float = 0.0
     resistivity_ohm_um: float = 0.0
+    rel_permittivity: float = 0.0
 
 
 # --- 標準材料テーブル -------------------------------------------------------
 # 半導体プロセスで頻出する材料を定義。色は断面で識別しやすいものを選択。
 _MATERIALS: list[Material] = [
-    Material(0, "air", "空気/真空", (1.0, 1.0, 1.0), opacity=0.0, etchable=False),
-    Material(1, "silicon", "シリコン基板", (0.45, 0.45, 0.50), etchable=False),
-    Material(2, "oxide", "酸化膜 (SiO2)", (0.40, 0.78, 0.95), stress_mpa=-300.0),
+    Material(0, "air", "空気/真空", (1.0, 1.0, 1.0), opacity=0.0, etchable=False,
+             rel_permittivity=1.0),
+    Material(1, "silicon", "シリコン基板", (0.45, 0.45, 0.50), etchable=False,
+             rel_permittivity=11.7),
+    Material(2, "oxide", "酸化膜 (SiO2)", (0.40, 0.78, 0.95), stress_mpa=-300.0,
+             rel_permittivity=3.9),
     Material(3, "poly", "ポリシリコン", (0.80, 0.25, 0.25), stress_mpa=-200.0),
-    Material(4, "nitride", "窒化膜 (Si3N4)", (0.30, 0.72, 0.40), stress_mpa=1000.0),
-    Material(5, "photoresist", "フォトレジスト", (0.95, 0.82, 0.25), opacity=0.85, is_resist=True),
+    Material(4, "nitride", "窒化膜 (Si3N4)", (0.30, 0.72, 0.40), stress_mpa=1000.0,
+             rel_permittivity=7.5),
+    Material(5, "photoresist", "フォトレジスト", (0.95, 0.82, 0.25), opacity=0.85, is_resist=True,
+             rel_permittivity=3.0),
     Material(6, "metal_al", "金属 (Al)", (0.82, 0.82, 0.88), stress_mpa=100.0,
              resistivity_ohm_um=0.0265),
     Material(7, "metal_cu", "金属 (Cu)", (0.85, 0.52, 0.25), stress_mpa=200.0,
@@ -54,9 +62,12 @@ _MATERIALS: list[Material] = [
     Material(10, "doped_p", "p型拡散層", (0.85, 0.35, 0.55), resistivity_ohm_um=2000.0),
     Material(11, "tin", "バリア (TiN)", (0.65, 0.62, 0.45), stress_mpa=-500.0,
              resistivity_ohm_um=0.25),
-    Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78), stress_mpa=-60.0),
-    Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False),
-    Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80), stress_mpa=500.0),
+    Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78), stress_mpa=-60.0,
+             rel_permittivity=2.5),
+    Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False,
+             rel_permittivity=11.7),
+    Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80), stress_mpa=500.0,
+             rel_permittivity=25.0),
     Material(15, "tan", "バリア (TaN)", (0.50, 0.48, 0.55), stress_mpa=-1000.0,
              resistivity_ohm_um=2.5),
     Material(16, "silicide", "シリサイド (NiSi)", (0.78, 0.70, 0.30), stress_mpa=500.0,

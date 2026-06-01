@@ -1074,6 +1074,93 @@ def contact_resistance_ohm(
     return float(specific_contact_resistivity_ohm_um2 / area)
 
 
+# 真空誘電率 ε0 を「容量[fF] = _EPS0_FF·εr·A[µm²]/d[µm]」の係数に換算した定数。
+#   ε0 = 8.854e-12 F/m → 8.854e-3 fF·µm/µm²（µm 単位系での値）。
+_EPS0_FF = 8.854e-3
+
+
+def _conductor_ids() -> set[int]:
+    """導体（ρ>0）の材料 ID 集合を返す。"""
+    return {m.id for m in materials.all_materials() if m.resistivity_ohm_um > 0}
+
+
+def permittivity_field(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの比誘電率 εr を格納した配列を返す（容量計算の補助）。
+
+    誘電体材料は定義済み rel_permittivity、空気は 1.0、それ以外（未設定の
+    導体など）は既定 1.0。導体ボクセルは容量計算側でマスク除外される。
+    """
+    grid = wafer.grid
+    eps = np.ones(grid.shape, dtype=float)  # 既定 = 真空/空気 1.0
+    for m in materials.all_materials():
+        if m.rel_permittivity > 0:
+            eps[grid == m.id] = m.rel_permittivity
+    return eps
+
+
+def parasitic_capacitance_ff(wafer: Wafer, name_a, name_b) -> float:
+    """2 導体間の寄生容量（fF）を面対向ライン走査で推定する。
+
+    3 軸それぞれに沿ってボクセル列を走査し、導体 A の面と導体 B の面が
+    「間に他導体を挟まず」直接対向する区間を見つける。各対向区間を断面
+    pitch²・電極間距離 d（µm）・介在誘電体平均比誘電率 εr の平行平板素子と
+    見なし、dC = ε0·εr·pitch²/d を全方向・全列で積算する。
+
+    平行平板（面積 Aₚ・間隙 g・一様誘電体 εr）では解析値 ε0·εr·Aₚ/g に
+    厳密一致し、面内で隣接する配線間の対向（カップリング容量）も自動的に
+    加算される。間に第 3 の導体があるとそこで遮蔽される。配線間/対基板容量の
+    評価や RC 遅延（rc_delay_ps）の入力に使う。どちらかの材料が存在しなければ
+    0、同一材料指定も 0。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    if a.id == b.id:
+        return 0.0
+    grid = wafer.grid
+    if not (grid == a.id).any() or not (grid == b.id).any():
+        return 0.0
+    pitch = wafer.config.pitch_um
+    eps_field = permittivity_field(wafer)
+    is_cond = np.isin(grid, list(_conductor_ids()))
+    pair = {a.id, b.id}
+    coef0 = _EPS0_FF * (pitch ** 2)
+
+    total = 0.0
+    for axis in (0, 1, 2):
+        # 走査軸を末尾へ移動して 2 次元 (線数, 線長) に展開
+        g2 = np.moveaxis(grid, axis, -1).reshape(-1, grid.shape[axis])
+        e2 = np.moveaxis(eps_field, axis, -1).reshape(-1, grid.shape[axis])
+        c2 = np.moveaxis(is_cond, axis, -1).reshape(-1, grid.shape[axis])
+        # A・B 両方を含む線のみ処理（大半の線を高速にスキップ）
+        targets = np.nonzero((g2 == a.id).any(1) & (g2 == b.id).any(1))[0]
+        for li in targets:
+            line = g2[li]
+            pos = np.nonzero(c2[li])[0]  # 導体ボクセルの位置
+            for k in range(pos.size - 1):
+                p, q = int(pos[k]), int(pos[k + 1])
+                if {int(line[p]), int(line[q])} != pair:
+                    continue  # 対向ペアでない（同材料 or 第3導体）
+                sep = (q - p) * pitch  # 電極面間距離 µm
+                eps_gap = float(e2[li][p + 1:q].mean()) if q - p > 1 else 1.0
+                total += coef0 * eps_gap / sep
+    return float(total)
+
+
+def rc_delay_ps(wafer: Wafer, line_material, return_material, axis: str = "x") -> float:
+    """配線の RC 遅延（ps）を集中定数モデル τ=R·C で推定する。
+
+    R は line_resistance_ohm（指定軸の直列抵抗 Ω）、C は line_material と
+    return_material（対向電極=隣接配線や基板）間の parasitic_capacitance_ff
+    （fF）。τ[ps] = R[Ω]·C[F]·1e12 = R·C_fF·1e-3。断線（R=inf）や
+    容量 0 では inf／0 を返す。配線遅延の一次見積りに使う。
+    """
+    r = line_resistance_ohm(wafer, line_material, axis)
+    if r == float("inf"):
+        return float("inf")
+    c_ff = parasitic_capacitance_ff(wafer, line_material, return_material)
+    return float(r * c_ff * 1e-3)
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
@@ -1140,19 +1227,24 @@ def report(wafer: Wafer) -> str:
                 f"  {m.name:<12} シート抵抗={rs_txt}Ω/sq  "
                 f"x方向={conn}  連結成分={cont['n_components']}"
             )
-        # 導体ペア間の最小間隔（ショート/近接リスク）
+        # 導体ペア間の最小間隔（ショート/近接リスク）＋寄生容量
         pair_lines: list[str] = []
         for i in range(len(conductors)):
             for j in range(i + 1, len(conductors)):
                 a, b = conductors[i], conductors[j]
                 sp = min_spacing_um(wafer, a.name, b.name)
+                cap = parasitic_capacitance_ff(wafer, a.name, b.name)
+                if sp == float("inf") and cap <= 0:
+                    continue
+                parts = [f"  {a.name}-{b.name}"]
                 if sp != float("inf"):
-                    flag = "  ★接触/ショート" if sp == 0.0 else ""
-                    pair_lines.append(
-                        f"  {a.name}-{b.name} 最小間隔={sp:.3f}µm{flag}"
-                    )
+                    flag = " ★接触/ショート" if sp == 0.0 else ""
+                    parts.append(f"最小間隔={sp:.3f}µm{flag}")
+                if cap > 0:
+                    parts.append(f"寄生容量={cap:.3f}fF")
+                pair_lines.append("  ".join(parts))
         if pair_lines:
-            lines.append("導体間 最小間隔 (DRC):")
+            lines.append("導体間 最小間隔/容量 (DRC/寄生):")
             lines.extend(pair_lines)
     return "\n".join(lines)
 
@@ -1182,13 +1274,21 @@ def electrical_report(wafer: Wafer) -> dict:
             "n_components": cont["n_components"],
         }
     spacing: dict[str, float] = {}
+    capacitance: dict[str, float] = {}
     for i in range(len(conductors)):
         for j in range(i + 1, len(conductors)):
             a, b = conductors[i], conductors[j]
             sp = min_spacing_um(wafer, a.name, b.name)
             if sp != float("inf"):
                 spacing[f"{a.name}-{b.name}"] = sp
-    return {"conductors": cond_data, "min_spacing_um": spacing}
+            cap = parasitic_capacitance_ff(wafer, a.name, b.name)
+            if cap > 0:
+                capacitance[f"{a.name}-{b.name}"] = cap
+    return {
+        "conductors": cond_data,
+        "min_spacing_um": spacing,
+        "capacitance_ff": capacitance,
+    }
 
 
 def defect_report(wafer: Wafer) -> dict:
