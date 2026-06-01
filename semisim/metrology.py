@@ -1419,6 +1419,84 @@ def joule_self_heating_k(
     }
 
 
+def temperature_field_2d(
+    wafer: Wafer, source_mask: np.ndarray, total_power_w: float, y_index: int | None = None
+) -> np.ndarray:
+    """2.5D 熱拡散ソルバで XZ 断面の温度上昇分布 ΔT[K] を返す。
+
+    指定 y 断面で定常熱伝導方程式 ∇·(k∇T)=−q を有限体積・疎行列直接解法で解く。
+    基板最下行（z=0）を温度基準（ヒートシンク, ΔT=0）の Dirichlet 境界、他境界は
+    断熱（Neumann）とする。発熱は source_mask（3D bool, True が発熱領域）の当該
+    断面ボクセルに、単位 y 長あたり total_power_w/Ly を均等分配する。横方向の熱拡散
+    （ヒートスプレッディング）を捉え、均一全面発熱では 1D 熱抵抗の ΔT=P·R_th に一致する。
+    返り値は (nz, nx) の ΔT[K] 配列。
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import spsolve
+
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    if y_index is None:
+        y_index = ny // 2
+    kf = thermal_conductivity_field(wafer)[:, y_index, :]  # (nz, nx) W/m·K
+    src2d = source_mask[:, y_index, :]
+    pitch_m = wafer.config.pitch_um * 1e-6
+    ly_m = ny * pitch_m
+    n_src = int(src2d.sum())
+    # 単位 y 長あたり発熱 [W/m]、各発熱セルに均等分配
+    p_per_depth = (total_power_w / ly_m) if ly_m > 0 else 0.0
+    s_cell = (p_per_depth / n_src) if n_src > 0 else 0.0
+
+    sink = np.zeros((nz, nx), dtype=bool)
+    sink[0, :] = True  # 基板底=ヒートシンク
+    idx = -np.ones((nz, nx), dtype=int)
+    unk = np.argwhere(~sink)
+    for k, (i, j) in enumerate(unk):
+        idx[i, j] = k
+    m = len(unk)
+    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def k_face(i, j, ii, jj):
+        a, c = kf[i, j], kf[ii, jj]
+        return 2.0 * a * c / (a + c) if (a + c) > 0 else 0.0
+
+    rows: list[int] = []
+    cols: list[int] = []
+    data: list[float] = []
+    b = np.zeros(m)
+    for k, (i, j) in enumerate(unk):
+        diag = 0.0
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < nz and 0 <= jj < nx):
+                continue
+            kfc = k_face(i, j, ii, jj)
+            diag += kfc
+            if sink[ii, jj]:
+                pass  # ΔT=0 のシンク → 寄与 0
+            else:
+                rows.append(k)
+                cols.append(idx[ii, jj])
+                data.append(-kfc)
+        rows.append(k)
+        cols.append(k)
+        data.append(diag)
+        if src2d[i, j]:
+            b[k] += s_cell  # 発熱（W/m depth）
+    mat = csr_matrix((data, (rows, cols)), shape=(m, m))
+    t_unk = spsolve(mat, b)
+    t = np.zeros((nz, nx))
+    t[~sink] = t_unk
+    return t
+
+
+def peak_temperature_rise_k(
+    wafer: Wafer, source_mask: np.ndarray, total_power_w: float, y_index: int | None = None
+) -> float:
+    """2.5D 熱拡散ソルバによる断面内の最大温度上昇 ΔT_max[K] を返す。"""
+    return float(temperature_field_2d(wafer, source_mask, total_power_w, y_index).max())
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:
