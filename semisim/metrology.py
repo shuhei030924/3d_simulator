@@ -1500,6 +1500,67 @@ def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dic
     }
 
 
+def stress_field_mpa(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの残留膜応力 σ（MPa）を格納した配列を返す。空気は 0。"""
+    grid = wafer.grid
+    s = np.zeros(grid.shape, dtype=float)
+    for m in materials.all_materials():
+        if m.stress_mpa != 0.0:
+            s[grid == m.id] = m.stress_mpa
+    return s
+
+
+def stress_concentration_map(wafer: Wafer) -> np.ndarray:
+    """局所応力集中マップ（MPa 相当）を返す。クラック/剥離リスク箇所の検出。
+
+    各固体ボクセルについて、隣接（6 近傍）との応力ミスマッチ最大値
+    Δσ=max|σ_self−σ_neighbor|（空気は σ=0 の自由表面扱い）を求め、幾何学的な
+    応力集中係数 Kt=1+(異材/空気に接する面数)/2 を掛ける。界面の応力差が大きい
+    箇所（例: 高応力 Si3N4 と圧縮 SiO2 の界面）や、露出面の多い凸角ほど高い値に
+    なる。空気ボクセルは 0。シミュレーション境界はラップさせない。
+    """
+    grid = wafer.grid
+    s = stress_field_mpa(wafer)
+    solid = grid != materials.AIR
+    mism = np.zeros(grid.shape, dtype=float)
+    n_diff = np.zeros(grid.shape, dtype=int)
+    for axis in (0, 1, 2):
+        for shift in (1, -1):
+            sn = np.roll(s, shift, axis=axis)
+            gn = np.roll(grid, shift, axis=axis)
+            d = np.abs(s - sn)
+            diff = gn != grid
+            # ラップした境界面は隣接なし扱い（偽の集中を防ぐ）
+            sl = [slice(None)] * 3
+            sl[axis] = 0 if shift == 1 else -1
+            d[tuple(sl)] = 0.0
+            diff[tuple(sl)] = False
+            mism = np.maximum(mism, d)
+            n_diff += diff.astype(int)
+    kt = 1.0 + n_diff / 2.0
+    conc = mism * kt
+    conc[~solid] = 0.0
+    return conc
+
+
+def max_stress_concentration(wafer: Wafer) -> dict:
+    """最大応力集中の値と位置・関与材料を返す（剥離/クラック最弱点）。
+
+    返す辞書: value_mpa（集中値）/ location（z,y,x）/ material（その位置の材料名）。
+    固体が無ければ value_mpa=0。
+    """
+    conc = stress_concentration_map(wafer)
+    if not (conc > 0).any():
+        return {"value_mpa": 0.0, "location": None, "material": None}
+    idx = np.unravel_index(int(np.argmax(conc)), conc.shape)
+    mat = materials.BY_ID.get(int(wafer.grid[idx]))
+    return {
+        "value_mpa": float(conc[idx]),
+        "location": tuple(int(i) for i in idx),
+        "material": mat.name if mat else None,
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
