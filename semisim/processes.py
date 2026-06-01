@@ -1910,20 +1910,23 @@ class AnisoWetEtch(Process):
         if not opening.any():
             return
 
-        for d in range(depth):
-            inset = int(round(d / tan_a))  # 深さに比例して内側へ後退
-            if inset > 0:
-                layer = ndimage.binary_erosion(opening, iterations=inset)
-            else:
-                layer = opening
-            if not layer.any():
-                break
-            zlayer = z_top - d
-            sel = layer & (zlayer >= 0)
-            ys, xs = np.nonzero(sel)
-            zz = zlayer[ys, xs]
-            is_t = grid[zz, ys, xs] == target_id
-            grid[zz[is_t], ys[is_t], xs[is_t]] = materials.AIR
+        # 各開口列について、最も近い開口縁までの水平距離を求める。結晶異方性
+        # エッチでは側壁が角度 angle で内側へ傾くため、縁から距離 r の列は
+        # 深さ r·tan(angle) まで掘れて V 溝/逆ピラミッド底で自己停止する。
+        # （帯状開口は幅、正方形開口は対角で律速。binary_erosion を使うと
+        #  y 方向にも侵食して薄い格子では深さが ny に律速される不具合を回避）
+        dist = ndimage.distance_transform_edt(opening)  # 縁からの距離[vox]
+        max_d_col = np.minimum(dist * tan_a, float(depth))  # 列ごと到達深さ[vox]
+
+        z_idx = np.arange(grid.shape[0])[:, None, None]
+        # 各列で z_top-d (d=1..max_d_col) のターゲット材を除去する。
+        etch_mask = (
+            opening[None, :, :]
+            & (z_idx <= z_top[None, :, :])
+            & (z_idx > (z_top - max_d_col.astype(int))[None, :, :])
+            & (grid == target_id)
+        )
+        grid[etch_mask] = materials.AIR
 
     def params_dict(self) -> dict:
         return {
@@ -2208,7 +2211,12 @@ class DRIE(Process):
 
         amp = wafer.um_to_vox(self.scallop_um) if self.scallop_um > 0 else 0
         pitch = max(2, wafer.um_to_vox(self.scallop_pitch_um))
-        struct = ndimage.generate_binary_structure(3, 1)
+        # スキャロップ膨らみは横方向(x,y)のみに広げる構造要素。z 成分を含めると
+        # dilation が下方へも掘り進み、エッチ深さが指定値より深くなってしまう。
+        lat_struct = np.zeros((3, 3, 3), dtype=bool)
+        lat_struct[1, 1, 1] = True
+        lat_struct[1, 0, 1] = lat_struct[1, 2, 1] = True
+        lat_struct[1, 1, 0] = lat_struct[1, 1, 2] = True
 
         for d in range(depth):
             z_top, top_id = _top_material(wafer)
@@ -2220,12 +2228,14 @@ class DRIE(Process):
             grid[zz, ys, xs] = materials.AIR
             etched[do] += 1.0
             # スキャロップ: 周期の中央付近でその層だけ側壁を横へ膨らませる。
-            # 直近に掘った 1 層分のみを横方向に拡張するため、深さに比例した
-            # 累積的なテーパは生じず、垂直側壁に局所的な凹凸が付く。
+            # 直近に掘った 1 層分のみを横方向(x,y)に拡張するため、深さに比例した
+            # 累積的なテーパや過剰掘りは生じず、垂直側壁に局所的な凹凸が付く。
             if amp > 0 and (d % pitch) == (pitch // 2):
                 layer = np.zeros(grid.shape, dtype=bool)
                 layer[zz, ys, xs] = True
-                ring = ndimage.binary_dilation(layer, structure=struct, iterations=amp)
+                ring = ndimage.binary_dilation(
+                    layer, structure=lat_struct, iterations=amp
+                )
                 bulge = ring & (grid == target_id)
                 grid[bulge] = materials.AIR
 
