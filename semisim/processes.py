@@ -2160,8 +2160,41 @@ class LiftOff(Process):
         # 各列のレジスト最下面 z（底から最初に True になる位置）
         resist_bottom = np.argmax(resist, axis=0)  # (y, x)
         z_idx = np.arange(nz)[:, None, None]
-        remove = (z_idx >= resist_bottom[None, :, :]) & has_resist[None, :, :]
-        grid[remove] = materials.AIR
+        resist_cols = (z_idx >= resist_bottom[None, :, :]) & has_resist[None, :, :]
+        # レジスト列（レジスト＋その上に乗った膜）を一括除去する。
+        grid[resist_cols] = materials.AIR
+
+        # フェンス（ラビットイヤー）除去: 指向性成膜はレジスト側壁にも膜を
+        # 付けるが、リフトオフ用レジストはアンダーカット形状のため側壁膜は
+        # 基板上の膜と切れて一緒に剥がれる。残ると開口端に三角形の突起
+        # （偽像）になるので、平坦膜の上面より高くレジスト跡に連結する固体を
+        # 連結的に除去し、基板上の所望パターンだけを残す。
+        solid = grid != materials.AIR
+        if solid.any():
+            col_has = solid.any(axis=0)
+            top_z = np.where(
+                col_has, (nz - 1) - np.argmax(solid[::-1], axis=0), -1
+            )
+            flat = top_z[top_z >= 0]
+            if flat.size:
+                # 平坦膜の上面（最頻値）。突起はこれより上にだけ立つ。
+                flat_top = int(np.bincount(flat).argmax())
+                lat = np.zeros((3, 3, 3), dtype=bool)
+                lat[1, 1, 1] = lat[1, 1, 0] = lat[1, 1, 2] = True
+                lat[1, 0, 1] = lat[1, 2, 1] = True
+                above = z_idx > flat_top
+                fence = ndimage.binary_dilation(
+                    resist_cols, structure=lat
+                ) & solid & above
+                while True:
+                    grown = (
+                        ndimage.binary_dilation(fence, structure=lat)
+                        & solid & above
+                    )
+                    if int(grown.sum()) == int(fence.sum()):
+                        break
+                    fence = grown
+                grid[fence] = materials.AIR
 
     def params_dict(self) -> dict:
         return {}
