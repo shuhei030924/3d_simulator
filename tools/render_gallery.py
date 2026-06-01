@@ -32,6 +32,7 @@ from semisim.processes import (  # noqa: E402
     PVD,
     AnisoWetEtch,
     Anneal,
+    AtomicLayerEtch,
     Diffusion,
     DryEtch,
     Epitaxy,
@@ -142,8 +143,21 @@ def recipe_mosfet() -> Recipe:
     return r
 
 
+def recipe_ale() -> Recipe:
+    """ALE による nm 精度の自己制限・高選択リセス（等方成分でマスク下を後退）。"""
+    r = Recipe(config=cfg())
+    r.add(CVD(material="oxide", thickness_um=1.5))
+    r.add(Photo(mask=_stripe_mask(0.4, 0.2), thickness_um=1.0, polarity="positive"))
+    # cycles×epc=0.8µm を精密除去。anisotropy=0.3 で側壁に等方アンダーカット。
+    r.add(AtomicLayerEtch(targets=["oxide"], cycles=400, etch_per_cycle_nm=2.0,
+                          anisotropy=0.3))
+    r.add(Strip(material="photoresist"))
+    return r
+
+
 GALLERY = {
     "implant_buried_layer": recipe_implant,
+    "ale_recess": recipe_ale,
     "anneal_drivein": recipe_anneal,
     "epitaxy_selective": recipe_epitaxy,
     "koh_vgroove": recipe_koh,

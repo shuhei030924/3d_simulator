@@ -14,8 +14,13 @@
   SPUTTER（イオンミリング）/ REFLOW（熱リフロー）/ CLEAN（プラズマクリーン）。
   材料は High-k(HfO₂)・TaN バリア・シリサイド(NiSi) など 16 種に対応。各材料は残留膜応力(MPa)を持ち、Stoney 則による等価ウェハ反りを計測できます。
 - **任意角度パターン**: 回転矩形・帯・周期ライン（グレーティング）。
-- **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD に加え、表面粗さ(RMS)・側壁角・界面面積・トレンチ閉塞(ボイド)判定・ビア充填品質(`via_fill_quality`)・側壁ボーイング(`sidewall_bowing_um`)・段差被覆性(`conformality_pct`)・パターン密度(`pattern_density_map`/`pattern_density_stats`)・サーマルバジェット(`thermal_budget`)・膜応力とウェハ反り(`film_stress_thickness`/`wafer_bow_um`, Stoney 則)・ダマシンディッシング深さ(`dishing_depth_um`)・層間界面粗さ(`interface_roughness_um`)・接合深さと深さ方向ドーパントプロファイル(`junction_depth_um`/`dopant_depth_profile`)・表面凹凸の支配波長(`dominant_wavelength_um`, 2D FFT)・埋め込みボイドの連結成分統計(`void_metrics`: 個数/最大体積/縦方向高さ)・線幅ラフネス(`line_width_roughness_um`, LWR)・限界寸法均一性(`cd_uniformity`, CDU: 平均 CD/3σ/範囲)・導体の電気的導通/オープン判定(`electrical_continuity`, 連結成分が指定軸の両端に到達するか)・配線抵抗推定(`line_resistance_ohm`, 断面積を考慮した直列抵抗 R=Σρ·Δl/A, 細り箇所で増大・断線で inf)・DRC 最小間隔(`min_spacing_um`, 2 材料間の最小距離=ショート不良リスク, 接触で 0)・シート抵抗(`sheet_resistance_ohm_sq`, Rs=ρ/t, 4 探針相当の薄膜評価)・コンタクト面積/接触抵抗(`contact_area_um2`/`contact_resistance_ohm`, 面ペア数×pitch² と Rc=ρc/A)・エッチ残渣/ストリンガー検出(`etch_residue_metrics`, 微小孤立片の個数/総体積/最大縦横比でブロックエッチ残り・側壁ストリンガーを判定)・アンダーカット検出(`undercut_um`, マスク開口に対する被加工材料の横方向後退量=等方/過剰サイドエッチ不良)・ピンホール検出(`pinhole_metrics`, 膜に囲まれた貫通抜けの個数/面積=カバレッジ/パーティクル起因リーク欠陥)・統合不良レポート(`defect_report`, ボイド/ピンホール/エッチ残渣/ディッシング/反りを横断検査した機械可読辞書, CLI `--json-report` の `defects` に統合)など計測ヘルパ（`semisim/metrology.py`）。
+- **メトロロジ**: 膜厚マップ・段差・体積・アスペクト比・断面 CD に加え、表面粗さ(RMS)・側壁角・界面面積・トレンチ閉塞(ボイド)判定・ビア充填品質(`via_fill_quality`)・側壁ボーイング(`sidewall_bowing_um`)・段差被覆性(`conformality_pct`)・パターン密度(`pattern_density_map`/`pattern_density_stats`)・サーマルバジェット(`thermal_budget`)・膜応力とウェハ反り(`film_stress_thickness`/`wafer_bow_um`, Stoney 則)・局所応力集中(`stress_concentration_map`/`max_stress_concentration`, 界面の応力ミスマッチ Δσ×幾何集中係数 Kt でクラック/剥離リスク箇所=凸角・高応力界面を検出)・ダマシンディッシング深さ(`dishing_depth_um`)・層間界面粗さ(`interface_roughness_um`)・接合深さと深さ方向ドーパントプロファイル(`junction_depth_um`/`dopant_depth_profile`)・表面凹凸の支配波長(`dominant_wavelength_um`, 2D FFT)・埋め込みボイドの連結成分統計(`void_metrics`: 個数/最大体積/縦方向高さ)・線幅ラフネス(`line_width_roughness_um`, LWR)・限界寸法均一性(`cd_uniformity`, CDU: 平均 CD/3σ/範囲)・導体の電気的導通/オープン判定(`electrical_continuity`, 連結成分が指定軸の両端に到達するか)・配線抵抗推定(`line_resistance_ohm`, 断面積を考慮した直列抵抗 R=Σρ·Δl/A, 細り箇所で増大・断線で inf)・DRC 最小間隔(`min_spacing_um`, 2 材料間の最小距離=ショート不良リスク, 接触で 0)・シート抵抗(`sheet_resistance_ohm_sq`, Rs=ρ/t, 4 探針相当の薄膜評価)・コンタクト面積/接触抵抗(`contact_area_um2`/`contact_resistance_ohm`, 面ペア数×pitch² と Rc=ρc/A)・寄生容量(`parasitic_capacitance_ff`, 面対向ライン走査による平行平板積算 C=Σε0·εr·pitch²/d。平行平板の解析値に厳密一致し配線間カップリング/対基板容量を評価。各材料の比誘電率 rel_permittivity を使用)・寄生容量(静電界ソルバ)(`parasitic_capacitance_field_ff`, 断面で ∇·(εr∇φ)=0 を有限体積・疎行列直接解法で解き電束から容量を算出。全面平板では解析値に一致し、有限幅電極ではフリンジ容量を上乗せ=平行平板近似より大)・RC 遅延(`rc_delay_ps`, 集中定数 τ=R·C による配線遅延の一次見積り)・MOS ゲート容量/EOT(`mos_gate_capacitance`, ゲート積層の直列容量 Cox=ε0/Σ(tᵢ/εrᵢ) と等価酸化膜厚 EOT=εr(SiO2)·Σ(tᵢ/εrᵢ)。high-k で EOT 薄化=Cox 増を評価)・電流密度/EM 信頼性(`current_density_stats`/`electromigration_risk`, J=I/A をスライス毎に算出しネッキング箇所の最大 J を材料の許容電流密度 em_jmax_a_cm2 と比較)・絶縁破壊判定(`dielectric_breakdown`, 2 導体間の最小間隙から最大電界 E=V/g を求め誘電体の破壊電界 breakdown_field_mv_cm と比較)・歩留り推定(`yield_estimate`, 欠陥密度から Poisson/Murphy/Seeds モデルで歩留りを算出。`killer_defect_count` で検出キラー欠陥数を集計)・アンテナ比(`antenna_ratio`, プラズマ帯電損傷 DRC。ゲート酸化膜に接続した導体の露出表面積/ゲート面積でプロセスアンテナ効果によるゲート絶縁破壊リスクを判定)・縦方向熱抵抗(`thermal_resistance_k_w`/`thermal_resistance_map`, 各材料の熱伝導率 thermal_conductivity_w_mk から基板→表面の直列熱抵抗 R=ΣΔz/(k·A) を列毎に算出し並列合成。Cu ビアは低熱抵抗・low-k は熱障壁=ホットスポット検出)・自己発熱温度上昇(`temperature_rise_k`/`joule_self_heating_k`, ΔT=P·Rth。配線のジュール発熱 P=I²R から接合温度上昇を評価)・エッチ残渣/ストリンガー検出(`etch_residue_metrics`, 微小孤立片の個数/総体積/最大縦横比でブロックエッチ残り・側壁ストリンガーを判定)・アンダーカット検出(`undercut_um`, マスク開口に対する被加工材料の横方向後退量=等方/過剰サイドエッチ不良)・ピンホール検出(`pinhole_metrics`, 膜に囲まれた貫通抜けの個数/面積=カバレッジ/パーティクル起因リーク欠陥)・統合不良レポート(`defect_report`, ボイド/ピンホール/エッチ残渣/ディッシング/反りを横断検査した機械可読辞書, CLI `--json-report` の `defects` に統合)など計測ヘルパ（`semisim/metrology.py`）。
   人が読めるテキスト計測レポート（`metrology.report`）も生成できます。
+- **リソ プロセスウィンドウ解析**: 空間像（aerial image）モデル（`semisim/litho.py`）で、
+  マスク開口から印刷 CD を計算し、焦点・露光量に対する CD 応答（`bossung`）、
+  プロセスウィンドウ（被写界深度 DOF・露光裕度 EL, `process_window`）、エッジ配置誤差
+  （`edge_placement_error_um`）、マスク誤差増幅係数（`meef`）を検証できます。
+  しきい値=0.5 較正によりベストフォーカスで CD バイアスがほぼ 0、解像限界付近で MEEF が増大します。
 - **プリセットレシピ**: 代表的な 13 フロー（ダマシン・MOSFET・LDD MOSFET・KOH・DRIE・TSV 貫通ビア・サリサイドゲート・薄化 3D-IC 等）をメニューから即読込（`semisim/presets.py`）。
 - **設定の永続化**: 最後に使ったフォルダ・最近開いたレシピ・既定ウェハ設定・ウィンドウ位置を
   保存し次回起動時に復元（`semisim/settings.py`、`~/.semisim/settings.json`）。
@@ -105,6 +110,7 @@ py tools\render_gallery.py
 | ![implant](docs/gallery/implant_buried_layer.png) | イオン注入による埋込ドープ層（レジストで中央を遮蔽） |
 | ![koh](docs/gallery/koh_vgroove.png) | KOH 異方性エッチの V 溝（54.7° 側壁） |
 | ![drie](docs/gallery/drie_scallop.png) | DRIE 深掘りトレンチ（側壁スキャロップ） |
+| ![ale](docs/gallery/ale_recess.png) | ALE 原子層エッチによる nm 精度・高選択リセス（等方成分でマスク下を後退） |
 | ![damascene](docs/gallery/damascene_cu.png) | Cu ダマシン配線（TiN バリア＋CMP 平坦化） |
 | ![epitaxy](docs/gallery/epitaxy_selective.png) | 選択エピタキシャル成長（酸化膜開口部のみ） |
 | ![mosfet](docs/gallery/mosfet_flow.png) | 簡易 MOSFET フロー（ゲート＋ソース/ドレイン） |
@@ -127,6 +133,7 @@ py tools/build_manual.py
 | PVD | PVD 成膜 | 指向性成膜（段差被覆率でシャドーイング） |
 | DRY | ドライエッチ | 異方性エッチ（垂直・オーバーエッチ対応） |
 | WET | ウェットエッチ | 等方エッチ（アンダーカット） |
+| ALE | 原子層エッチ | サイクル数×1サイクル除去量で nm 精度・自己制限・高選択のエッチ（ALD の対）。`anisotropy` で等方コンフォーマル〜純垂直を切替 |
 | DIFFUSION | 拡散 | 表面からの不純物拡散 |
 | IMPLANT | イオン注入 | 投影飛程＋縦/横ストラグルのガウス濃度分布で埋込ドープ |
 | ANNEAL | アニール | ドーパントのドライブイン（等方再分布） |
@@ -134,6 +141,7 @@ py tools/build_manual.py
 | OXIDE | 熱酸化 | 露出 Si を消費し SiO₂ 成長（消費比は可変、既定 45/55 則） |
 | SALICIDE | シリサイド形成 | 露出 Si／ポリ上のみ自己整合でシリサイド化（`react_poly`でゲート反応を制御） |
 | SPACER | スペーサ形成 | コンフォーマル成膜＋異方性エッチバックで段差の垂直側壁にのみ材料を残す（ゲートスペーサ等） |
+| ALE | `cycles` / `etch_per_cycle_nm` / `anisotropy` | サイクル数×1サイクル除去量で除去深さを精密制御（自己制限）。`anisotropy`（0=等方コンフォーマル/1=純垂直）で指向性を切替。対象以外の材料で完全停止（高選択比） |
 | EPI | エピ成長 | 露出シリコン上のみに選択的単結晶成長 |
 | KOH | 異方性ウェット | 結晶面に沿った斜め側壁（V 溝・台形） |
 | FILL | 埋込（ダマシン） | 開口・トレンチをボトムアップで金属充填。高 AR でキーホール空隙 |
@@ -206,6 +214,7 @@ py tools/build_manual.py
 | `semisim/masks.py` | フォトマスク図形（分数座標 0..1） |
 | `semisim/processes.py` | 各プロセス工程のロジック |
 | `semisim/metrology.py` | 計測・解析ヘルパ |
+| `semisim/litho.py` | リソ空間像モデル・プロセスウィンドウ解析（Bossung/DOF/EL/EPE/MEEF） |
 | `semisim/recipe.py` | レシピ管理・シミュレーション・保存/読込 |
 | `semisim/presets.py` | 組み込みプリセットレシピ（レシピライブラリ） |
 | `semisim/settings.py` | アプリ設定の永続化（最近のレシピ・既定設定） |

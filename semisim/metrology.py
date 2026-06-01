@@ -1074,6 +1074,619 @@ def contact_resistance_ohm(
     return float(specific_contact_resistivity_ohm_um2 / area)
 
 
+# 真空誘電率 ε0 を「容量[fF] = _EPS0_FF·εr·A[µm²]/d[µm]」の係数に換算した定数。
+#   ε0 = 8.854e-12 F/m → 8.854e-3 fF·µm/µm²（µm 単位系での値）。
+_EPS0_FF = 8.854e-3
+
+
+def _conductor_ids() -> set[int]:
+    """導体（ρ>0）の材料 ID 集合を返す。"""
+    return {m.id for m in materials.all_materials() if m.resistivity_ohm_um > 0}
+
+
+def permittivity_field(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの比誘電率 εr を格納した配列を返す（容量計算の補助）。
+
+    誘電体材料は定義済み rel_permittivity、空気は 1.0、それ以外（未設定の
+    導体など）は既定 1.0。導体ボクセルは容量計算側でマスク除外される。
+    """
+    grid = wafer.grid
+    eps = np.ones(grid.shape, dtype=float)  # 既定 = 真空/空気 1.0
+    for m in materials.all_materials():
+        if m.rel_permittivity > 0:
+            eps[grid == m.id] = m.rel_permittivity
+    return eps
+
+
+def parasitic_capacitance_ff(wafer: Wafer, name_a, name_b) -> float:
+    """2 導体間の寄生容量（fF）を面対向ライン走査で推定する。
+
+    3 軸それぞれに沿ってボクセル列を走査し、導体 A の面と導体 B の面が
+    「間に他導体を挟まず」直接対向する区間を見つける。各対向区間を断面
+    pitch²・電極間距離 d（µm）・介在誘電体平均比誘電率 εr の平行平板素子と
+    見なし、dC = ε0·εr·pitch²/d を全方向・全列で積算する。
+
+    平行平板（面積 Aₚ・間隙 g・一様誘電体 εr）では解析値 ε0·εr·Aₚ/g に
+    厳密一致し、面内で隣接する配線間の対向（カップリング容量）も自動的に
+    加算される。間に第 3 の導体があるとそこで遮蔽される。配線間/対基板容量の
+    評価や RC 遅延（rc_delay_ps）の入力に使う。どちらかの材料が存在しなければ
+    0、同一材料指定も 0。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    if a.id == b.id:
+        return 0.0
+    grid = wafer.grid
+    if not (grid == a.id).any() or not (grid == b.id).any():
+        return 0.0
+    pitch = wafer.config.pitch_um
+    eps_field = permittivity_field(wafer)
+    is_cond = np.isin(grid, list(_conductor_ids()))
+    pair = {a.id, b.id}
+    coef0 = _EPS0_FF * (pitch ** 2)
+
+    total = 0.0
+    for axis in (0, 1, 2):
+        # 走査軸を末尾へ移動して 2 次元 (線数, 線長) に展開
+        g2 = np.moveaxis(grid, axis, -1).reshape(-1, grid.shape[axis])
+        e2 = np.moveaxis(eps_field, axis, -1).reshape(-1, grid.shape[axis])
+        c2 = np.moveaxis(is_cond, axis, -1).reshape(-1, grid.shape[axis])
+        # A・B 両方を含む線のみ処理（大半の線を高速にスキップ）
+        targets = np.nonzero((g2 == a.id).any(1) & (g2 == b.id).any(1))[0]
+        for li in targets:
+            line = g2[li]
+            pos = np.nonzero(c2[li])[0]  # 導体ボクセルの位置
+            for k in range(pos.size - 1):
+                p, q = int(pos[k]), int(pos[k + 1])
+                if {int(line[p]), int(line[q])} != pair:
+                    continue  # 対向ペアでない（同材料 or 第3導体）
+                sep = (q - p) * pitch  # 電極面間距離 µm
+                eps_gap = float(e2[li][p + 1:q].mean()) if q - p > 1 else 1.0
+                total += coef0 * eps_gap / sep
+    return float(total)
+
+
+def rc_delay_ps(wafer: Wafer, line_material, return_material, axis: str = "x") -> float:
+    """配線の RC 遅延（ps）を集中定数モデル τ=R·C で推定する。
+
+    R は line_resistance_ohm（指定軸の直列抵抗 Ω）、C は line_material と
+    return_material（対向電極=隣接配線や基板）間の parasitic_capacitance_ff
+    （fF）。τ[ps] = R[Ω]·C[F]·1e12 = R·C_fF·1e-3。断線（R=inf）や
+    容量 0 では inf／0 を返す。配線遅延の一次見積りに使う。
+    """
+    r = line_resistance_ohm(wafer, line_material, axis)
+    if r == float("inf"):
+        return float("inf")
+    c_ff = parasitic_capacitance_ff(wafer, line_material, return_material)
+    return float(r * c_ff * 1e-3)
+
+
+def current_density_stats(
+    wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線に電流 current_ma[mA] を流したときの電流密度（A/cm²）統計を返す。
+
+    指定軸に沿って配線を薄切りし、各スライスの断面積 A=（ボクセル数×pitch²）で
+    J=I/A を求める。最小断面（ネッキング箇所）で J が最大になる。返す辞書:
+      - j_max_a_cm2 / j_mean_a_cm2: 最大・平均電流密度（A/cm²）
+      - area_min_um2: 最小断面積（µm²）
+      - bottleneck_index: 最小断面のスライス番号（指定軸の位置）
+    配線が無い/非導体/断線（断面 0）の場合は j_max=inf。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    mask = grid == mat.id
+    if mat.resistivity_ohm_um <= 0:  # 非導体（誘電体）は電流路にならないため対象外
+        return {"j_max_a_cm2": float("inf"), "j_mean_a_cm2": 0.0,
+                "area_min_um2": 0.0, "bottleneck_index": -1}
+    if not mask.any() or current_ma == 0:
+        return {"j_max_a_cm2": float("inf") if not mask.any() else 0.0,
+                "j_mean_a_cm2": 0.0, "area_min_um2": 0.0, "bottleneck_index": -1}
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)
+    pitch = wafer.config.pitch_um
+    other = tuple(ax for ax in (0, 1, 2) if ax != a)
+    area_vox = mask.sum(axis=other)
+    present = np.nonzero(area_vox > 0)[0]
+    lo, hi = int(present.min()), int(present.max())
+    seg = area_vox[lo:hi + 1]
+    if (seg == 0).any():  # 途中断線
+        return {"j_max_a_cm2": float("inf"), "j_mean_a_cm2": float("inf"),
+                "area_min_um2": 0.0, "bottleneck_index": int(lo + np.argmin(seg))}
+    area_um2 = seg * (pitch ** 2)
+    area_cm2 = area_um2 * 1e-8  # µm² → cm²
+    i_a = abs(current_ma) * 1e-3  # mA → A
+    j = i_a / area_cm2
+    bottleneck = int(lo + np.argmin(area_um2))
+    return {
+        "j_max_a_cm2": float(j.max()),
+        "j_mean_a_cm2": float(j.mean()),
+        "area_min_um2": float(area_um2.min()),
+        "bottleneck_index": bottleneck,
+    }
+
+
+def electromigration_risk(
+    wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線のエレクトロマイグレーション（EM）リスクを判定する。
+
+    current_density_stats の最大電流密度 J_max を、材料の許容電流密度
+    em_jmax_a_cm2 と比較する。返す辞書: j_max_a_cm2 / limit_a_cm2 /
+    margin（=limit/J_max, 1 未満で超過）/ fail（bool, 限界超過）。
+    許容値が未設定（0）の材料や非導体では判定不可として fail=False, margin=inf。
+    """
+    mat = materials.get(name_or_id)
+    stats = current_density_stats(wafer, name_or_id, current_ma, axis)
+    j_max = stats["j_max_a_cm2"]
+    limit = mat.em_jmax_a_cm2
+    if limit <= 0:
+        return {"j_max_a_cm2": j_max, "limit_a_cm2": 0.0,
+                "margin": float("inf"), "fail": False}
+    margin = float("inf") if j_max == 0 else limit / j_max
+    return {
+        "j_max_a_cm2": j_max,
+        "limit_a_cm2": limit,
+        "margin": margin,
+        "fail": bool(j_max > limit),
+    }
+
+
+def dielectric_breakdown(
+    wafer: Wafer, name_a, name_b, voltage_v: float
+) -> dict:
+    """2 導体間に電圧 voltage_v[V] を印加したときの絶縁破壊リスクを判定する。
+
+    導体 A・B の最小間隔 g（min_spacing_um）を電極間距離とみなし、最大電界
+    E=V/g を求めて MV/cm に換算する。間隙を占める誘電体の絶縁破壊電界
+    breakdown_field_mv_cm（複数あれば最小値=最弱）と比較する。返す辞書:
+      - field_mv_cm: 最大電界（MV/cm）
+      - gap_um: 最小間隙（µm）
+      - breakdown_field_mv_cm: 介在誘電体の破壊電界（MV/cm）
+      - margin: 破壊電界/印加電界（1 未満で破壊）
+      - fail: 破壊電界超過か
+    接触（g=0）は field=inf, fail=True。どちらかの導体が無ければ判定不可。
+    """
+    g_um = min_spacing_um(wafer, name_a, name_b)
+    if g_um == float("inf"):
+        return {"field_mv_cm": 0.0, "gap_um": float("inf"),
+                "breakdown_field_mv_cm": 0.0, "margin": float("inf"), "fail": False}
+    # 介在誘電体の破壊電界（最小間隔ギャップ経路上の誘電体の最小値=最弱点）。
+    # 外接直方体全体だと、オフセット配線の上方/側方に広がる空気など実際の
+    # 最短ギャップと無関係な弱誘電体を拾ってしまうため、最近接 A/B ペアを結ぶ
+    # 直線経路上の材料だけを対象にする。
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    grid = wafer.grid
+    mask_a = grid == a.id
+    mask_b = grid == b.id
+    # B からの距離場と最近傍 B のインデックスから、最小間隔を与える A/B ペアを特定
+    dist, inds = ndimage.distance_transform_edt(~mask_b, return_indices=True)
+    da = np.where(mask_a, dist, np.inf)
+    pa = np.unravel_index(int(np.argmin(da)), da.shape)        # 最小間隔の A ボクセル
+    pb = tuple(int(inds[k][pa]) for k in range(3))            # その最近傍 B ボクセル
+    # pa→pb 直線上をサンプリングし、ギャップを占める材料 ID を集める
+    steps = max(abs(pb[k] - pa[k]) for k in range(3)) + 1
+    gap_ids = {
+        int(grid[tuple(int(round(pa[k] + (pb[k] - pa[k]) * t)) for k in range(3))])
+        for t in np.linspace(0.0, 1.0, steps)
+    }
+    fields = [
+        m.breakdown_field_mv_cm
+        for m in materials.all_materials()
+        if m.breakdown_field_mv_cm > 0 and m.id in gap_ids
+    ]
+    bd = min(fields) if fields else 0.0
+    if g_um <= 0:  # 接触＝即破壊
+        return {"field_mv_cm": float("inf"), "gap_um": 0.0,
+                "breakdown_field_mv_cm": bd, "margin": 0.0, "fail": True}
+    # E[MV/cm] = V[V] / g[µm] × (1e-6 MV/V) / (1e-4 cm/µm) = V/g × 1e-2
+    field_mv_cm = abs(voltage_v) / g_um * 1e-2
+    margin = float("inf") if field_mv_cm == 0 else (bd / field_mv_cm if bd > 0 else float("inf"))
+    return {
+        "field_mv_cm": float(field_mv_cm),
+        "gap_um": float(g_um),
+        "breakdown_field_mv_cm": float(bd),
+        "margin": float(margin),
+        "fail": bool(bd > 0 and field_mv_cm > bd),
+    }
+
+
+def yield_estimate(
+    defect_density_per_cm2: float, die_area_cm2: float, model: str = "murphy"
+) -> float:
+    """欠陥密度から歩留り（0〜1）を推定する。
+
+    AD = defect_density × die_area（die あたり平均欠陥数）として、
+      - "poisson":  Y = exp(-AD)
+      - "murphy":   Y = ((1-exp(-AD))/AD)²  （欠陥分布のばらつきを考慮、業界標準）
+      - "seeds":    Y = 1/(1+AD)            （Seeds の負の二項近似）
+    を返す。AD=0 では Y=1。負の入力は ValueError。
+    """
+    if defect_density_per_cm2 < 0 or die_area_cm2 < 0:
+        raise ValueError("欠陥密度・ダイ面積は非負である必要があります。")
+    ad = defect_density_per_cm2 * die_area_cm2
+    if ad <= 0:
+        return 1.0
+    if model == "poisson":
+        return float(np.exp(-ad))
+    if model == "seeds":
+        return float(1.0 / (1.0 + ad))
+    if model == "murphy":
+        return float(((1.0 - np.exp(-ad)) / ad) ** 2)
+    raise ValueError(f"未知の歩留りモデル: {model!r}（poisson/murphy/seeds）")
+
+
+def killer_defect_count(wafer: Wafer) -> int:
+    """defect_report からキラー欠陥（致命欠陥）の総数を数える。
+
+    ボイド連結成分数＋各材料のピンホール数＋エッチ残渣片数の合計。
+    歩留り推定の入力（ダイ内検出欠陥数）に使う。
+    """
+    rep = defect_report(wafer)
+    n = int(rep["voids"].get("count", 0))
+    for d in rep["per_material"].values():
+        n += int(d["pinhole"].get("count", 0))
+        n += int(d["residue"].get("count", 0))
+    return n
+
+
+def thermal_conductivity_field(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの熱伝導率 k（W/m·K）を格納した配列を返す。
+
+    定義済み thermal_conductivity_w_mk を使用。未設定（0）の材料は空気相当
+    （0.026 W/m·K）として扱う。熱抵抗計算の補助。
+    """
+    grid = wafer.grid
+    air_k = materials.BY_NAME["air"].thermal_conductivity_w_mk
+    k = np.full(grid.shape, air_k, dtype=float)
+    for m in materials.all_materials():
+        if m.thermal_conductivity_w_mk > 0:
+            k[grid == m.id] = m.thermal_conductivity_w_mk
+    return k
+
+
+def thermal_resistance_map(wafer: Wafer) -> np.ndarray:
+    """各 (y, x) 列の縦方向熱抵抗マップ（K/W）を返す。
+
+    基板底（z=0）から各列の最上位固体ボクセルまでを、ボクセルを直列の
+    熱抵抗 R=Δz/(k·A)（Δz=A^{1/2}=pitch）と見なして積算する。各列断面は
+    pitch²。途中の空気ボイドは低 k の熱障壁として加算される（自己発熱の
+    放熱経路評価）。固体の無い列は inf。
+    """
+    kf = thermal_conductivity_field(wafer)
+    p_m = wafer.config.pitch_um * 1e-6  # µm → m
+    # R_voxel = Δz/(k·A) = p_m/(k·p_m²) = 1/(k·p_m)。列方向の累積和を取る。
+    csum = np.cumsum(1.0 / kf, axis=0)  # csum[z,y,x] = Σ_{0..z} 1/k
+    top = wafer.top_surface_z()  # (ny, nx), 固体無しは -1
+    ny, nx = top.shape
+    rmap = np.full((ny, nx), np.inf, dtype=float)
+    has = top >= 0
+    yy, xx = np.nonzero(has)
+    rmap[yy, xx] = csum[top[yy, xx], yy, xx] / p_m
+    return rmap
+
+
+def thermal_resistance_k_w(wafer: Wafer) -> float:
+    """ウェハ全体の縦方向熱抵抗（K/W）を返す（列を並列接続）。
+
+    thermal_resistance_map の各列を並列熱抵抗とみなし 1/R_total=Σ 1/R_col を
+    取る。基板→表面の実効熱抵抗で、低 k 膜が厚いほど大きい。固体が無ければ inf。
+    """
+    rmap = thermal_resistance_map(wafer)
+    finite = np.isfinite(rmap)
+    if not finite.any():
+        return float("inf")
+    return float(1.0 / np.sum(1.0 / rmap[finite]))
+
+
+def temperature_rise_k(wafer: Wafer, power_w: float) -> float:
+    """消費電力 power_w[W] による定常温度上昇 ΔT[K] を返す。
+
+    ΔT = P · R_th（R_th は thermal_resistance_k_w の縦方向熱抵抗）。
+    放熱経路が無い（R_th=inf）場合は inf。低 k 膜が厚いほど ΔT は大きい。
+    自己発熱（ジュール熱）による接合温度上昇の一次評価に使う。
+    """
+    if power_w < 0:
+        raise ValueError("消費電力は非負である必要があります。")
+    rth = thermal_resistance_k_w(wafer)
+    if rth == float("inf"):
+        return float("inf")
+    return float(power_w * rth)
+
+
+def joule_self_heating_k(
+    wafer: Wafer, conductor, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線のジュール自己発熱による温度上昇を返す。
+
+    配線抵抗 R（line_resistance_ohm）と電流 I からジュール発熱 P=I²R を求め、
+    縦方向熱抵抗 R_th を介した定常温度上昇 ΔT=P·R_th を算出する。返す辞書:
+      - power_w: ジュール発熱（W）
+      - resistance_ohm: 配線抵抗（Ω）
+      - delta_t_k: 温度上昇（K）
+    断線（R=inf）や放熱経路無しでは ΔT=inf。
+    """
+    r = line_resistance_ohm(wafer, conductor, axis)
+    i_a = abs(current_ma) * 1e-3
+    if r == float("inf"):
+        return {"power_w": float("inf"), "resistance_ohm": float("inf"),
+                "delta_t_k": float("inf")}
+    power = i_a ** 2 * r
+    return {
+        "power_w": float(power),
+        "resistance_ohm": float(r),
+        "delta_t_k": temperature_rise_k(wafer, power),
+    }
+
+
+def antenna_ratio(
+    wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
+) -> dict:
+    """プロセスアンテナ比（プラズマ帯電損傷リスク）を判定する。
+
+    プラズマエッチ中、ゲート酸化膜に接続した導体（アンテナ）はその露出表面積に
+    比例して電荷を集め、薄いゲート酸化膜に電圧ストレスを与える。
+      アンテナ比 = 導体の露出表面積 / ゲート酸化膜面積
+    が大きいほど（広い金属＋小さいゲート）ゲート絶縁破壊リスクが高い。返す辞書:
+      - antenna_area_um2: 導体の空気露出表面積（電荷収集面積）
+      - gate_area_um2: 導体とゲート絶縁膜の接触面積
+      - ratio: アンテナ比
+      - fail: ratio_limit 超過か（既定 400, ファウンドリのアンテナ則相当）
+    導体かゲートが無い/未接続では ratio=0, fail=False。
+    """
+    cond = materials.get(conductor)
+    grid = wafer.grid
+    mask_c = grid == cond.id
+    gate_area = contact_area_um2(wafer, gate_dielectric, conductor)
+    if not mask_c.any() or gate_area <= 0:
+        return {"antenna_area_um2": 0.0, "gate_area_um2": float(gate_area),
+                "ratio": 0.0, "fail": False}
+    # 導体の空気露出面積（面ペア数×pitch²）
+    air = grid == materials.AIR
+    faces = 0
+    for axis in range(3):
+        sa = [slice(None)] * 3
+        sb = [slice(None)] * 3
+        sa[axis] = slice(0, -1)
+        sb[axis] = slice(1, None)
+        faces += int((mask_c[tuple(sa)] & air[tuple(sb)]).sum())
+        faces += int((mask_c[tuple(sb)] & air[tuple(sa)]).sum())
+    antenna_area = float(faces) * (wafer.config.pitch_um ** 2)
+    ratio = antenna_area / gate_area
+    return {
+        "antenna_area_um2": antenna_area,
+        "gate_area_um2": float(gate_area),
+        "ratio": float(ratio),
+        "fail": bool(ratio > ratio_limit),
+    }
+
+
+def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dict:
+    """MOS ゲート積層の容量密度 Cox と等価酸化膜厚 EOT を算出する。
+
+    ゲート電極（gate_conductor）とチャネル（channel, 既定 silicon）の間に挟まれた
+    誘電体スタックを各列で検出し、直列容量の電気的厚み d_eff=Σ tᵢ/εrᵢ を求める。
+      - Cox = ε0 / d_eff        （F/m² → fF/µm² に換算）
+      - EOT = εr(SiO2) · d_eff   （high-k 採用で物理厚より薄い EOT になる）
+    返す辞書: cox_ff_per_um2 / eot_nm / gate_area_um2 / total_cap_ff。
+    ゲートとチャネルの間に導体がある列や、誘電体が無い（直接接触＝短絡）列は
+    除外する。有効なゲート領域が無ければ全て 0。
+    """
+    gate = materials.get(gate_conductor)
+    ch = materials.get(channel)
+    grid = wafer.grid
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps_field = permittivity_field(wafer)
+    cond_ids = _conductor_ids()
+    eps0 = 8.854e-12
+    eps_sio2 = materials.BY_NAME["oxide"].rel_permittivity
+
+    d_effs: list[float] = []
+    gate_cols = np.argwhere((grid == gate.id).any(axis=0))  # (y, x) のリスト
+    for y, x in gate_cols:
+        col = grid[:, y, x]
+        gate_zs = np.nonzero(col == gate.id)[0]
+        gate_bottom = int(gate_zs.min())
+        ch_zs = np.nonzero((col == ch.id) & (np.arange(len(col)) < gate_bottom))[0]
+        if ch_zs.size == 0:
+            continue
+        ch_top = int(ch_zs.max())
+        between = range(ch_top + 1, gate_bottom)
+        if len(between) == 0:
+            continue  # 誘電体無し（直接接触＝短絡）
+        if any(int(col[z]) in cond_ids for z in between):
+            continue  # 間に別の導体 → 純粋なゲート誘電体でない
+        d_eff = sum(pitch_m / eps_field[z, y, x] for z in between)
+        d_effs.append(d_eff)
+
+    if not d_effs:
+        return {"cox_ff_per_um2": 0.0, "eot_nm": 0.0,
+                "gate_area_um2": 0.0, "total_cap_ff": 0.0}
+    d_eff_avg = float(np.mean(d_effs))
+    gate_area = len(d_effs) * (wafer.config.pitch_um ** 2)
+    cox_f_m2 = eps0 / d_eff_avg
+    cox_ff_um2 = cox_f_m2 * 1e3  # F/m² → fF/µm²
+    return {
+        "cox_ff_per_um2": float(cox_ff_um2),
+        "eot_nm": float(eps_sio2 * d_eff_avg * 1e9),
+        "gate_area_um2": float(gate_area),
+        "total_cap_ff": float(cox_ff_um2 * gate_area),
+    }
+
+
+def stress_field_mpa(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの残留膜応力 σ（MPa）を格納した配列を返す。空気は 0。"""
+    grid = wafer.grid
+    s = np.zeros(grid.shape, dtype=float)
+    for m in materials.all_materials():
+        if m.stress_mpa != 0.0:
+            s[grid == m.id] = m.stress_mpa
+    return s
+
+
+def stress_concentration_map(wafer: Wafer) -> np.ndarray:
+    """局所応力集中マップ（MPa 相当）を返す。クラック/剥離リスク箇所の検出。
+
+    各固体ボクセルについて、隣接（6 近傍）との応力ミスマッチ最大値
+    Δσ=max|σ_self−σ_neighbor|（空気は σ=0 の自由表面扱い）を求め、幾何学的な
+    応力集中係数 Kt=1+(異材/空気に接する面数)/2 を掛ける。界面の応力差が大きい
+    箇所（例: 高応力 Si3N4 と圧縮 SiO2 の界面）や、露出面の多い凸角ほど高い値に
+    なる。空気ボクセルは 0。シミュレーション境界はラップさせない。
+    """
+    grid = wafer.grid
+    s = stress_field_mpa(wafer)
+    solid = grid != materials.AIR
+    mism = np.zeros(grid.shape, dtype=float)
+    n_diff = np.zeros(grid.shape, dtype=int)
+    for axis in (0, 1, 2):
+        for shift in (1, -1):
+            sn = np.roll(s, shift, axis=axis)
+            gn = np.roll(grid, shift, axis=axis)
+            d = np.abs(s - sn)
+            diff = gn != grid
+            # ラップした境界面は隣接なし扱い（偽の集中を防ぐ）
+            sl = [slice(None)] * 3
+            sl[axis] = 0 if shift == 1 else -1
+            d[tuple(sl)] = 0.0
+            diff[tuple(sl)] = False
+            mism = np.maximum(mism, d)
+            n_diff += diff.astype(int)
+    kt = 1.0 + n_diff / 2.0
+    conc = mism * kt
+    conc[~solid] = 0.0
+    return conc
+
+
+def max_stress_concentration(wafer: Wafer) -> dict:
+    """最大応力集中の値と位置・関与材料を返す（剥離/クラック最弱点）。
+
+    返す辞書: value_mpa（集中値）/ location（z,y,x）/ material（その位置の材料名）。
+    固体が無ければ value_mpa=0。
+    """
+    conc = stress_concentration_map(wafer)
+    if not (conc > 0).any():
+        return {"value_mpa": 0.0, "location": None, "material": None}
+    idx = np.unravel_index(int(np.argmax(conc)), conc.shape)
+    mat = materials.BY_ID.get(int(wafer.grid[idx]))
+    return {
+        "value_mpa": float(conc[idx]),
+        "location": tuple(int(i) for i in idx),
+        "material": mat.name if mat else None,
+    }
+
+
+def _solve_slice_capacitance(eps2d: np.ndarray, is_a: np.ndarray, is_b: np.ndarray) -> float:
+    """2D 断面で ∇·(εr∇φ)=0 を解き、電極 A(φ=1)/B(φ=0) 間の単位長あたり
+    容量（ε0 を除いた無次元値）を返す。面の εr は調和平均（直列誘電体に厳密）。
+
+    境界は自然境界条件（ゼロ流束）。電極以外を未知数とする疎行列を直接解法で解き、
+    A の表面を貫く電束 Q'=Σ εr_face·(1−φ_nb) を容量（V=1）として返す。
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import spsolve
+
+    h, w = eps2d.shape
+    fixed = is_a | is_b
+    idx = -np.ones((h, w), dtype=int)
+    unk = np.argwhere(~fixed)
+    if unk.size == 0:
+        return 0.0
+    for k, (i, j) in enumerate(unk):
+        idx[i, j] = k
+    n = len(unk)
+    phi_fixed = np.where(is_a, 1.0, 0.0)
+    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def eps_face(i, j, ii, jj):
+        # 電極（A/B=導体）に接する面は誘電体側の εr を使う（導体表面=境界）。
+        # これにより一様 εr 媒質では容量が εr に厳密比例する。
+        ei, ej = fixed[i, j], fixed[ii, jj]
+        if ei and ej:
+            return 0.0
+        if ei:
+            return float(eps2d[ii, jj])
+        if ej:
+            return float(eps2d[i, j])
+        a, c = eps2d[i, j], eps2d[ii, jj]
+        return 2.0 * a * c / (a + c) if (a + c) > 0 else 0.0
+
+    rows: list[int] = []
+    cols: list[int] = []
+    data: list[float] = []
+    b = np.zeros(n)
+    for k, (i, j) in enumerate(unk):
+        diag = 0.0
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < h and 0 <= jj < w):
+                continue
+            ef = eps_face(i, j, ii, jj)
+            diag += ef
+            if fixed[ii, jj]:
+                b[k] += ef * phi_fixed[ii, jj]
+            else:
+                rows.append(k)
+                cols.append(idx[ii, jj])
+                data.append(-ef)
+        rows.append(k)
+        cols.append(k)
+        data.append(diag)
+    mat = csr_matrix((data, (rows, cols)), shape=(n, n))
+    phi_u = spsolve(mat, b)
+    phi = phi_fixed.copy()
+    phi[~fixed] = phi_u
+    # A 表面を貫く電束（= V=1 のときの容量）
+    q = 0.0
+    for i, j in np.argwhere(is_a):
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < h and 0 <= jj < w) or is_a[ii, jj]:
+                continue
+            q += eps_face(i, j, ii, jj) * (1.0 - phi[ii, jj])
+    return float(q)
+
+
+def parasitic_capacitance_field_ff(wafer: Wafer, name_a, name_b, axis: str = "y") -> float:
+    """2.5D 静電界ソルバによる 2 導体間の寄生容量（fF, フリンジ込み）。
+
+    指定軸に垂直な各断面で変係数ラプラス方程式 ∇·(εr∇φ)=0 を有限体積・疎行列
+    直接解法で解き、電極 A の表面電束から単位長容量を求め、断面厚 pitch を掛けて
+    積算する。`parasitic_capacitance_ff`（面対向平行平板近似）と異なり、電極端の
+    フリンジ電界も捉えるため、有限幅の電極では平行平板近似より大きい容量を与える。
+    A・B 以外の導体はフローティング金属として高 εr で近似する。
+    計算量は断面サイズに依存（大規模グリッドでは重い）。どちらかの材料が
+    無ければ 0。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    if a.id == b.id:
+        return 0.0
+    grid = wafer.grid
+    if not (grid == a.id).any() or not (grid == b.id).any():
+        return 0.0
+    eps_field = permittivity_field(wafer)
+    cond_ids = list(_conductor_ids())
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps0 = 8.854e-12
+    ax = {"x": 2, "y": 1, "z": 0}.get(axis, 1)
+
+    total = 0.0
+    for s in range(grid.shape[ax]):
+        sl = [slice(None)] * 3
+        sl[ax] = s
+        g2 = grid[tuple(sl)]
+        is_a = g2 == a.id
+        is_b = g2 == b.id
+        if not (is_a.any() and is_b.any()):
+            continue
+        e2 = eps_field[tuple(sl)].copy()
+        other_cond = np.isin(g2, cond_ids) & ~is_a & ~is_b
+        e2[other_cond] = 1e4  # フローティング金属を高 εr で近似
+        cp = _solve_slice_capacitance(e2, is_a, is_b)  # ε0 抜き・単位長
+        total += cp * eps0 * pitch_m
+    return float(total * 1e15)  # F → fF
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
@@ -1110,6 +1723,9 @@ def report(wafer: Wafer) -> str:
     if abs(bow) >= 0.001:
         sign = "凸(引張)" if bow > 0 else "凹(圧縮)"
         lines.append(f"等価ウェハ反り: {bow:+.2f}µm  {sign}")
+    rth = thermal_resistance_k_w(wafer)
+    if np.isfinite(rth):
+        lines.append(f"縦方向熱抵抗(基板→表面): {rth:.3e}K/W")
     lines.append("")
     lines.append("材料別 体積/膜厚:")
     counts = material_counts(wafer)
@@ -1140,19 +1756,24 @@ def report(wafer: Wafer) -> str:
                 f"  {m.name:<12} シート抵抗={rs_txt}Ω/sq  "
                 f"x方向={conn}  連結成分={cont['n_components']}"
             )
-        # 導体ペア間の最小間隔（ショート/近接リスク）
+        # 導体ペア間の最小間隔（ショート/近接リスク）＋寄生容量
         pair_lines: list[str] = []
         for i in range(len(conductors)):
             for j in range(i + 1, len(conductors)):
                 a, b = conductors[i], conductors[j]
                 sp = min_spacing_um(wafer, a.name, b.name)
+                cap = parasitic_capacitance_ff(wafer, a.name, b.name)
+                if sp == float("inf") and cap <= 0:
+                    continue
+                parts = [f"  {a.name}-{b.name}"]
                 if sp != float("inf"):
-                    flag = "  ★接触/ショート" if sp == 0.0 else ""
-                    pair_lines.append(
-                        f"  {a.name}-{b.name} 最小間隔={sp:.3f}µm{flag}"
-                    )
+                    flag = " ★接触/ショート" if sp == 0.0 else ""
+                    parts.append(f"最小間隔={sp:.3f}µm{flag}")
+                if cap > 0:
+                    parts.append(f"寄生容量={cap:.3f}fF")
+                pair_lines.append("  ".join(parts))
         if pair_lines:
-            lines.append("導体間 最小間隔 (DRC):")
+            lines.append("導体間 最小間隔/容量 (DRC/寄生):")
             lines.extend(pair_lines)
     return "\n".join(lines)
 
@@ -1182,13 +1803,21 @@ def electrical_report(wafer: Wafer) -> dict:
             "n_components": cont["n_components"],
         }
     spacing: dict[str, float] = {}
+    capacitance: dict[str, float] = {}
     for i in range(len(conductors)):
         for j in range(i + 1, len(conductors)):
             a, b = conductors[i], conductors[j]
             sp = min_spacing_um(wafer, a.name, b.name)
             if sp != float("inf"):
                 spacing[f"{a.name}-{b.name}"] = sp
-    return {"conductors": cond_data, "min_spacing_um": spacing}
+            cap = parasitic_capacitance_ff(wafer, a.name, b.name)
+            if cap > 0:
+                capacitance[f"{a.name}-{b.name}"] = cap
+    return {
+        "conductors": cond_data,
+        "min_spacing_um": spacing,
+        "capacitance_ff": capacitance,
+    }
 
 
 def defect_report(wafer: Wafer) -> dict:
