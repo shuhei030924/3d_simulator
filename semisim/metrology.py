@@ -1161,6 +1161,161 @@ def rc_delay_ps(wafer: Wafer, line_material, return_material, axis: str = "x") -
     return float(r * c_ff * 1e-3)
 
 
+def current_density_stats(
+    wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線に電流 current_ma[mA] を流したときの電流密度（A/cm²）統計を返す。
+
+    指定軸に沿って配線を薄切りし、各スライスの断面積 A=（ボクセル数×pitch²）で
+    J=I/A を求める。最小断面（ネッキング箇所）で J が最大になる。返す辞書:
+      - j_max_a_cm2 / j_mean_a_cm2: 最大・平均電流密度（A/cm²）
+      - area_min_um2: 最小断面積（µm²）
+      - bottleneck_index: 最小断面のスライス番号（指定軸の位置）
+    配線が無い/非導体/断線（断面 0）の場合は j_max=inf。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    mask = grid == mat.id
+    if not mask.any() or current_ma == 0:
+        return {"j_max_a_cm2": float("inf") if not mask.any() else 0.0,
+                "j_mean_a_cm2": 0.0, "area_min_um2": 0.0, "bottleneck_index": -1}
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)
+    pitch = wafer.config.pitch_um
+    other = tuple(ax for ax in (0, 1, 2) if ax != a)
+    area_vox = mask.sum(axis=other)
+    present = np.nonzero(area_vox > 0)[0]
+    lo, hi = int(present.min()), int(present.max())
+    seg = area_vox[lo:hi + 1]
+    if (seg == 0).any():  # 途中断線
+        return {"j_max_a_cm2": float("inf"), "j_mean_a_cm2": float("inf"),
+                "area_min_um2": 0.0, "bottleneck_index": int(lo + np.argmin(seg))}
+    area_um2 = seg * (pitch ** 2)
+    area_cm2 = area_um2 * 1e-8  # µm² → cm²
+    i_a = abs(current_ma) * 1e-3  # mA → A
+    j = i_a / area_cm2
+    bottleneck = int(lo + np.argmin(area_um2))
+    return {
+        "j_max_a_cm2": float(j.max()),
+        "j_mean_a_cm2": float(j.mean()),
+        "area_min_um2": float(area_um2.min()),
+        "bottleneck_index": bottleneck,
+    }
+
+
+def electromigration_risk(
+    wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線のエレクトロマイグレーション（EM）リスクを判定する。
+
+    current_density_stats の最大電流密度 J_max を、材料の許容電流密度
+    em_jmax_a_cm2 と比較する。返す辞書: j_max_a_cm2 / limit_a_cm2 /
+    margin（=limit/J_max, 1 未満で超過）/ fail（bool, 限界超過）。
+    許容値が未設定（0）の材料や非導体では判定不可として fail=False, margin=inf。
+    """
+    mat = materials.get(name_or_id)
+    stats = current_density_stats(wafer, name_or_id, current_ma, axis)
+    j_max = stats["j_max_a_cm2"]
+    limit = mat.em_jmax_a_cm2
+    if limit <= 0:
+        return {"j_max_a_cm2": j_max, "limit_a_cm2": 0.0,
+                "margin": float("inf"), "fail": False}
+    margin = float("inf") if j_max == 0 else limit / j_max
+    return {
+        "j_max_a_cm2": j_max,
+        "limit_a_cm2": limit,
+        "margin": margin,
+        "fail": bool(j_max > limit),
+    }
+
+
+def dielectric_breakdown(
+    wafer: Wafer, name_a, name_b, voltage_v: float
+) -> dict:
+    """2 導体間に電圧 voltage_v[V] を印加したときの絶縁破壊リスクを判定する。
+
+    導体 A・B の最小間隔 g（min_spacing_um）を電極間距離とみなし、最大電界
+    E=V/g を求めて MV/cm に換算する。間隙を占める誘電体の絶縁破壊電界
+    breakdown_field_mv_cm（複数あれば最小値=最弱）と比較する。返す辞書:
+      - field_mv_cm: 最大電界（MV/cm）
+      - gap_um: 最小間隙（µm）
+      - breakdown_field_mv_cm: 介在誘電体の破壊電界（MV/cm）
+      - margin: 破壊電界/印加電界（1 未満で破壊）
+      - fail: 破壊電界超過か
+    接触（g=0）は field=inf, fail=True。どちらかの導体が無ければ判定不可。
+    """
+    g_um = min_spacing_um(wafer, name_a, name_b)
+    if g_um == float("inf"):
+        return {"field_mv_cm": 0.0, "gap_um": float("inf"),
+                "breakdown_field_mv_cm": 0.0, "margin": float("inf"), "fail": False}
+    # 介在誘電体の破壊電界（A・B を囲む直方体内に存在する誘電体の最小値=最弱点）
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    grid = wafer.grid
+    both = (grid == a.id) | (grid == b.id)
+    idx = np.argwhere(both)
+    lo = idx.min(axis=0)
+    hi = idx.max(axis=0) + 1
+    sub = grid[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]]
+    fields = [
+        m.breakdown_field_mv_cm
+        for m in materials.all_materials()
+        if m.breakdown_field_mv_cm > 0 and (sub == m.id).any()
+    ]
+    bd = min(fields) if fields else 0.0
+    if g_um <= 0:  # 接触＝即破壊
+        return {"field_mv_cm": float("inf"), "gap_um": 0.0,
+                "breakdown_field_mv_cm": bd, "margin": 0.0, "fail": True}
+    # E[MV/cm] = V[V] / g[µm] × (1e-6 MV/V) / (1e-4 cm/µm) = V/g × 1e-2
+    field_mv_cm = abs(voltage_v) / g_um * 1e-2
+    margin = float("inf") if field_mv_cm == 0 else (bd / field_mv_cm if bd > 0 else float("inf"))
+    return {
+        "field_mv_cm": float(field_mv_cm),
+        "gap_um": float(g_um),
+        "breakdown_field_mv_cm": float(bd),
+        "margin": float(margin),
+        "fail": bool(bd > 0 and field_mv_cm > bd),
+    }
+
+
+def yield_estimate(
+    defect_density_per_cm2: float, die_area_cm2: float, model: str = "murphy"
+) -> float:
+    """欠陥密度から歩留り（0〜1）を推定する。
+
+    AD = defect_density × die_area（die あたり平均欠陥数）として、
+      - "poisson":  Y = exp(-AD)
+      - "murphy":   Y = ((1-exp(-AD))/AD)²  （欠陥分布のばらつきを考慮、業界標準）
+      - "seeds":    Y = 1/(1+AD)            （Seeds の負の二項近似）
+    を返す。AD=0 では Y=1。負の入力は ValueError。
+    """
+    if defect_density_per_cm2 < 0 or die_area_cm2 < 0:
+        raise ValueError("欠陥密度・ダイ面積は非負である必要があります。")
+    ad = defect_density_per_cm2 * die_area_cm2
+    if ad <= 0:
+        return 1.0
+    if model == "poisson":
+        return float(np.exp(-ad))
+    if model == "seeds":
+        return float(1.0 / (1.0 + ad))
+    if model == "murphy":
+        return float(((1.0 - np.exp(-ad)) / ad) ** 2)
+    raise ValueError(f"未知の歩留りモデル: {model!r}（poisson/murphy/seeds）")
+
+
+def killer_defect_count(wafer: Wafer) -> int:
+    """defect_report からキラー欠陥（致命欠陥）の総数を数える。
+
+    ボイド連結成分数＋各材料のピンホール数＋エッチ残渣片数の合計。
+    歩留り推定の入力（ダイ内検出欠陥数）に使う。
+    """
+    rep = defect_report(wafer)
+    n = int(rep["voids"].get("count", 0))
+    for d in rep["per_material"].values():
+        n += int(d["pinhole"].get("count", 0))
+        n += int(d["residue"].get("count", 0))
+    return n
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
