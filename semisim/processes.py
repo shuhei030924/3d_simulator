@@ -721,6 +721,57 @@ class PVD(Process):
                     nxt &= self._open_to_top(grid == materials.AIR)
                     grid[nxt] = mat_id
 
+        # === 凸トップコーナーのカスプ ===
+        # 指向性フラックスはトレンチ／段差の凸角（肩）に広い立体角で入射する
+        # ため、膜が盛り上がってカスプ状の膨らみを作り、フィールド膜と側壁膜を
+        # 連続的に橋渡しする。これが無いとフィールド膜上面と一段低い側壁膜
+        # 上面の間に段差が生じ、肩の「凹み」偽像になる。各凸コーナーから、
+        # フィールド面と側壁面の段差を四半円で丸めて連続化する。
+        metal = grid == mat_id
+        col_has = metal.any(axis=0)
+        if col_has.any():
+            mt = np.where(
+                col_has, (nz - 1) - np.argmax(metal[::-1], axis=0), -1
+            )  # (y, x) 各列の金属上面 z
+            air_now = grid == materials.AIR
+            open_now = self._open_to_top(air_now)
+            for yy in range(ny):
+                row_top = mt[yy]
+                if row_top.max() < 0:
+                    continue
+                field_z = int(row_top.max())  # フィールド膜上面（最も高い列）
+                edges = []  # (コーナー列 x, トレンチ方向 sgn)
+                for x in range(nx):
+                    if row_top[x] != field_z:
+                        continue
+                    if x + 1 < nx and 0 <= row_top[x + 1] < field_z - 1:
+                        edges.append((x, +1))
+                    if x - 1 >= 0 and 0 <= row_top[x - 1] < field_z - 1:
+                        edges.append((x, -1))
+                for cx, sgn in edges:
+                    # カスプ半径＝段差の高さ。ただし膜厚 t で頭打ちにして、
+                    # 深い窪みで庇が伸びすぎて開口を塞ぐのを防ぐ（カスプは
+                    # 堆積膜厚スケールの局所効果）。
+                    nb = cx + sgn
+                    rad = min(field_z - int(mt[yy, nb]), t)
+                    if rad <= 1:
+                        continue
+                    for d in range(1, rad + 1):
+                        xc = cx + sgn * d
+                        if not (0 <= xc < nx):
+                            break
+                        # 四半円: コーナーで field_z、離れるほど低くなる。
+                        cz = int(round(
+                            field_z - rad + math.sqrt(max(rad * rad - d * d, 0))
+                        ))
+                        top_xc = int(mt[yy, xc])
+                        if cz <= top_xc:
+                            continue
+                        lo = top_xc + 1 if top_xc >= 0 else 0
+                        for z in range(lo, cz + 1):
+                            if air_now[z, yy, xc] and open_now[z, yy, xc]:
+                                grid[z, yy, xc] = mat_id
+
     def params_dict(self) -> dict:
         return {
             "material": self.material,
