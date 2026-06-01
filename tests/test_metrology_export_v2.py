@@ -722,6 +722,32 @@ def test_electrical_report_json_serializable(wafer):
     json.dumps(rep)  # inf が None 化されていれば例外なし
 
 
+# --- 統合不良レポート ------------------------------------------------------
+def test_defect_report_clean_film(wafer):
+    CVD(material="tungsten", thickness_um=0.3).apply(wafer)
+    rep = metrology.defect_report(wafer)
+    assert rep["voids"]["count"] == 0
+    assert "tungsten" in rep["per_material"]
+    assert rep["per_material"]["tungsten"]["pinhole"]["count"] == 0
+
+
+def test_defect_report_detects_pinhole(wafer):
+    CVD(material="tungsten", thickness_um=0.3).apply(wafer)
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    grid[grid[:, 20, 20] == w_id, 20, 20] = materials.AIR
+    rep = metrology.defect_report(wafer)
+    assert rep["per_material"]["tungsten"]["pinhole"]["count"] == 1
+
+
+def test_defect_report_json_serializable(wafer):
+    import json
+
+    CVD(material="tungsten", thickness_um=0.3).apply(wafer)
+    rep = metrology.defect_report(wafer)
+    json.dumps(rep)
+
+
 # --- コンタクト面積/接触抵抗 ----------------------------------------------
 def test_contact_area_counts_faces(wafer):
     grid = wafer.grid

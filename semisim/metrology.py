@@ -1187,3 +1187,38 @@ def electrical_report(wafer: Wafer) -> dict:
                 spacing[f"{a.name}-{b.name}"] = sp
     return {"conductors": cond_data, "min_spacing_um": spacing}
 
+
+def defect_report(wafer: Wafer) -> dict:
+    """各種不良モードを一括検査した機械可読な辞書を返す。
+
+    半導体プロセスで典型的な不良モードを横断的にチェックする：
+      - voids: 埋め込みボイド（トレンチ/ビア充填不良）の連結成分統計。
+      - per_material: グリッドに存在する基板/空気以外の各材料について、
+          pinhole（薄膜貫通欠陥）と residue（エッチ残渣/ストリンガー）を検査。
+      - dishing_um: ダマシン CMP のディッシング深さ。
+      - wafer_bow_um: 膜応力起因のウェハ反り。
+    不良が無ければ各項目は 0／空となり、健全であることを示す。
+    """
+    skip = {"silicon", "air"}
+    present = [
+        m
+        for m in materials.all_materials()
+        if m.name not in skip and m.id != materials.AIR and (wafer.grid == m.id).any()
+    ]
+    per_material: dict[str, dict] = {}
+    for m in present:
+        per_material[m.name] = {
+            "pinhole": pinhole_metrics(wafer, m.name),
+            "residue": etch_residue_metrics(wafer, m.name),
+        }
+    # ディッシングは軟金属（Cu）が存在する場合のみ評価
+    dishing = 0.0
+    if (wafer.grid == materials.BY_NAME["metal_cu"].id).any():
+        dishing = dishing_depth_um(wafer, "metal_cu")
+    return {
+        "voids": void_metrics(wafer),
+        "per_material": per_material,
+        "dishing_um": dishing,
+        "wafer_bow_um": wafer_bow_um(wafer),
+    }
+

@@ -290,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json_report:
         data = metrology.summary(wafer)
         data["electrical"] = metrology.electrical_report(wafer)
+        data["defects"] = metrology.defect_report(wafer)
         with open(args.json_report, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         print(f"JSON レポートを保存しました: {args.json_report}", file=sys.stderr)
