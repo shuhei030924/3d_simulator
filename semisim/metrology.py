@@ -1561,6 +1561,118 @@ def max_stress_concentration(wafer: Wafer) -> dict:
     }
 
 
+def _solve_slice_capacitance(eps2d: np.ndarray, is_a: np.ndarray, is_b: np.ndarray) -> float:
+    """2D 断面で ∇·(εr∇φ)=0 を解き、電極 A(φ=1)/B(φ=0) 間の単位長あたり
+    容量（ε0 を除いた無次元値）を返す。面の εr は調和平均（直列誘電体に厳密）。
+
+    境界は自然境界条件（ゼロ流束）。電極以外を未知数とする疎行列を直接解法で解き、
+    A の表面を貫く電束 Q'=Σ εr_face·(1−φ_nb) を容量（V=1）として返す。
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import spsolve
+
+    h, w = eps2d.shape
+    fixed = is_a | is_b
+    idx = -np.ones((h, w), dtype=int)
+    unk = np.argwhere(~fixed)
+    if unk.size == 0:
+        return 0.0
+    for k, (i, j) in enumerate(unk):
+        idx[i, j] = k
+    n = len(unk)
+    phi_fixed = np.where(is_a, 1.0, 0.0)
+    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def eps_face(i, j, ii, jj):
+        # 電極（A/B=導体）に接する面は誘電体側の εr を使う（導体表面=境界）。
+        # これにより一様 εr 媒質では容量が εr に厳密比例する。
+        ei, ej = fixed[i, j], fixed[ii, jj]
+        if ei and ej:
+            return 0.0
+        if ei:
+            return float(eps2d[ii, jj])
+        if ej:
+            return float(eps2d[i, j])
+        a, c = eps2d[i, j], eps2d[ii, jj]
+        return 2.0 * a * c / (a + c) if (a + c) > 0 else 0.0
+
+    rows: list[int] = []
+    cols: list[int] = []
+    data: list[float] = []
+    b = np.zeros(n)
+    for k, (i, j) in enumerate(unk):
+        diag = 0.0
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < h and 0 <= jj < w):
+                continue
+            ef = eps_face(i, j, ii, jj)
+            diag += ef
+            if fixed[ii, jj]:
+                b[k] += ef * phi_fixed[ii, jj]
+            else:
+                rows.append(k)
+                cols.append(idx[ii, jj])
+                data.append(-ef)
+        rows.append(k)
+        cols.append(k)
+        data.append(diag)
+    mat = csr_matrix((data, (rows, cols)), shape=(n, n))
+    phi_u = spsolve(mat, b)
+    phi = phi_fixed.copy()
+    phi[~fixed] = phi_u
+    # A 表面を貫く電束（= V=1 のときの容量）
+    q = 0.0
+    for i, j in np.argwhere(is_a):
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < h and 0 <= jj < w) or is_a[ii, jj]:
+                continue
+            q += eps_face(i, j, ii, jj) * (1.0 - phi[ii, jj])
+    return float(q)
+
+
+def parasitic_capacitance_field_ff(wafer: Wafer, name_a, name_b, axis: str = "y") -> float:
+    """2.5D 静電界ソルバによる 2 導体間の寄生容量（fF, フリンジ込み）。
+
+    指定軸に垂直な各断面で変係数ラプラス方程式 ∇·(εr∇φ)=0 を有限体積・疎行列
+    直接解法で解き、電極 A の表面電束から単位長容量を求め、断面厚 pitch を掛けて
+    積算する。`parasitic_capacitance_ff`（面対向平行平板近似）と異なり、電極端の
+    フリンジ電界も捉えるため、有限幅の電極では平行平板近似より大きい容量を与える。
+    A・B 以外の導体はフローティング金属として高 εr で近似する。
+    計算量は断面サイズに依存（大規模グリッドでは重い）。どちらかの材料が
+    無ければ 0。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    if a.id == b.id:
+        return 0.0
+    grid = wafer.grid
+    if not (grid == a.id).any() or not (grid == b.id).any():
+        return 0.0
+    eps_field = permittivity_field(wafer)
+    cond_ids = list(_conductor_ids())
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps0 = 8.854e-12
+    ax = {"x": 2, "y": 1, "z": 0}.get(axis, 1)
+
+    total = 0.0
+    for s in range(grid.shape[ax]):
+        sl = [slice(None)] * 3
+        sl[ax] = s
+        g2 = grid[tuple(sl)]
+        is_a = g2 == a.id
+        is_b = g2 == b.id
+        if not (is_a.any() and is_b.any()):
+            continue
+        e2 = eps_field[tuple(sl)].copy()
+        other_cond = np.isin(g2, cond_ids) & ~is_a & ~is_b
+        e2[other_cond] = 1e4  # フローティング金属を高 εr で近似
+        cp = _solve_slice_capacitance(e2, is_a, is_b)  # ε0 抜き・単位長
+        total += cp * eps0 * pitch_m
+    return float(total * 1e15)  # F → fF
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
