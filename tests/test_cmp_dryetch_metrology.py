@@ -14,16 +14,16 @@ from semisim.recipe import Recipe
 # --- CMP ディッシング ------------------------------------------------------
 def test_cmp_dishing_recesses_soft_material():
     cfg = WaferConfig(nx=40, ny=40, nz=60, pitch_um=0.1, substrate_um=2.0)
-    r = Recipe(config=cfg)
-    r.add(CVD(material="metal_cu", thickness_um=1.0))
-    r.add(CMP(remove_um=0.3))
-    flat_top = int(r.simulate().top_surface_z().max())
     r2 = Recipe(config=cfg)
     r2.add(CVD(material="metal_cu", thickness_um=1.0))
-    r2.add(CMP(remove_um=0.3, soft_material="metal_cu", dishing_um=0.2))
-    dished_top = int(r2.simulate().top_surface_z().max())
-    # ディッシングで軟材料の上面が下がる
-    assert dished_top < flat_top
+    r2.add(CMP(remove_um=0.3, soft_material="metal_cu", dishing_um=0.2,
+               dishing_width_um=0.3))
+    w = r2.simulate()
+    z_top = w.top_surface_z()
+    center = int(z_top[20, 20])
+    edge = int(z_top[1, 1])
+    # ディッシングは中央ほど深く、縁ほど浅い凹面（皿状）になる
+    assert center < edge
 
 
 def test_cmp_dishing_roundtrip():

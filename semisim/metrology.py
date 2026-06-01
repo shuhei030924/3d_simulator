@@ -798,9 +798,11 @@ def wafer_bow_um(
 def dishing_depth_um(wafer: Wafer, name_or_id) -> float:
     """指定材料（Cu 等の軟材料）上面が周囲フィールドより凹んだ量 (µm) を返す。
 
-    ダマシン CMP では軟らかい金属が過研磨で凹む（ディッシング）。対象材料が
-    最上面に露出する列の代表高さ（中央値）と、それ以外（フィールド）の代表
-    高さの差を返す。凹んでいなければ 0。
+    ダマシン CMP では軟らかい金属が過研磨で皿状に凹む（ディッシング）。
+    凹面の最深部（中央）と周囲フィールドの代表高さ（中央値）との差を返す。
+    実機のディッシングは「中央が最も深い凹み量」として規定されるため、
+    軟材料側は最深部（高さの下側 5 パーセンタイル）で代表する。凹んで
+    いなければ 0。
     """
     grid = wafer.grid
     nz = grid.shape[0]
@@ -815,7 +817,8 @@ def dishing_depth_um(wafer: Wafer, name_or_id) -> float:
     if not is_soft_top.any() or not field_mask.any():
         return 0.0
     field_h = float(np.median(height[field_mask]))
-    soft_h = float(np.median(height[is_soft_top]))
+    # 凹面の最深部（中央）を代表値とする（5 パーセンタイルでノイズに頑健化）。
+    soft_h = float(np.percentile(height[is_soft_top], 5))
     return max(0.0, field_h - soft_h)
 
 

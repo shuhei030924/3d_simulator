@@ -1076,6 +1076,10 @@ class CMP(Process):
     stop_material: str = ""
     soft_material: str = ""
     dishing_um: float = 0.0
+    # ディッシングの幅依存性を決める特性幅[µm]。軟材料領域の縁からの横方向
+    # 距離がこの値を超えると最大ディッシング量に漸近する。狭い配線は浅く、
+    # 広いパッドほど深く凹む（実機の幅依存ディッシングを再現）。
+    dishing_width_um: float = 0.3
     # パターン密度依存エロージョン: 軟材料（Cu 等）が密集する領域ほど
     # 余分に削れる。erosion_um は密度=1 のときの追加除去量、
     # density_radius_um は密度を平均する近傍半径。
@@ -1119,18 +1123,38 @@ class CMP(Process):
             grid[cut + 1:, :, :] = materials.AIR
 
         # ディッシング: 軟らかい材料（Cu など）は研磨で余計に凹む。
-        # 平坦化後の上面から dishing 分だけ、対象材料が露出する列を追加除去。
+        # 実機のディッシングは平底ではなく「中央ほど深く、縁（バリア/絶縁膜
+        # との境界）ほど浅い」凹面（皿状）になり、配線幅が広いほど深くなる。
+        # 露出した軟材料領域の縁からの横方向距離（距離変換）でプロファイルを
+        # 決め、距離が特性幅 dishing_width_um を超えると最大量に漸近させる。
         if self.soft_material and self.dishing_um > 0:
             soft_id = materials.get(self.soft_material).id
-            dish = wafer.um_to_vox(self.dishing_um)
-            for _ in range(dish):
-                z_top2 = wafer.top_surface_z()
-                ys, xs = np.nonzero(z_top2 >= 0)
-                if ys.size == 0:
-                    break
-                zt = z_top2[ys, xs]
-                is_soft = grid[zt, ys, xs] == soft_id
-                grid[zt[is_soft], ys[is_soft], xs[is_soft]] = materials.AIR
+            z_top2 = wafer.top_surface_z()
+            ys0, xs0 = np.nonzero(z_top2 >= 0)
+            exposed = np.zeros(z_top2.shape, dtype=bool)
+            if ys0.size:
+                sel0 = grid[z_top2[ys0, xs0], ys0, xs0] == soft_id
+                exposed[ys0[sel0], xs0[sel0]] = True
+            if exposed.any():
+                # 縁からの横方向距離[vox]。中央ほど大きい。
+                edt = ndimage.distance_transform_edt(exposed)
+                char_vox = max(1.0, float(wafer.um_to_vox(self.dishing_width_um)))
+                dish_max = wafer.um_to_vox(self.dishing_um)
+                # 縁で 0、中央で dish_max に漸近する皿状（凹面）プロファイル。
+                profile = dish_max * (edt / (edt + char_vox))
+                depth_map = np.round(profile).astype(int)
+                depth_map[~exposed] = 0
+                max_d = int(depth_map.max())
+                for _ in range(max_d):
+                    z_top2 = wafer.top_surface_z()
+                    ys, xs = np.nonzero((z_top2 >= 0) & (depth_map > 0))
+                    if ys.size == 0:
+                        break
+                    zt = z_top2[ys, xs]
+                    is_soft = grid[zt, ys, xs] == soft_id
+                    sel_y, sel_x, sel_z = ys[is_soft], xs[is_soft], zt[is_soft]
+                    grid[sel_z, sel_y, sel_x] = materials.AIR
+                    depth_map[sel_y, sel_x] -= 1
 
         # パターン密度依存エロージョン: 軟材料が密集する領域ほど余計に削れる。
         # 近傍の軟材料存在率（局所密度）に比例して追加除去する。
@@ -1162,6 +1186,7 @@ class CMP(Process):
             "stop_material": self.stop_material,
             "soft_material": self.soft_material,
             "dishing_um": self.dishing_um,
+            "dishing_width_um": self.dishing_width_um,
             "erosion_um": self.erosion_um,
             "density_radius_um": self.density_radius_um,
         }
@@ -1173,6 +1198,7 @@ class CMP(Process):
             stop_material=d.get("stop_material", ""),
             soft_material=d.get("soft_material", ""),
             dishing_um=float(d.get("dishing_um", 0.0)),
+            dishing_width_um=float(d.get("dishing_width_um", 0.3)),
             erosion_um=float(d.get("erosion_um", 0.0)),
             density_radius_um=float(d.get("density_radius_um", 1.0)),
         )
