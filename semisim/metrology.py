@@ -1176,6 +1176,9 @@ def current_density_stats(
     mat = materials.get(name_or_id)
     grid = wafer.grid
     mask = grid == mat.id
+    if mat.resistivity_ohm_um <= 0:  # 非導体（誘電体）は電流路にならないため対象外
+        return {"j_max_a_cm2": float("inf"), "j_mean_a_cm2": 0.0,
+                "area_min_um2": 0.0, "bottleneck_index": -1}
     if not mask.any() or current_ma == 0:
         return {"j_max_a_cm2": float("inf") if not mask.any() else 0.0,
                 "j_mean_a_cm2": 0.0, "area_min_um2": 0.0, "bottleneck_index": -1}
@@ -1247,19 +1250,30 @@ def dielectric_breakdown(
     if g_um == float("inf"):
         return {"field_mv_cm": 0.0, "gap_um": float("inf"),
                 "breakdown_field_mv_cm": 0.0, "margin": float("inf"), "fail": False}
-    # 介在誘電体の破壊電界（A・B を囲む直方体内に存在する誘電体の最小値=最弱点）
+    # 介在誘電体の破壊電界（最小間隔ギャップ経路上の誘電体の最小値=最弱点）。
+    # 外接直方体全体だと、オフセット配線の上方/側方に広がる空気など実際の
+    # 最短ギャップと無関係な弱誘電体を拾ってしまうため、最近接 A/B ペアを結ぶ
+    # 直線経路上の材料だけを対象にする。
     a = materials.get(name_a)
     b = materials.get(name_b)
     grid = wafer.grid
-    both = (grid == a.id) | (grid == b.id)
-    idx = np.argwhere(both)
-    lo = idx.min(axis=0)
-    hi = idx.max(axis=0) + 1
-    sub = grid[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]]
+    mask_a = grid == a.id
+    mask_b = grid == b.id
+    # B からの距離場と最近傍 B のインデックスから、最小間隔を与える A/B ペアを特定
+    dist, inds = ndimage.distance_transform_edt(~mask_b, return_indices=True)
+    da = np.where(mask_a, dist, np.inf)
+    pa = np.unravel_index(int(np.argmin(da)), da.shape)        # 最小間隔の A ボクセル
+    pb = tuple(int(inds[k][pa]) for k in range(3))            # その最近傍 B ボクセル
+    # pa→pb 直線上をサンプリングし、ギャップを占める材料 ID を集める
+    steps = max(abs(pb[k] - pa[k]) for k in range(3)) + 1
+    gap_ids = {
+        int(grid[tuple(int(round(pa[k] + (pb[k] - pa[k]) * t)) for k in range(3))])
+        for t in np.linspace(0.0, 1.0, steps)
+    }
     fields = [
         m.breakdown_field_mv_cm
         for m in materials.all_materials()
-        if m.breakdown_field_mv_cm > 0 and (sub == m.id).any()
+        if m.breakdown_field_mv_cm > 0 and m.id in gap_ids
     ]
     bd = min(fields) if fields else 0.0
     if g_um <= 0:  # 接触＝即破壊

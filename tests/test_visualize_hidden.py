@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from semisim import materials, visualize
-from semisim.grid import Wafer, WaferConfig
-from semisim.processes import CVD
+# visualize は pyvista 依存。未導入の headless CI ではモジュールごとスキップ
+pytest.importorskip("pyvista")
+
+from semisim import materials, visualize  # noqa: E402
+from semisim.grid import Wafer, WaferConfig  # noqa: E402
+from semisim.processes import CVD  # noqa: E402
 
 
 def _wafer():
