@@ -57,8 +57,8 @@ OUT_DIR = os.path.join(ROOT, "docs", "manual")
 IMG_DIR = os.path.join(OUT_DIR, "img")
 
 
-def cfg(nx=800, ny=16, nz=560, pitch=0.01, sub=2.0) -> WaferConfig:
-    # pitch=0.01µm の微細ボクセルで断面の曲線・斜面・スキャロップを
+def cfg(nx=1600, ny=16, nz=1120, pitch=0.005, sub=2.0) -> WaferConfig:
+    # pitch=0.005µm の超微細ボクセルで断面の曲線・斜面・スキャロップを
     # 滑らかに描く（角つきを極力抑える）。断面は XZ 面なので ny は小さく保つ。
     return WaferConfig(nx=nx, ny=ny, nz=nz, pitch_um=pitch, substrate_um=sub)
 
@@ -261,7 +261,7 @@ def demos() -> list:
 
     # --- 異方性ウェット（KOH） ---
     def d_koh():
-        r = Recipe(config=cfg(nz=640, sub=3.0))
+        r = Recipe(config=cfg(nz=1280, sub=3.0))
         r.add(CVD(material="nitride", thickness_um=0.3))
         r.add(Photo(mask=_center_mask(0.5), thickness_um=0.8, polarity="positive"))
         r.add(DryEtch(targets=["nitride"], depth_um=0.4))
@@ -282,7 +282,7 @@ def demos() -> list:
 
     # --- DRIE ---
     def d_drie():
-        r = Recipe(config=cfg(nz=720, sub=4.0))
+        r = Recipe(config=cfg(nz=1440, sub=4.0))
         r.add(Photo(mask=_stripe_mask(0.6, 0.3), thickness_um=1.0, polarity="positive"))
         r.add(DRIE(target="silicon", depth_um=3.0, scallop_um=0.12, scallop_pitch_um=0.35))
         r.add(Strip(material="photoresist"))
@@ -377,7 +377,7 @@ def demos() -> list:
 
     # --- ダマシン Cu + CMP ディッシング（目玉） ---
     def d_damascene():
-        r = Recipe(config=cfg(nx=960, nz=640, sub=2.0))
+        r = Recipe(config=cfg(nx=1920, nz=1280, sub=2.0))
         r.add(CVD(material="oxide", thickness_um=1.0))
         mask = Mask(shapes=[Shape("rect", {"x0": 0.15, "y0": 0.0, "x1": 0.45, "y1": 1.0}),
                             Shape("rect", {"x0": 0.6, "y0": 0.0, "x1": 0.85, "y1": 1.0})])
@@ -432,12 +432,12 @@ def defect_section() -> tuple[str, str]:
     """不良モード検証デモ（ボイド／ピンホール）画像 + 説明 HTML を返す。"""
     # ボイド: 高アスペクト比トレンチを等角性の悪い PVD で埋め、口元が先に
     # 塞がって内部にキーホール（ティアドロップ）状の空洞が残る様子を再現する。
-    # 細かいボクセル(pitch=0.02µm)で側壁被覆と口元の絞り込みを滑らかに描く。
-    pitch = 0.01
+    # 細かいボクセル(pitch=0.005µm)で側壁被覆と口元の絞り込みを滑らかに描く。
+    pitch = 0.005
     width, depth = 0.5, 1.5
-    span = 600 * pitch
+    span = 1200 * pitch
     frac = width / span
-    r = Recipe(config=WaferConfig(nx=600, ny=12, nz=480, pitch_um=pitch, substrate_um=2.0))
+    r = Recipe(config=WaferConfig(nx=1200, ny=12, nz=960, pitch_um=pitch, substrate_um=2.0))
     r.add(CVD(material="oxide", thickness_um=depth + 0.3))
     r.add(Photo(
         mask=Mask(shapes=[Shape("rect", {"x0": (1 - frac) / 2, "y0": 0.0,

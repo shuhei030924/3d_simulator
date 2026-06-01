@@ -2209,16 +2209,7 @@ class DRIE(Process):
             depth_cap = np.full((ny, nx), float(depth))
         etched = np.zeros((ny, nx), dtype=float)
 
-        amp = wafer.um_to_vox(self.scallop_um) if self.scallop_um > 0 else 0
-        pitch = max(2, wafer.um_to_vox(self.scallop_pitch_um))
-        # スキャロップ膨らみは横方向(x,y)のみに広げる構造要素。z 成分を含めると
-        # dilation が下方へも掘り進み、エッチ深さが指定値より深くなってしまう。
-        lat_struct = np.zeros((3, 3, 3), dtype=bool)
-        lat_struct[1, 1, 1] = True
-        lat_struct[1, 0, 1] = lat_struct[1, 2, 1] = True
-        lat_struct[1, 1, 0] = lat_struct[1, 1, 2] = True
-
-        for d in range(depth):
+        for _ in range(depth):
             z_top, top_id = _top_material(wafer)
             do = opening & (z_top >= 0) & (top_id == target_id) & (etched < depth_cap)
             if not do.any():
@@ -2227,17 +2218,31 @@ class DRIE(Process):
             zz = z_top[ys, xs]
             grid[zz, ys, xs] = materials.AIR
             etched[do] += 1.0
-            # スキャロップ: 周期の中央付近でその層だけ側壁を横へ膨らませる。
-            # 直近に掘った 1 層分のみを横方向(x,y)に拡張するため、深さに比例した
-            # 累積的なテーパや過剰掘りは生じず、垂直側壁に局所的な凹凸が付く。
-            if amp > 0 and (d % pitch) == (pitch // 2):
-                layer = np.zeros(grid.shape, dtype=bool)
-                layer[zz, ys, xs] = True
-                ring = ndimage.binary_dilation(
-                    layer, structure=lat_struct, iterations=amp
-                )
-                bulge = ring & (grid == target_id)
-                grid[bulge] = materials.AIR
+
+        # スキャロップ（Bosch プロセスの側壁波形）: エッチ後のトレンチ側壁を
+        # サイクル位相に応じた半円プロファイルで横方向へ追加除去する。各サイクル
+        # 中央で最も膨らみ境界で 0 に絞れるため、解像度に依らず丸みのある周期的な
+        # 凹凸になる（旧実装の 1 ボクセル線にならない）。横方向(x,y)距離だけで
+        # 評価するので深さは増えない（垂直方向は実質無限大の sampling）。
+        amp = wafer.um_to_vox(self.scallop_um) if self.scallop_um > 0 else 0
+        if amp > 0:
+            s_pitch = max(2, wafer.um_to_vox(self.scallop_pitch_um))
+            target_mask = grid == target_id
+            lat_dist = ndimage.distance_transform_edt(
+                target_mask, sampling=(1e6, 1.0, 1.0)
+            )
+            surf = int(z_top0[opening].max())  # フィールド上面（深さ位相の基準）
+            z_idx = np.arange(nz)
+            phase = (surf - z_idx) % s_pitch  # 上面からの深さ方向のサイクル位相
+            radius_z = amp * np.sin(np.pi * phase / s_pitch)  # 半円: 中央で最大
+            radius = radius_z[:, None, None]
+            carve = (
+                target_mask
+                & (lat_dist > 0.0)
+                & (lat_dist <= radius)
+                & (z_idx[:, None, None] <= surf)
+            )
+            grid[carve] = materials.AIR
 
         # マイクロトレンチング: 側壁で反射したイオンが開口周縁（フット）に
         # 集中し、その列だけ局所的に深く掘れる。開口の外周列を microtrench
