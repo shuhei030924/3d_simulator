@@ -629,14 +629,38 @@ class PVD(Process):
         v_budget = np.maximum(np.rint(atten * t).astype(np.int64), 1)
         v_done = np.zeros((ny, nx), dtype=np.int64)
 
+        # 側壁被覆の深さ依存テーパ: 指向性フラックスは開口から入るため、側壁
+        # 上端ほど空(開口)を広く見込んで厚く付き、深い底ほど壁に遮蔽されて
+        # 薄くなる。底のコンキャブ隅が最も遮蔽されて最薄になる実挙動を表す。
+        # フィールド面からの深さ(ボクセル)で各 z の堆積露出度を与え、z ごとに
+        # 側壁成長頻度を変える（深い z ほど稀にしか成長せず薄膜にとどまる）。
+        z_idx_s = np.arange(nz)
+        depth_below = np.clip(field_ref - z_idx_s, 0.0, None)
+        if valid0.any():
+            h_shadow = max(field_ref - float(zt0[valid0].min()), 1.0)
+        else:
+            h_shadow = 1.0
+        # 上端=1.0 → 底=0.08 へ線形にテーパ（底でも薄膜は付くので 0 にしない）。
+        side_expo = np.clip(1.0 - depth_below / h_shadow, 0.08, 1.0)
+        # 各 z の側壁被覆の最大横厚（ボクセル）。上端で約 sc·t、底で薄い。
+        # 元の壁からの横距離がこのキャップを超えて成長しないよう抑え、底隅に
+        # 金属が三角形に充填されるフィレット偽像を防ぐ。
+        side_cap = sc * t * side_expo
+        # 成膜前の壁/床からの横距離場（横方向のみ評価, 縦の空気は無視）。
+        init_air = grid == materials.AIR
+        wall_dist = ndimage.distance_transform_edt(
+            init_air, sampling=(1e6, 1.0, 1.0)
+        )
+
         # 反復堆積: 1 反復で膜厚 1 ボクセル相当を成長させる。
         #  - 垂直成長: 水平面（直下が固体の開口空気）に積もる。窪み底は
         #             バジェット(≈sc·t)で頭打ちになり薄い膜にとどまる。
-        #  - 側壁成長: 垂直面（横が固体の開口空気）には被覆率 sc の割合で堆積。
+        #  - 側壁成長: 垂直面（横が固体の開口空気）に被覆率 sc×露出度 の頻度で
+        #             堆積。深い側壁ほど稀になり、底隅に向かって薄くテーパする。
         #  - 庇成長 : 開口上端の膜先端（真下が空気の膜＝庇）から横へ張り出し、
         #             overhang に比例した速さで開口を塞ぐ。塞がると内部は
         #             _open_to_top の連結が切れてボイドとして凍結する。
-        lat_acc = 0.0
+        side_acc = np.zeros(nz, dtype=np.float64)
         oh_acc = 0.0
         for _ in range(t):
             air = grid == materials.AIR
@@ -656,12 +680,21 @@ class PVD(Process):
 
             grow = grow_v.copy()
 
-            # 側壁成長フロント（横が固体の開口空気）を被覆率 sc の頻度で
-            lat_acc += sc
-            if lat_acc >= 1.0:
-                lat_acc -= 1.0
+            # 側壁成長フロント（横が固体の開口空気）を z ごとの被覆頻度
+            # sc×side_expo[z] で堆積。深い z ほど稀にしか tick せず薄くなる。
+            # 元の壁からの横距離が side_cap[z] 以内に限り、底隅のフィレット
+            # （三角形充填）偽像を防ぐ。
+            side_acc += sc * side_expo
+            side_tick = side_acc >= 1.0
+            if side_tick.any():
+                side_acc[side_tick] -= 1.0
                 side_solid = ndimage.binary_dilation(solid, structure=lat) & air
-                grow |= open_air & side_solid
+                grow |= (
+                    open_air
+                    & side_solid
+                    & side_tick[:, None, None]
+                    & (wall_dist <= side_cap[:, None, None])
+                )
 
             grid[grow] = mat_id
 
