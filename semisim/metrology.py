@@ -2158,6 +2158,44 @@ def junction_leakage_a(
     return float(j * area_um2)
 
 
+def dram_retention_time_s(
+    storage_cap_ff: float, junction_area_um2: float, temperature_c: float = 85.0,
+    *, sense_margin_v: float = 0.3, **leak_kw,
+) -> dict:
+    """DRAM セルの保持（リテンション）時間 t_ret を返す（容量＋接合リークの結合）。
+
+    蓄積容量 C[fF] に貯めた電荷が接合リーク I_leak（junction_leakage_a）で抜け、
+    センスマージン sense_margin_v だけ電圧が落ちるまでの時間 t_ret=C·ΔV/I_leak を
+    求める。温度が高いほどリークが増え保持時間は指数的に短くなる（リフレッシュ
+    周期の決定要因）。返す辞書: retention_s / leakage_a / storage_cap_ff。
+    リークが 0 なら inf。
+    """
+    if storage_cap_ff < 0 or sense_margin_v <= 0:
+        raise ValueError("容量は非負・センスマージンは正である必要があります。")
+    i_leak = junction_leakage_a(junction_area_um2, temperature_c, **leak_kw)
+    if i_leak <= 0:
+        return {"retention_s": float("inf"), "leakage_a": 0.0,
+                "storage_cap_ff": float(storage_cap_ff)}
+    t_ret = (storage_cap_ff * 1e-15) * sense_margin_v / i_leak
+    return {
+        "retention_s": float(t_ret),
+        "leakage_a": float(i_leak),
+        "storage_cap_ff": float(storage_cap_ff),
+    }
+
+
+def critical_charge_fc(storage_cap_ff: float, node_voltage_v: float = 1.0) -> float:
+    """ソフトエラー（SEU）の臨界電荷 Q_crit（fC）を返す。
+
+    記憶ノードの状態反転に必要な最小電荷 Q_crit = C·V（一次近似）。粒子線が
+    集めた電荷がこれを超えるとビット反転（ソフトエラー）。容量・電圧が大きいほど
+    Q_crit が大きくソフトエラー耐性が高い。容量[fF]×電圧[V] = 電荷[fC]。
+    """
+    if storage_cap_ff < 0:
+        raise ValueError("容量は非負である必要があります。")
+    return float(storage_cap_ff * node_voltage_v)
+
+
 def junction_cv_curve(
     na_cm3: float, nd_cm3: float,
     *, v_max_reverse: float = 5.0, n_points: int = 51, area_um2: float = 1.0,
@@ -2272,11 +2310,15 @@ def hci_lifetime(vds: float, *, b_volt: float = 30.0, a_const: float = 1.0e-6) -
 
     TTF = A·exp(B/Vds)。ドレイン電圧 Vds が高いほど高エネルギーキャリアが増え
     寿命が指数的に短くなる（NBTI/TDDB と異なりドレイン電界律速）。B は電圧加速
-    係数（V）。Vds≤0 では inf。
+    係数（V）。Vds≤0 では inf。極小 Vds では指数をクリップして inf を返す
+    （オーバーフロー警告を回避）。
     """
     if vds <= 0:
         return float("inf")
-    return float(a_const * np.exp(b_volt / vds))
+    expo = b_volt / vds
+    if expo > 700.0:  # exp(700) ≈ 1e304（float 上限近傍）。これ以上は実質 inf。
+        return float("inf")
+    return float(a_const * np.exp(expo))
 
 
 def critical_area_short_um2(
