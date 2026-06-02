@@ -75,6 +75,37 @@ def step_height_um(wafer: Wafer) -> float:
     return float(valid.max() - valid.min())
 
 
+def planarization_dof_check(wafer: Wafer, dof_um: float = 0.2) -> dict:
+    """表面トポグラフィをリソの焦点深度(DOF)と比較し焦点外れリスクを判定する。
+
+    各列の表面高さ（surface_height_map）の中央値を最良焦点面とみなし、そこからの
+    乖離が DOF/2 を超える領域を「焦点外れ」と判定する。CMP 後の平坦性がリソの
+    DOF に収まるか（後続パターニングの解像可否）を検証する。返す辞書:
+      - surface_range_um: 表面高低差（max−min）
+      - focus_plane_um: 最良焦点面（高さ中央値）
+      - out_of_focus_fraction: 焦点外れ領域の面積率（0〜1）
+      - within_dof: 高低差が DOF 以内か（bool）
+    固体が無ければ全て 0／True。
+    """
+    if dof_um <= 0:
+        raise ValueError("DOF は正の値が必要です。")
+    height = surface_height_map(wafer)
+    valid_mask = ~np.isnan(height)
+    valid = height[valid_mask]
+    if valid.size == 0:
+        return {"surface_range_um": 0.0, "focus_plane_um": 0.0,
+                "out_of_focus_fraction": 0.0, "within_dof": True}
+    focus = float(np.median(valid))
+    dev = np.abs(valid - focus)
+    out_frac = float((dev > dof_um / 2.0).mean())
+    return {
+        "surface_range_um": float(valid.max() - valid.min()),
+        "focus_plane_um": focus,
+        "out_of_focus_fraction": out_frac,
+        "within_dof": bool((valid.max() - valid.min()) <= dof_um),
+    }
+
+
 def solid_fraction(wafer: Wafer) -> float:
     """全ボクセルに対する固体（空気以外）の割合。"""
     return float((wafer.grid != materials.AIR).mean())
