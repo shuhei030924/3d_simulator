@@ -575,6 +575,8 @@ def verification_section() -> str:
          f"{c_field:.3f} fF（∇·(εr∇φ)=0 を疎行列で解きフリンジ込み）"),
         ("RC 遅延", "rc_delay_ps", "τ=R·C による配線遅延"),
         ("分布 RC Elmore 遅延", "elmore_delay_ps", "τ=Σ(ΣR)·C。一様線で ½RC（分布効果）"),
+        ("伝送線路パラメータ", "transmission_line_params",
+         "Z0・インダクタンス・信号速度 v=c/√εr・伝搬遅延（高速配線 RLC）"),
         ("ロジックゲート遅延", "gate_switching_delay_ps", "CV/I モデル τ=C·Vdd/I_drive"),
         ("MOS ゲート容量 / EOT", "mos_gate_capacitance",
          "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),
