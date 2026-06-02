@@ -1846,6 +1846,58 @@ def junction_cv_curve(
     }
 
 
+def mos_drain_current(
+    wafer: Wafer, gate_conductor, channel="silicon", *, vg: float, vd: float,
+    doping_cm3: float = 1.0e17, vfb: float = 0.0, mobility_cm2_vs: float = 450.0,
+    w_over_l: float = 10.0, lambda_per_v: float = 0.0, subthreshold_n: float = 1.3,
+) -> float:
+    """長チャネル n-MOSFET のドレイン電流 Id（A）を返す（区分モデル）。
+
+    ゲート容量 Cox（mos_gate_capacitance）としきい値 Vth（threshold_voltage_v）から、
+      - サブスレショルド（Vov=Vg−Vth≤0）: Id=β·n·Vt²·exp(Vov/(n·Vt))·(1−exp(−Vd/Vt))
+        （SS=n·(kT/q)·ln10 ≈ n·60mV/dec）
+      - 三極管（Vd<Vov）: Id=β·(Vov·Vd−Vd²/2)
+      - 飽和（Vd≥Vov）: Id=½·β·Vov²·(1+λ·Vd)
+    ここで β=µ·Cox·(W/L)。µ は mobility_cm2_vs、Vt=kT/q。Cox=0 では 0。
+    """
+    th = threshold_voltage_v(wafer, gate_conductor, channel,
+                             doping_cm3=doping_cm3, vfb=vfb)
+    cox = th["cox_f_m2"]
+    vth = th["vth_v"]
+    if cox <= 0 or vth is None:
+        return 0.0
+    mu = mobility_cm2_vs * 1e-4  # cm²/Vs → m²/Vs
+    beta = mu * cox * w_over_l   # A/V²
+    vt = _KT_Q
+    vov = vg - vth
+    sat_factor = 1.0 - np.exp(-max(vd, 0.0) / vt)
+    if vov <= 0.0:  # サブスレショルド（弱反転）
+        return float(beta * subthreshold_n * vt * vt
+                     * np.exp(vov / (subthreshold_n * vt)) * sat_factor)
+    if vd < vov:    # 三極管（線形）
+        return float(beta * (vov * vd - 0.5 * vd * vd))
+    return float(0.5 * beta * vov * vov * (1.0 + lambda_per_v * vd))  # 飽和
+
+
+def mos_iv_curve(
+    wafer: Wafer, gate_conductor, channel="silicon", *, vg_list=(0.5, 1.0, 1.5),
+    vd_max: float = 2.0, n_points: int = 41, **kw,
+) -> dict:
+    """MOS 出力特性 Id-Vd 族（複数 Vg）を返す。
+
+    返す辞書: vd（配列）/ curves（{vg: Id 配列(A)}）。三極管→飽和の遷移と、Vg を
+    上げると Idsat が二乗で増える様子（飽和電流 ∝ (Vg−Vth)²）を表す。
+    """
+    vd = np.linspace(0.0, vd_max, n_points)
+    curves = {}
+    for vg in vg_list:
+        curves[float(vg)] = np.array([
+            mos_drain_current(wafer, gate_conductor, channel, vg=float(vg),
+                              vd=float(v), **kw) for v in vd
+        ])
+    return {"vd": vd, "curves": curves}
+
+
 def critical_area_short_um2(
     wafer: Wafer, name_a, name_b, defect_diameter_um: float, z_index: int | None = None
 ) -> float:
