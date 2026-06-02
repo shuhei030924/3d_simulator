@@ -1358,6 +1358,70 @@ def current_density_stats(
     }
 
 
+def current_density_profile(
+    wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
+) -> dict:
+    """配線に沿った電流密度プロファイル J(位置) を返す（EM ホットスポット可視化）。
+
+    指定軸の各スライスの断面積から J=I/A を求めた配列を返す。最小断面で J が
+    ピークになり、ネッキング箇所＝EM 故障の起点を位置付きで可視化できる。返す辞書:
+      - position_um: 各スライスの軸方向位置（µm, 配線の存在範囲）
+      - area_um2: 各スライスの断面積（µm²）
+      - j_a_cm2: 各スライスの電流密度（A/cm²）
+    配線が無い/非導体/断線では空配列。
+    """
+    mat = materials.get(name_or_id)
+    grid = wafer.grid
+    mask = grid == mat.id
+    empty = {"position_um": np.array([]), "area_um2": np.array([]),
+             "j_a_cm2": np.array([])}
+    if mat.resistivity_ohm_um <= 0 or not mask.any():
+        return empty
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)
+    pitch = wafer.config.pitch_um
+    other = tuple(ax for ax in (0, 1, 2) if ax != a)
+    area_vox = mask.sum(axis=other)
+    present = np.nonzero(area_vox > 0)[0]
+    lo, hi = int(present.min()), int(present.max())
+    seg = area_vox[lo:hi + 1]
+    if (seg == 0).any():
+        return empty  # 断線
+    area_um2 = seg * (pitch ** 2)
+    i_a = abs(current_ma) * 1e-3
+    j = i_a / (area_um2 * 1e-8)
+    pos = (np.arange(lo, hi + 1)) * pitch
+    return {"position_um": pos, "area_um2": area_um2, "j_a_cm2": j}
+
+
+def tlm_extract(spacings_um, resistances_ohm, width_um: float) -> dict:
+    """TLM（伝送線路法）で接触抵抗・シート抵抗・伝送長を抽出する。
+
+    複数のコンタクト間隔 L に対する全抵抗 R_total = 2·Rc + (Rsheet/W)·L の直線
+    （R vs L）を最小二乗回帰し、傾き=Rsheet/W、切片=2·Rc から抽出する。
+      - sheet_resistance_ohm_sq = 傾き × W
+      - contact_resistance_ohm = 切片 / 2
+      - transfer_length_um = |x 切片|/2 = Rc·W/Rsheet
+    返す辞書: 上記 3 値 + slope/intercept。点が 2 点未満や幅 ≤0 は ValueError。
+    """
+    spac = np.asarray(spacings_um, dtype=float)
+    res = np.asarray(resistances_ohm, dtype=float)
+    if spac.size < 2 or res.size != spac.size:
+        raise ValueError("spacings と resistances は同数で 2 点以上必要です。")
+    if width_um <= 0:
+        raise ValueError("幅 width_um は正の値が必要です。")
+    slope, intercept = np.polyfit(spac, res, 1)
+    rsheet = slope * width_um
+    rc = intercept / 2.0
+    lt = abs(intercept / slope) / 2.0 if slope != 0 else 0.0
+    return {
+        "sheet_resistance_ohm_sq": float(rsheet),
+        "contact_resistance_ohm": float(rc),
+        "transfer_length_um": float(lt),
+        "slope_ohm_per_um": float(slope),
+        "intercept_ohm": float(intercept),
+    }
+
+
 def electromigration_risk(
     wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
 ) -> dict:
