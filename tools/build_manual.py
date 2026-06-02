@@ -633,6 +633,8 @@ def verification_section() -> str:
          "ΔT=P·Rth, ジュール発熱 P=I²R"),
         ("熱拡散ソルバ（温度分布）", "temperature_field_2d / peak_temperature_rise_k",
          "∇·(k∇T)=−q で横方向ヒートスプレッディングを解く"),
+        ("完全 3D 熱拡散ソルバ", "temperature_field_3d / peak_temperature_rise_3d",
+         "局所発熱を x・y・z の 3 方向に等方拡散（断面ソルバの上位）"),
         ("局所応力集中", "stress_concentration_map / max_stress_concentration",
          "界面 Δσ×幾何係数でクラック/剥離リスク箇所を検出"),
         ("ウェハ反り（膜応力）", "wafer_bow_um", "Stoney 則による等価反り"),

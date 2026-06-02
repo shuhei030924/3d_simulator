@@ -1720,6 +1720,81 @@ def peak_temperature_rise_k(
     return float(temperature_field_2d(wafer, source_mask, total_power_w, y_index).max())
 
 
+def temperature_field_3d(
+    wafer: Wafer, source_mask: np.ndarray, total_power_w: float
+) -> np.ndarray:
+    """完全 3D 熱拡散ソルバで温度上昇分布 ΔT[K]（3D 配列）を返す。
+
+    定常熱伝導 ∇·(k∇T)=−q を 3D 全体で有限体積・疎行列直接解法で解く。基板最下面
+    （z=0）を温度基準（ヒートシンク, ΔT=0）の Dirichlet 境界、他境界は断熱とする。
+    発熱は source_mask（3D bool）の各セルに total_power_w を均等分配。2.5D 断面
+    ソルバ（temperature_field_2d）と異なり局所発熱を 3 方向に拡散させるため、点状
+    ホットスポットのピーク温度をより正確（低め）に評価する。計算量は格子規模に依存
+    （大規模では重い）。返り値は (nz, ny, nx) の ΔT[K] 配列。
+    """
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import spsolve
+
+    grid = wafer.grid
+    nz, ny, nx = grid.shape
+    kf = thermal_conductivity_field(wafer)
+    pitch_m = wafer.config.pitch_um * 1e-6
+    n_src = int(source_mask.sum())
+    p_cell = (total_power_w / n_src) if n_src > 0 else 0.0
+
+    # ヒートシンク = z=0 面。未知数 = z>=1 のセル。
+    idx = -np.ones((nz, ny, nx), dtype=int)
+    unknown_mask = np.zeros((nz, ny, nx), dtype=bool)
+    unknown_mask[1:, :, :] = True
+    unk = np.argwhere(unknown_mask)
+    for n, (zc, yc, xc) in enumerate(unk):
+        idx[zc, yc, xc] = n
+    m = len(unk)
+    if m == 0:
+        return np.zeros((nz, ny, nx))
+
+    def k_face(a, b):
+        return 2.0 * a * b / (a + b) if (a + b) > 0 else 0.0
+
+    rows: list[int] = []
+    cols: list[int] = []
+    data: list[float] = []
+    b = np.zeros(m)
+    neigh = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+    for n, (zc, yc, xc) in enumerate(unk):
+        diag = 0.0
+        for dz, dy, dx in neigh:
+            zn, yn, xn = zc + dz, yc + dy, xc + dx
+            if not (0 <= zn < nz and 0 <= yn < ny and 0 <= xn < nx):
+                continue
+            g = k_face(kf[zc, yc, xc], kf[zn, yn, xn]) * pitch_m  # コンダクタンス W/K
+            if g == 0.0:
+                continue
+            diag += g
+            if zn == 0:  # ヒートシンク（ΔT=0）→ RHS 寄与 0
+                continue
+            rows.append(n)
+            cols.append(idx[zn, yn, xn])
+            data.append(-g)
+        rows.append(n)
+        cols.append(n)
+        data.append(diag)
+        if source_mask[zc, yc, xc]:
+            b[n] += p_cell
+    sol = spsolve(csr_matrix((data, (rows, cols)), shape=(m, m)), b)
+    t = np.zeros((nz, ny, nx))
+    for n, (zc, yc, xc) in enumerate(unk):
+        t[zc, yc, xc] = sol[n]
+    return t
+
+
+def peak_temperature_rise_3d(
+    wafer: Wafer, source_mask: np.ndarray, total_power_w: float
+) -> float:
+    """完全 3D 熱拡散ソルバによる最大温度上昇 ΔT_max[K] を返す。"""
+    return float(temperature_field_3d(wafer, source_mask, total_power_w).max())
+
+
 def estimate_convergence_order(step_sizes, errors) -> float:
     """メッシュ刻み h に対する誤差の収束次数 p を最小二乗で推定する。
 
