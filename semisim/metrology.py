@@ -1769,6 +1769,66 @@ def mos_cv_curve(
     }
 
 
+def junction_capacitance(
+    na_cm3: float, nd_cm3: float, reverse_bias_v: float = 0.0, area_um2: float = 1.0
+) -> dict:
+    """pn 接合（階段接合）の空乏層幅・接合容量・ビルトイン電位を返す。
+
+    ビルトイン電位 Vbi=(kT/q)·ln(Na·Nd/ni²)、逆バイアス V_R≥0 のとき
+      W = √(2·εs·(Vbi+V_R)/q · (1/Na+1/Nd))     （空乏層幅）
+      Cj = εs/W                                   （単位面積容量）
+    片側接合は一方を高ドープにすると再現できる（W は低ドープ側で決まる）。返す辞書:
+      vbi_v / depletion_width_um / cj_ff_per_um2 / cj_total_ff / one_over_cj2。
+    逆バイアスが深いほど W は広く Cj は小さい。`1/Cj²` は (Vbi+V_R) に比例（C-V
+    profiling でドーピングと Vbi を抽出できる）。
+    """
+    if na_cm3 <= 0 or nd_cm3 <= 0 or area_um2 < 0:
+        raise ValueError("ドーピングは正、面積は非負である必要があります。")
+    if reverse_bias_v < 0:
+        raise ValueError("reverse_bias_v は逆バイアス量(≥0)で指定してください。")
+    na = na_cm3 * 1e6
+    nd = nd_cm3 * 1e6
+    vbi = _KT_Q * np.log(na * nd / _NI_SI_M3 ** 2)
+    w = np.sqrt(2.0 * _EPS_SI * (vbi + reverse_bias_v) / _Q * (1.0 / na + 1.0 / nd))
+    cj_f_m2 = _EPS_SI / w
+    cj_ff_um2 = cj_f_m2 * 1e3
+    return {
+        "vbi_v": float(vbi),
+        "depletion_width_um": float(w * 1e6),
+        "cj_ff_per_um2": float(cj_ff_um2),
+        "cj_total_ff": float(cj_ff_um2 * area_um2),
+        "one_over_cj2": float(1.0 / cj_f_m2 ** 2),
+    }
+
+
+def junction_cv_curve(
+    na_cm3: float, nd_cm3: float,
+    *, v_max_reverse: float = 5.0, n_points: int = 51, area_um2: float = 1.0,
+) -> dict:
+    """pn 接合の逆バイアス C-V 曲線（Cj-V と 1/Cj²-V）を返す。
+
+    逆バイアス 0→v_max_reverse を掃引し、各点の接合容量と 1/Cj² を返す。
+    1/Cj² は逆バイアスに対し直線になり、傾きから実効ドーピング、外挿切片から
+    Vbi が求まる（標準の C-V ドーピングプロファイリング）。返す辞書:
+      reverse_bias_v / cj_ff_per_um2 / one_over_cj2 / vbi_v。
+    """
+    vr = np.linspace(0.0, v_max_reverse, n_points)
+    cj = np.empty_like(vr)
+    inv2 = np.empty_like(vr)
+    vbi = 0.0
+    for k, v in enumerate(vr):
+        d = junction_capacitance(na_cm3, nd_cm3, float(v), area_um2)
+        cj[k] = d["cj_ff_per_um2"]
+        inv2[k] = d["one_over_cj2"]
+        vbi = d["vbi_v"]
+    return {
+        "reverse_bias_v": vr,
+        "cj_ff_per_um2": cj,
+        "one_over_cj2": inv2,
+        "vbi_v": float(vbi),
+    }
+
+
 def critical_area_short_um2(
     wafer: Wafer, name_a, name_b, defect_diameter_um: float, z_index: int | None = None
 ) -> float:
