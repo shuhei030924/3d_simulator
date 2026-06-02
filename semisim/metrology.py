@@ -1195,6 +1195,102 @@ def rc_delay_ps(wafer: Wafer, line_material, return_material, axis: str = "x") -
     return float(r * c_ff * 1e-3)
 
 
+def _line_slice_resistances(wafer: Wafer, mat_id: int, axis: str):
+    """配線を指定軸に沿って薄切りした各スライスの抵抗 [Ω] 配列を返す（内部用）。
+
+    R_slice = ρ/(断面ボクセル数·pitch)。配線が存在する範囲のみ。断面 0（断線）が
+    あれば None。配線/非導体不在も None。
+    """
+    mat = materials.BY_ID.get(int(mat_id))
+    if mat is None or mat.resistivity_ohm_um <= 0:
+        return None
+    grid = wafer.grid
+    mask = grid == mat.id
+    if not mask.any():
+        return None
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)
+    pitch = wafer.config.pitch_um
+    other = tuple(ax for ax in (0, 1, 2) if ax != a)
+    area_vox = mask.sum(axis=other)
+    present = np.nonzero(area_vox > 0)[0]
+    lo, hi = int(present.min()), int(present.max())
+    seg = area_vox[lo:hi + 1]
+    if (seg == 0).any():
+        return None  # 途中断線
+    return mat.resistivity_ohm_um / (seg.astype(float) * pitch)
+
+
+def elmore_delay_ps(
+    wafer: Wafer, line_material, return_material, axis: str = "x"
+) -> dict:
+    """分布 RC 配線の Elmore 遅延（ps）を推定する（集中定数 R·C より高精度）。
+
+    配線を指定軸方向に薄切りし、各スライスの抵抗 rₖ（断面積から）と容量 cₖ
+    （対 return_material 総容量を在線スライスへ均等配分）から、
+      τ_Elmore = Σₖ (Σ_{j≤k} rⱼ)·cₖ
+    を計算する。一様配線では τ≈½·R·C（集中定数の半分）になり、分布効果を捉える。
+    返す辞書: elmore_delay_ps / lumped_rc_ps / resistance_ohm / capacitance_ff。
+    断線・容量 0 ではそれぞれ inf／0。
+    """
+    line = materials.get(line_material)
+    r_slices = _line_slice_resistances(wafer, line.id, axis)
+    c_ff = parasitic_capacitance_ff(wafer, line_material, return_material)
+    r_total = line_resistance_ohm(wafer, line_material, axis)
+    lumped = float("inf") if r_total == float("inf") else float(r_total * c_ff * 1e-3)
+    if r_slices is None:
+        return {"elmore_delay_ps": float("inf"), "lumped_rc_ps": lumped,
+                "resistance_ohm": r_total, "capacitance_ff": c_ff}
+    n = len(r_slices)
+    c_f = c_ff * 1e-15 / n  # 各スライスの容量 [F]（均等配分）
+    cum_r = np.cumsum(r_slices)  # 各ノードまでの上流抵抗 [Ω]
+    tau_s = float(np.sum(cum_r * c_f))  # Σ (ΣR)·c [s]
+    return {
+        "elmore_delay_ps": tau_s * 1e12,
+        "lumped_rc_ps": lumped,
+        "resistance_ohm": float(r_total),
+        "capacitance_ff": float(c_ff),
+    }
+
+
+def blech_immortal(
+    wafer: Wafer, conductor, current_ma: float, axis: str = "x",
+    jl_threshold_a_cm: float = 4000.0,
+) -> dict:
+    """エレクトロマイグレーションの Blech 不死条件（j·L < (jL)_crit）を判定する。
+
+    配線の電流密度 j（平均断面）と長さ L の積 j·L が臨界値未満なら、応力勾配が
+    EM 駆動力と釣り合い空孔成長が止まる＝EM 不死（故障しない）。j·L が大きい
+    （長い/高電流密度の配線）ほど故障しやすい。返す辞書:
+      j_a_cm2 / length_cm / jl_product_a_cm / threshold_a_cm / immortal(bool)。
+    （jL）_crit は材料・温度依存（既定 4000 A/cm ≈ Cu の代表値）。
+    """
+    mat = materials.get(conductor)
+    grid = wafer.grid
+    mask = grid == mat.id
+    if not mask.any() or mat.resistivity_ohm_um <= 0:
+        return {"j_a_cm2": 0.0, "length_cm": 0.0, "jl_product_a_cm": 0.0,
+                "threshold_a_cm": jl_threshold_a_cm, "immortal": True}
+    a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)
+    pitch = wafer.config.pitch_um
+    other = tuple(ax for ax in (0, 1, 2) if ax != a)
+    area_vox = mask.sum(axis=other)
+    present = np.nonzero(area_vox > 0)[0]
+    lo, hi = int(present.min()), int(present.max())
+    length_um = (hi - lo + 1) * pitch
+    mean_area_um2 = float(area_vox[lo:hi + 1].mean()) * (pitch ** 2)
+    i_a = abs(current_ma) * 1e-3
+    j = i_a / (mean_area_um2 * 1e-8) if mean_area_um2 > 0 else float("inf")
+    length_cm = length_um * 1e-4
+    jl = j * length_cm
+    return {
+        "j_a_cm2": float(j),
+        "length_cm": float(length_cm),
+        "jl_product_a_cm": float(jl),
+        "threshold_a_cm": float(jl_threshold_a_cm),
+        "immortal": bool(jl < jl_threshold_a_cm),
+    }
+
+
 def current_density_stats(
     wafer: Wafer, name_or_id, current_ma: float, axis: str = "x"
 ) -> dict:
