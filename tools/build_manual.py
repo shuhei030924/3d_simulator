@@ -578,6 +578,8 @@ def verification_section() -> str:
          "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),
         ("MOS C-V 特性 / Vth", "mos_cv_curve / threshold_voltage_v",
          "空乏近似の高周波 C-V（蓄積→空乏→反転）としきい値電圧・空乏層幅"),
+        ("pn 接合 空乏層容量", "junction_capacitance / junction_cv_curve",
+         "ビルトイン電位・空乏層幅・接合容量。1/Cj²-V 直線（C-V プロファイリング）"),
         ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
          "断面積を考慮した直列抵抗・薄膜評価"),
         ("電流密度 / EM リスク", "current_density_stats / electromigration_risk",
@@ -601,6 +603,8 @@ def verification_section() -> str:
          "欠陥径ごとの臨界面積を距離変換で算出しサイズ分布で積分→ショート歩留り"),
         ("平坦化 DOF バジェット", "planarization_dof_check",
          "表面トポグラフィをリソ焦点深度と比較し焦点外れ面積率を判定"),
+        ("ソルバ収束検証", "estimate_convergence_order",
+         "容量・熱拡散ソルバが格子細分で解析解へ約1次収束することを定量検証"),
         ("リソ プロセスウィンドウ", "litho.bossung / process_window / meef / EPE",
          "空間像モデルで CD・DOF・露光裕度・MEEF・EPE を評価"),
     ]
