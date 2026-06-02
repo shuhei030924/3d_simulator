@@ -21,6 +21,9 @@
   プロセスウィンドウ（被写界深度 DOF・露光裕度 EL, `process_window`）、エッジ配置誤差
   （`edge_placement_error_um`）、マスク誤差増幅係数（`meef`）を検証できます。
   しきい値=0.5 較正によりベストフォーカスで CD バイアスがほぼ 0、解像限界付近で MEEF が増大します。
+- **数値ソルバの収束検証**: 静電界容量・熱拡散ソルバが格子細分で解析解へ収束することを
+  `estimate_convergence_order`（誤差≈C·hᵖ の次数 p を最小二乗推定）で定量検証できます。
+  いずれも約 1 次精度（p≈1）で解析解に収束することを確認済み（`tests/test_solver_convergence.py`）。
 - **プリセットレシピ**: 代表的な 13 フロー（ダマシン・MOSFET・LDD MOSFET・KOH・DRIE・TSV 貫通ビア・サリサイドゲート・薄化 3D-IC 等）をメニューから即読込（`semisim/presets.py`）。
 - **設定の永続化**: 最後に使ったフォルダ・最近開いたレシピ・既定ウェハ設定・ウィンドウ位置を
   保存し次回起動時に復元（`semisim/settings.py`、`~/.semisim/settings.json`）。

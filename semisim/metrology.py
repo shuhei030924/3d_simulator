@@ -1531,6 +1531,23 @@ def peak_temperature_rise_k(
     return float(temperature_field_2d(wafer, source_mask, total_power_w, y_index).max())
 
 
+def estimate_convergence_order(step_sizes, errors) -> float:
+    """メッシュ刻み h に対する誤差の収束次数 p を最小二乗で推定する。
+
+    誤差 ≈ C·hᵖ を仮定し log(error)=log(C)+p·log(h) の傾き p を返す。数値ソルバ
+    （容量・熱拡散など）がメッシュ細分で解析解へ収束することの定量検証に使う。
+    1 次精度の有限体積なら p≈1。要素数 2 未満や非正の値があれば ValueError。
+    """
+    h = np.asarray(step_sizes, dtype=float)
+    e = np.asarray(errors, dtype=float)
+    if h.size < 2 or e.size != h.size:
+        raise ValueError("step_sizes と errors は同数で 2 点以上必要です。")
+    if np.any(h <= 0) or np.any(e <= 0):
+        raise ValueError("step_sizes・errors は正の値である必要があります。")
+    slope, _ = np.polyfit(np.log(h), np.log(e), 1)
+    return float(slope)
+
+
 # ボルツマン定数（eV/K）
 _K_BOLTZMANN_EV = 8.617333e-5
 
