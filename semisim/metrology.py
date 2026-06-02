@@ -2739,6 +2739,71 @@ def capacitance_matrix_ff(wafer: Wafer, conductor_names, axis: str = "y") -> dic
     }
 
 
+def transmission_line_params(wafer: Wafer, signal, ground, axis: str = "y") -> dict:
+    """配線の伝送線路パラメータ（特性インピーダンス・インダクタンス・遅延）を返す。
+
+    TEM 線路では L'·C'_vac = μ0·ε0（インダクタンスは誘電体に依らず幾何のみで決まる）。
+    そこで静電界ソルバで「実誘電体での容量 C'」と「真空（εr=1）での容量 C'_vac」を
+    求め、L'=μ0·ε0/C'_vac、実効比誘電率 εr_eff=C'/C'_vac、信号速度 v=c/√εr_eff、
+    特性インピーダンス Z0=√(L'/C')、伝搬遅延 τ=長さ/v を導出する。返す辞書:
+      z0_ohm / inductance_ph_per_um / capacitance_ff / eps_eff /
+      signal_velocity_m_s / propagation_delay_ps / length_um。
+    signal/ground が無ければ空（0）。
+    """
+    sig = materials.get(signal)
+    gnd = materials.get(ground)
+    grid = wafer.grid
+    if sig.id == gnd.id or not (grid == sig.id).any() or not (grid == gnd.id).any():
+        return {"z0_ohm": 0.0, "inductance_ph_per_um": 0.0, "capacitance_ff": 0.0,
+                "eps_eff": 0.0, "signal_velocity_m_s": 0.0,
+                "propagation_delay_ps": 0.0, "length_um": 0.0}
+    eps_field = permittivity_field(wafer)
+    cond_ids = list(_conductor_ids())
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps0 = 8.854e-12
+    mu0 = 4.0e-7 * np.pi
+    ax = {"x": 2, "y": 1, "z": 0}.get(axis, 1)
+
+    c_diel = 0.0  # 総容量 [F]（実誘電体）
+    c_vac = 0.0   # 総容量 [F]（真空）
+    n_slices = 0
+    for s in range(grid.shape[ax]):
+        sl = [slice(None)] * 3
+        sl[ax] = s
+        g2 = grid[tuple(sl)]
+        is_a = g2 == sig.id
+        is_b = g2 == gnd.id
+        if not (is_a.any() and is_b.any()):
+            continue
+        is_cond = np.isin(g2, cond_ids)
+        e2 = eps_field[tuple(sl)]
+        ones = np.ones_like(e2)
+        c_diel += _solve_slice_capacitance(e2, is_a, is_b, is_cond) * eps0 * pitch_m
+        c_vac += _solve_slice_capacitance(ones, is_a, is_b, is_cond) * eps0 * pitch_m
+        n_slices += 1
+    if n_slices == 0 or c_vac <= 0:
+        return {"z0_ohm": 0.0, "inductance_ph_per_um": 0.0, "capacitance_ff": 0.0,
+                "eps_eff": 0.0, "signal_velocity_m_s": 0.0,
+                "propagation_delay_ps": 0.0, "length_um": 0.0}
+    length_m = n_slices * pitch_m
+    c_prime = c_diel / length_m       # F/m（実誘電体）
+    c_prime_vac = c_vac / length_m    # F/m（真空）
+    l_prime = mu0 * eps0 / c_prime_vac  # H/m
+    eps_eff = c_diel / c_vac
+    v = 1.0 / np.sqrt(l_prime * c_prime)  # = c0/√εr_eff
+    z0 = np.sqrt(l_prime / c_prime)
+    delay_s = length_m / v
+    return {
+        "z0_ohm": float(z0),
+        "inductance_ph_per_um": float(l_prime * 1e12 * 1e-6),  # H/m → pH/µm
+        "capacitance_ff": float(c_diel * 1e15),
+        "eps_eff": float(eps_eff),
+        "signal_velocity_m_s": float(v),
+        "propagation_delay_ps": float(delay_s * 1e12),
+        "length_um": float(length_m * 1e6),
+    }
+
+
 def total_net_capacitance_ff(wafer: Wafer, name_a, axis: str = "y") -> float:
     """ある導体から「他の全導体（接地）」への総容量（fF）を静電界ソルバで返す。
 
