@@ -1412,7 +1412,13 @@ def tlm_extract(spacings_um, resistances_ohm, width_um: float) -> dict:
     slope, intercept = np.polyfit(spac, res, 1)
     rsheet = slope * width_um
     rc = intercept / 2.0
-    lt = abs(intercept / slope) / 2.0 if slope != 0 else 0.0
+    # 傾き(シート抵抗)が実質ゼロだと伝送長は定義できない（Lt=Rc·W/Rsheet→∞）。
+    # 微小な数値ノイズで巨大値にならないよう、抵抗スケールに対する相対閾値でガード。
+    slope_scale = float(np.ptp(res)) / max(float(np.ptp(spac)), 1e-30)
+    if abs(slope) <= 1e-9 * max(slope_scale, 1.0):
+        lt = float("inf")
+    else:
+        lt = abs(intercept / slope) / 2.0
     return {
         "sheet_resistance_ohm_sq": float(rsheet),
         "contact_resistance_ohm": float(rc),
@@ -2013,6 +2019,38 @@ def threshold_voltage_v(
     }
 
 
+def short_channel_vth_v(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, channel_length_um: float, vds: float = 0.05, doping_cm3: float = 1.0e17,
+    vfb: float = 0.0, dibl_v_per_v: float = 0.05, sce_amp_v: float = 0.3,
+    sce_char_length_um: float = 0.05,
+) -> dict:
+    """短チャネル効果（SCE）と DIBL を含むしきい値電圧 Vth を返す。
+
+    長チャネル Vth（threshold_voltage_v）から、
+      Vth = Vth_long − ΔVth_SCE − DIBL·Vds,  ΔVth_SCE = sce_amp·exp(−L/λ)
+    を計算する。チャネル長 L が短いほど SCE で Vth が下がり（Vth ロールオフ）、
+    ドレイン電圧 Vds が高いほど DIBL で Vth が下がる（オフリーク増大の要因）。返す辞書:
+      vth_v / vth_long_v / dvth_sce_v / dvth_dibl_v。
+    """
+    if channel_length_um <= 0:
+        raise ValueError("チャネル長は正の値が必要です。")
+    th = threshold_voltage_v(wafer, gate_conductor, channel,
+                             doping_cm3=doping_cm3, vfb=vfb)
+    vth_long = th["vth_v"]
+    if vth_long is None:
+        return {"vth_v": None, "vth_long_v": None,
+                "dvth_sce_v": 0.0, "dvth_dibl_v": 0.0}
+    dvth_sce = sce_amp_v * float(np.exp(-channel_length_um / sce_char_length_um))
+    dvth_dibl = dibl_v_per_v * vds
+    return {
+        "vth_v": float(vth_long - dvth_sce - dvth_dibl),
+        "vth_long_v": float(vth_long),
+        "dvth_sce_v": float(dvth_sce),
+        "dvth_dibl_v": float(dvth_dibl),
+    }
+
+
 def mos_cv_curve(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, doping_cm3: float = 1.0e17, vfb: float = 0.0,
@@ -2097,6 +2135,27 @@ def junction_capacitance(
         "cj_total_ff": float(cj_ff_um2 * area_um2),
         "one_over_cj2": float(1.0 / cj_f_m2 ** 2),
     }
+
+
+def junction_leakage_a(
+    area_um2: float, temperature_c: float = 27.0,
+    *, j0_a_per_um2: float = 1.0e-15, eg_ev: float = 1.12,
+) -> float:
+    """pn 接合の逆方向リーク電流（A）を温度依存で返す。
+
+    発生律速の逆リークは真性キャリア濃度 ni∝T^1.5·exp(−Eg/2kT) に比例する。
+    300K の基準リーク密度 j0_a_per_um2 から
+      J(T) = j0 · (T/300)^1.5 · exp(−Eg/2k·(1/T − 1/300))
+    を求め、面積を掛ける。温度が高いほど指数的に増え（~8〜10°C で倍増）、待機
+    電力やリテンション不良の要因になる。Eg はバンドギャップ（Si=1.12eV）。
+    """
+    if area_um2 < 0:
+        raise ValueError("面積は非負である必要があります。")
+    t_k = temperature_c + 273.15
+    t0 = 300.0
+    j = j0_a_per_um2 * (t_k / t0) ** 1.5 * np.exp(
+        -eg_ev / (2.0 * _K_BOLTZMANN_EV) * (1.0 / t_k - 1.0 / t0))
+    return float(j * area_um2)
 
 
 def junction_cv_curve(
