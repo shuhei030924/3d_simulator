@@ -580,6 +580,8 @@ def verification_section() -> str:
          "空乏近似の高周波 C-V（蓄積→空乏→反転）としきい値電圧・空乏層幅"),
         ("pn 接合 空乏層容量", "junction_capacitance / junction_cv_curve",
          "ビルトイン電位・空乏層幅・接合容量。1/Cj²-V 直線（C-V プロファイリング）"),
+        ("MOS I-V 特性", "mos_drain_current / mos_iv_curve",
+         "Idsat∝(Vg−Vth)²・三極管/飽和・サブスレショルド傾斜 SS≈n·60mV/dec"),
         ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
          "断面積を考慮した直列抵抗・薄膜評価"),
         ("電流密度 / EM リスク", "current_density_stats / electromigration_risk",
