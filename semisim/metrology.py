@@ -2429,6 +2429,59 @@ def parasitic_capacitance_field_ff(wafer: Wafer, name_a, name_b, axis: str = "y"
     return float(total * 1e15)  # F → fF
 
 
+def total_net_capacitance_ff(wafer: Wafer, name_a, axis: str = "y") -> float:
+    """ある導体から「他の全導体（接地）」への総容量（fF）を静電界ソルバで返す。
+
+    対象導体 A を 1V、他の全導体材料を 0V（接地）として ∇·(εr∇φ)=0 を解き、A の
+    表面電束から総負荷容量を求める。配線がドライバから見る実効負荷容量（対基板＋
+    全隣接配線）に相当し、`gate_switching_delay_ps` の load_cap_ff の物理的な入力に
+    なる。A が無い/他に導体が無ければ 0。
+    """
+    a = materials.get(name_a)
+    grid = wafer.grid
+    cond_ids = list(_conductor_ids())
+    others = [cid for cid in cond_ids if cid != a.id]
+    if not (grid == a.id).any() or not np.isin(grid, others).any():
+        return 0.0
+    eps_field = permittivity_field(wafer)
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps0 = 8.854e-12
+    ax = {"x": 2, "y": 1, "z": 0}.get(axis, 1)
+
+    total = 0.0
+    for s in range(grid.shape[ax]):
+        sl = [slice(None)] * 3
+        sl[ax] = s
+        g2 = grid[tuple(sl)]
+        is_a = g2 == a.id
+        is_b = np.isin(g2, others)  # 他の全導体を接地電極に
+        if not (is_a.any() and is_b.any()):
+            continue
+        is_cond = np.isin(g2, cond_ids)
+        cp = _solve_slice_capacitance(eps_field[tuple(sl)], is_a, is_b, is_cond)
+        total += cp * eps0 * pitch_m
+    return float(total * 1e15)
+
+
+def ir_drop_v(wafer: Wafer, conductor, current_ma: float, axis: str = "x") -> dict:
+    """電源配線の IR ドロップ（電圧降下, V）を返す＝電源健全性検証。
+
+    配線抵抗 R（line_resistance_ohm）と電流 I から ΔV=I·R を求める。配線が細い/
+    長いほど、電流が大きいほど電圧降下が大きく、供給電圧の低下（タイミング劣化）を
+    招く。返す辞書: ir_drop_v / resistance_ohm / current_ma。断線/非導体では inf。
+    """
+    r = line_resistance_ohm(wafer, conductor, axis)
+    i_a = abs(current_ma) * 1e-3
+    if r == float("inf"):
+        return {"ir_drop_v": float("inf"), "resistance_ohm": float("inf"),
+                "current_ma": current_ma}
+    return {
+        "ir_drop_v": float(i_a * r),
+        "resistance_ohm": float(r),
+        "current_ma": current_ma,
+    }
+
+
 def summary(wafer: Wafer) -> dict:
     """主要指標をまとめた辞書を返す（ログ/テスト/UI 表示用）。"""
     return {
