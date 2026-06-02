@@ -75,6 +75,37 @@ def step_height_um(wafer: Wafer) -> float:
     return float(valid.max() - valid.min())
 
 
+def planarization_dof_check(wafer: Wafer, dof_um: float = 0.2) -> dict:
+    """表面トポグラフィをリソの焦点深度(DOF)と比較し焦点外れリスクを判定する。
+
+    各列の表面高さ（surface_height_map）の中央値を最良焦点面とみなし、そこからの
+    乖離が DOF/2 を超える領域を「焦点外れ」と判定する。CMP 後の平坦性がリソの
+    DOF に収まるか（後続パターニングの解像可否）を検証する。返す辞書:
+      - surface_range_um: 表面高低差（max−min）
+      - focus_plane_um: 最良焦点面（高さ中央値）
+      - out_of_focus_fraction: 焦点外れ領域の面積率（0〜1）
+      - within_dof: 高低差が DOF 以内か（bool）
+    固体が無ければ全て 0／True。
+    """
+    if dof_um <= 0:
+        raise ValueError("DOF は正の値が必要です。")
+    height = surface_height_map(wafer)
+    valid_mask = ~np.isnan(height)
+    valid = height[valid_mask]
+    if valid.size == 0:
+        return {"surface_range_um": 0.0, "focus_plane_um": 0.0,
+                "out_of_focus_fraction": 0.0, "within_dof": True}
+    focus = float(np.median(valid))
+    dev = np.abs(valid - focus)
+    out_frac = float((dev > dof_um / 2.0).mean())
+    return {
+        "surface_range_um": float(valid.max() - valid.min()),
+        "focus_plane_um": focus,
+        "out_of_focus_fraction": out_frac,
+        "within_dof": bool((valid.max() - valid.min()) <= dof_um),
+    }
+
+
 def solid_fraction(wafer: Wafer) -> float:
     """全ボクセルに対する固体（空気以外）の割合。"""
     return float((wafer.grid != materials.AIR).mean())
@@ -1641,6 +1672,166 @@ def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dic
         "eot_nm": float(eps_sio2 * d_eff_avg * 1e9),
         "gate_area_um2": float(gate_area),
         "total_cap_ff": float(cox_ff_um2 * gate_area),
+    }
+
+
+# 半導体物理定数（Si, 300K）
+_Q = 1.602176634e-19          # 素電荷 [C]
+_NI_SI_M3 = 1.0e16            # Si 真性キャリア濃度 [m^-3]（1e10 cm^-3）
+_KT_Q = 0.025852              # 熱電圧 kT/q [V] @300K
+_EPS_SI = 11.7 * 8.854e-12    # Si 誘電率 [F/m]
+
+
+def threshold_voltage_v(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, doping_cm3: float = 1.0e17, vfb: float = 0.0,
+) -> dict:
+    """MOS キャパシタのしきい値電圧 Vth（空乏近似, p 型基板の NMOS）を返す。
+
+    ゲート容量 Cox（mos_gate_capacitance）と基板ドーピング Na から、
+      φF = (kT/q)·ln(Na/ni)
+      Wmax = √(2·εs·2φF/(q·Na))            （最大空乏層幅）
+      Vth = Vfb + 2φF + √(4·εs·q·Na·φF)/Cox
+    を算出する。返す辞書: vth_v / phi_f_v / w_max_um / cox_f_m2。
+    Cox=0（ゲート無し）では Vth=None。
+    """
+    g = mos_gate_capacitance(wafer, gate_conductor, channel)
+    cox = g["cox_ff_per_um2"] * 1e-3  # fF/µm² → F/m²
+    if cox <= 0:
+        return {"vth_v": None, "phi_f_v": 0.0, "w_max_um": 0.0, "cox_f_m2": 0.0}
+    na = doping_cm3 * 1e6  # cm^-3 → m^-3
+    phi_f = _KT_Q * np.log(na / _NI_SI_M3)
+    w_max = np.sqrt(2.0 * _EPS_SI * 2.0 * phi_f / (_Q * na))
+    q_dep_max = np.sqrt(4.0 * _EPS_SI * _Q * na * phi_f)  # 最大空乏電荷 [C/m²]
+    vth = vfb + 2.0 * phi_f + q_dep_max / cox
+    return {
+        "vth_v": float(vth),
+        "phi_f_v": float(phi_f),
+        "w_max_um": float(w_max * 1e6),
+        "cox_f_m2": float(cox),
+    }
+
+
+def mos_cv_curve(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, doping_cm3: float = 1.0e17, vfb: float = 0.0,
+    v_min: float = -2.0, v_max: float = 2.0, n_points: int = 121,
+) -> dict:
+    """MOS キャパシタの高周波 C-V 特性曲線を返す（空乏近似, p 型基板）。
+
+    蓄積（V<Vfb で C=Cox）→空乏（空乏層拡大で C 低下）→反転（C=Cmin で飽和）の
+    古典的 HF C-V を、表面ポテンシャル ψs をパラメータに計算する。返す辞書:
+      - v: 印加電圧配列 [V]
+      - c_ff_per_um2: 容量密度配列 [fF/µm²]
+      - c_over_cox: 規格化容量 C/Cox 配列
+      - cox_ff_per_um2 / cmin_ff_per_um2 / vth_v / w_max_um
+    Cox=0（ゲート無し）では空配列。
+    """
+    th = threshold_voltage_v(wafer, gate_conductor, channel,
+                             doping_cm3=doping_cm3, vfb=vfb)
+    cox = th["cox_f_m2"]
+    if cox <= 0:
+        return {"v": np.array([]), "c_ff_per_um2": np.array([]),
+                "c_over_cox": np.array([]), "cox_ff_per_um2": 0.0,
+                "cmin_ff_per_um2": 0.0, "vth_v": None, "w_max_um": 0.0}
+    na = doping_cm3 * 1e6
+    phi_f = th["phi_f_v"]
+    w_max = th["w_max_um"] * 1e-6
+    cmin = cox * (_EPS_SI / w_max) / (cox + _EPS_SI / w_max)  # 直列最小容量
+
+    v = np.linspace(v_min, v_max, n_points)
+    c = np.empty_like(v)
+    vth = th["vth_v"]
+    # 空乏領域の V(ψs) を作り、各 V に対し ψs を逆引きして C を求める。
+    psi = np.linspace(1e-6, 2.0 * phi_f, 2000)
+    w_psi = np.sqrt(2.0 * _EPS_SI * psi / (_Q * na))
+    cdep = _EPS_SI / w_psi
+    c_depl = cox * cdep / (cox + cdep)
+    v_depl = vfb + psi + np.sqrt(2.0 * _EPS_SI * _Q * na * psi) / cox
+    for k, vv in enumerate(v):
+        if vv <= vfb:
+            c[k] = cox                      # 蓄積
+        elif vv >= vth:
+            c[k] = cmin                     # 反転（高周波）
+        else:
+            c[k] = float(np.interp(vv, v_depl, c_depl))  # 空乏
+    return {
+        "v": v,
+        "c_ff_per_um2": c * 1e3,
+        "c_over_cox": c / cox,
+        "cox_ff_per_um2": cox * 1e3,
+        "cmin_ff_per_um2": cmin * 1e3,
+        "vth_v": vth,
+        "w_max_um": th["w_max_um"],
+    }
+
+
+def critical_area_short_um2(
+    wafer: Wafer, name_a, name_b, defect_diameter_um: float, z_index: int | None = None
+) -> float:
+    """直径 d の円形導電性欠陥が 2 導体をブリッジ（ショート）させ得る臨界面積(µm²)。
+
+    指定 z 断面（既定=導体が存在する代表層）の上面図で、欠陥中心が置かれたとき
+    両導体に同時に触れる（A までの距離 ≤ d/2 かつ B までの距離 ≤ d/2）点の面積を
+    距離変換で数える。d が 2 配線間隔より小さいと 0、d が大きいほど臨界面積は増える。
+    クリティカルエリア解析（CAA）によるショート歩留りの基礎量。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    grid = wafer.grid
+    pitch = wafer.config.pitch_um
+    if z_index is None:
+        # A・B が最も多く共存する z 層を選ぶ
+        both_per_z = ((grid == a.id) | (grid == b.id)).sum(axis=(1, 2))
+        if both_per_z.max() == 0:
+            return 0.0
+        z_index = int(np.argmax(both_per_z))
+    plane = grid[z_index]
+    mask_a = plane == a.id
+    mask_b = plane == b.id
+    if not mask_a.any() or not mask_b.any():
+        return 0.0
+    r = defect_diameter_um / 2.0
+    tol = pitch * 1e-6  # ボクセル量子化による境界の取りこぼし防止
+    dist_a = ndimage.distance_transform_edt(~mask_a) * pitch
+    dist_b = ndimage.distance_transform_edt(~mask_b) * pitch
+    bridges = (dist_a <= r + tol) & (dist_b <= r + tol)
+    return float(bridges.sum()) * (pitch ** 2)
+
+
+def caa_short_yield(
+    wafer: Wafer, name_a, name_b,
+    *, defect_density_per_cm2: float = 0.1, chip_area_cm2: float = 0.1,
+    x0_um: float = 0.02, xmax_um: float = 1.0, n: int = 24, z_index: int | None = None,
+) -> dict:
+    """クリティカルエリア解析（CAA）でショート歩留りを推定する。
+
+    シミュレートした代表レイアウトの臨界面積 A_c(x) を版面面積で割った
+    「臨界面積率」を、実チップ面積 chip_area_cm2 に拡張して期待故障数を求める。
+    欠陥サイズ分布 dD/dx=k/x³（x≥x0, ∫=defect_density）に対し
+      λ = chip_area · ∫ frac_c(x)·(k/x³) dx
+    を数値積分し、Poisson 歩留り Y=exp(−λ) を返す。配線間隔が広い/欠陥が小さい/
+    欠陥密度が低いほど λ は小さく歩留りは高い。返す辞書: yield / lambda_faults /
+    diameters_um / critical_area_um2 / critical_area_fraction。
+    """
+    if defect_density_per_cm2 < 0 or x0_um <= 0 or xmax_um <= x0_um or chip_area_cm2 < 0:
+        raise ValueError("CAA パラメータが不正です（密度/面積≥0, 0<x0<xmax）。")
+    cfg = wafer.config
+    layout_area_um2 = cfg.nx * cfg.ny * (cfg.pitch_um ** 2)  # 上面図の版面面積
+    xs = np.logspace(np.log10(x0_um), np.log10(xmax_um), n)
+    ac_um2 = np.array([
+        critical_area_short_um2(wafer, name_a, name_b, x, z_index) for x in xs
+    ])
+    frac = ac_um2 / layout_area_um2 if layout_area_um2 > 0 else ac_um2 * 0.0
+    k = 2.0 * defect_density_per_cm2 * x0_um ** 2  # サイズ分布の正規化定数
+    dens = k / xs ** 3  # /cm²/µm
+    lam = float(chip_area_cm2 * np.trapezoid(frac * dens, xs))
+    return {
+        "yield": float(np.exp(-lam)),
+        "lambda_faults": lam,
+        "diameters_um": xs,
+        "critical_area_um2": ac_um2,
+        "critical_area_fraction": frac,
     }
 
 
