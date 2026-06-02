@@ -2118,6 +2118,44 @@ def mos_iv_curve(
     return {"vd": vd, "curves": curves}
 
 
+def gate_switching_delay_ps(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, load_cap_ff: float, vdd: float = 1.0, **mos_kw,
+) -> dict:
+    """ロジックゲートのスイッチング遅延 τ=C·Vdd/I_drive（CV/I モデル, ps）。
+
+    MOS の飽和駆動電流 I_drive=mos_drain_current(Vg=Vd=Vdd) と負荷容量 load_cap_ff
+    から、出力を Vdd まで充電する遅延 τ=C_load·Vdd/I_drive を求める。駆動電流が
+    大きい（W/L 大・Vdd 大）ほど速く、負荷容量が大きいほど遅い。返す辞書:
+      delay_ps / drive_current_a / load_cap_ff。I_drive=0 では inf。
+    """
+    if load_cap_ff < 0:
+        raise ValueError("負荷容量は非負である必要があります。")
+    i_drive = mos_drain_current(wafer, gate_conductor, channel,
+                                vg=vdd, vd=vdd, **mos_kw)
+    if i_drive <= 0:
+        return {"delay_ps": float("inf"), "drive_current_a": float(i_drive),
+                "load_cap_ff": float(load_cap_ff)}
+    tau_s = (load_cap_ff * 1e-15) * vdd / i_drive
+    return {
+        "delay_ps": float(tau_s * 1e12),
+        "drive_current_a": float(i_drive),
+        "load_cap_ff": float(load_cap_ff),
+    }
+
+
+def hci_lifetime(vds: float, *, b_volt: float = 30.0, a_const: float = 1.0e-6) -> float:
+    """ホットキャリア注入（HCI）寿命 TTF を返す（相対寿命指標, ラッキー電子モデル）。
+
+    TTF = A·exp(B/Vds)。ドレイン電圧 Vds が高いほど高エネルギーキャリアが増え
+    寿命が指数的に短くなる（NBTI/TDDB と異なりドレイン電界律速）。B は電圧加速
+    係数（V）。Vds≤0 では inf。
+    """
+    if vds <= 0:
+        return float("inf")
+    return float(a_const * np.exp(b_volt / vds))
+
+
 def critical_area_short_um2(
     wafer: Wafer, name_a, name_b, defect_diameter_um: float, z_index: int | None = None
 ) -> float:
