@@ -11,6 +11,9 @@ from scipy import ndimage
 from . import materials
 from .grid import Wafer
 
+# 台形積分。NumPy 2.0+ は np.trapezoid、1.x は np.trapz（要件 numpy>=1.22 に対応）。
+_trapz = getattr(np, "trapezoid", None) or np.trapz
+
 
 def material_counts(wafer: Wafer) -> dict[str, int]:
     """存在する材料ごとのボクセル数を {材料名: 個数} で返す（空気を除く）。"""
@@ -1528,6 +1531,23 @@ def peak_temperature_rise_k(
     return float(temperature_field_2d(wafer, source_mask, total_power_w, y_index).max())
 
 
+def estimate_convergence_order(step_sizes, errors) -> float:
+    """メッシュ刻み h に対する誤差の収束次数 p を最小二乗で推定する。
+
+    誤差 ≈ C·hᵖ を仮定し log(error)=log(C)+p·log(h) の傾き p を返す。数値ソルバ
+    （容量・熱拡散など）がメッシュ細分で解析解へ収束することの定量検証に使う。
+    1 次精度の有限体積なら p≈1。要素数 2 未満や非正の値があれば ValueError。
+    """
+    h = np.asarray(step_sizes, dtype=float)
+    e = np.asarray(errors, dtype=float)
+    if h.size < 2 or e.size != h.size:
+        raise ValueError("step_sizes と errors は同数で 2 点以上必要です。")
+    if np.any(h <= 0) or np.any(e <= 0):
+        raise ValueError("step_sizes・errors は正の値である必要があります。")
+    slope, _ = np.polyfit(np.log(h), np.log(e), 1)
+    return float(slope)
+
+
 # ボルツマン定数（eV/K）
 _K_BOLTZMANN_EV = 8.617333e-5
 
@@ -1766,6 +1786,66 @@ def mos_cv_curve(
     }
 
 
+def junction_capacitance(
+    na_cm3: float, nd_cm3: float, reverse_bias_v: float = 0.0, area_um2: float = 1.0
+) -> dict:
+    """pn 接合（階段接合）の空乏層幅・接合容量・ビルトイン電位を返す。
+
+    ビルトイン電位 Vbi=(kT/q)·ln(Na·Nd/ni²)、逆バイアス V_R≥0 のとき
+      W = √(2·εs·(Vbi+V_R)/q · (1/Na+1/Nd))     （空乏層幅）
+      Cj = εs/W                                   （単位面積容量）
+    片側接合は一方を高ドープにすると再現できる（W は低ドープ側で決まる）。返す辞書:
+      vbi_v / depletion_width_um / cj_ff_per_um2 / cj_total_ff / one_over_cj2。
+    逆バイアスが深いほど W は広く Cj は小さい。`1/Cj²` は (Vbi+V_R) に比例（C-V
+    profiling でドーピングと Vbi を抽出できる）。
+    """
+    if na_cm3 <= 0 or nd_cm3 <= 0 or area_um2 < 0:
+        raise ValueError("ドーピングは正、面積は非負である必要があります。")
+    if reverse_bias_v < 0:
+        raise ValueError("reverse_bias_v は逆バイアス量(≥0)で指定してください。")
+    na = na_cm3 * 1e6
+    nd = nd_cm3 * 1e6
+    vbi = _KT_Q * np.log(na * nd / _NI_SI_M3 ** 2)
+    w = np.sqrt(2.0 * _EPS_SI * (vbi + reverse_bias_v) / _Q * (1.0 / na + 1.0 / nd))
+    cj_f_m2 = _EPS_SI / w
+    cj_ff_um2 = cj_f_m2 * 1e3
+    return {
+        "vbi_v": float(vbi),
+        "depletion_width_um": float(w * 1e6),
+        "cj_ff_per_um2": float(cj_ff_um2),
+        "cj_total_ff": float(cj_ff_um2 * area_um2),
+        "one_over_cj2": float(1.0 / cj_f_m2 ** 2),
+    }
+
+
+def junction_cv_curve(
+    na_cm3: float, nd_cm3: float,
+    *, v_max_reverse: float = 5.0, n_points: int = 51, area_um2: float = 1.0,
+) -> dict:
+    """pn 接合の逆バイアス C-V 曲線（Cj-V と 1/Cj²-V）を返す。
+
+    逆バイアス 0→v_max_reverse を掃引し、各点の接合容量と 1/Cj² を返す。
+    1/Cj² は逆バイアスに対し直線になり、傾きから実効ドーピング、外挿切片から
+    Vbi が求まる（標準の C-V ドーピングプロファイリング）。返す辞書:
+      reverse_bias_v / cj_ff_per_um2 / one_over_cj2 / vbi_v。
+    """
+    vr = np.linspace(0.0, v_max_reverse, n_points)
+    cj = np.empty_like(vr)
+    inv2 = np.empty_like(vr)
+    vbi = 0.0
+    for k, v in enumerate(vr):
+        d = junction_capacitance(na_cm3, nd_cm3, float(v), area_um2)
+        cj[k] = d["cj_ff_per_um2"]
+        inv2[k] = d["one_over_cj2"]
+        vbi = d["vbi_v"]
+    return {
+        "reverse_bias_v": vr,
+        "cj_ff_per_um2": cj,
+        "one_over_cj2": inv2,
+        "vbi_v": float(vbi),
+    }
+
+
 def critical_area_short_um2(
     wafer: Wafer, name_a, name_b, defect_diameter_um: float, z_index: int | None = None
 ) -> float:
@@ -1825,7 +1905,7 @@ def caa_short_yield(
     frac = ac_um2 / layout_area_um2 if layout_area_um2 > 0 else ac_um2 * 0.0
     k = 2.0 * defect_density_per_cm2 * x0_um ** 2  # サイズ分布の正規化定数
     dens = k / xs ** 3  # /cm²/µm
-    lam = float(chip_area_cm2 * np.trapezoid(frac * dens, xs))
+    lam = float(chip_area_cm2 * _trapz(frac * dens, xs))
     return {
         "yield": float(np.exp(-lam)),
         "lambda_faults": lam,
