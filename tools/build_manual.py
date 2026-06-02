@@ -596,6 +596,8 @@ def verification_section() -> str:
          "Idsat∝(Vg−Vth)²・三極管/飽和・サブスレショルド傾斜 SS≈n·60mV/dec"),
         ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
          "断面積を考慮した直列抵抗・薄膜評価"),
+        ("Maxwell 容量行列", "capacitance_matrix_ff",
+         "複数導体の自己容量・全結合容量を抽出（標準的 RC 抽出, 遮蔽も再現）"),
         ("対全導体総容量", "total_net_capacitance_ff",
          "対象を1V・他全導体を接地で解くドライバ実効負荷容量"),
         ("電源 IR ドロップ", "ir_drop_v",

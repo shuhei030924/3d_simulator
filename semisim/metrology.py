@@ -2594,6 +2594,151 @@ def parasitic_capacitance_field_ff(wafer: Wafer, name_a, name_b, axis: str = "y"
     return float(total * 1e15)  # F → fF
 
 
+def _solve_slice_charges(eps_diel, electrode_masks, electrode_volts, is_cond):
+    """2D 断面で複数電極（各 Dirichlet 電圧）の ∇·(εr∇φ)=0 を解き、各電極表面を
+    貫く電束（ε0 抜き電荷）を返す。電極以外の導体は浮遊（等電位ノード）扱い。"""
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.linalg import spsolve
+
+    h, w = eps_diel.shape
+    fixed = np.zeros((h, w), dtype=bool)
+    phi_fixed = np.zeros((h, w), dtype=float)
+    for mask, volt in zip(electrode_masks, electrode_volts):
+        fixed |= mask
+        phi_fixed[mask] = volt
+    floating = is_cond & ~fixed
+    float_lab, n_float = ndimage.label(floating)
+    diel = ~is_cond
+    idx = -np.ones((h, w), dtype=int)
+    diel_cells = np.argwhere(diel)
+    for k, (i, j) in enumerate(diel_cells):
+        idx[i, j] = k
+    m = len(diel_cells)
+    n_nodes = m + n_float
+    if n_nodes == 0:
+        return [0.0 for _ in electrode_masks]
+
+    def node_of(i, j):
+        return idx[i, j] if diel[i, j] else m + int(float_lab[i, j]) - 1
+
+    neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def face_cond(i, j, ii, jj):
+        ci, cj = is_cond[i, j], is_cond[ii, jj]
+        if ci and cj:
+            return 1.0e8
+        if ci:
+            return float(eps_diel[ii, jj])
+        if cj:
+            return float(eps_diel[i, j])
+        a, c = eps_diel[i, j], eps_diel[ii, jj]
+        return 2.0 * a * c / (a + c) if (a + c) > 0 else 0.0
+
+    rows: list[int] = []
+    cols: list[int] = []
+    data: list[float] = []
+    b = np.zeros(n_nodes)
+
+    def add(r, c, v):
+        rows.append(r)
+        cols.append(c)
+        data.append(v)
+
+    for i, j in np.argwhere(~fixed):
+        nc = node_of(i, j)
+        for di, dj in neigh:
+            ii, jj = i + di, j + dj
+            if not (0 <= ii < h and 0 <= jj < w):
+                continue
+            ef = face_cond(i, j, ii, jj)
+            if ef == 0.0:
+                continue
+            if fixed[ii, jj]:
+                add(nc, nc, ef)
+                b[nc] += ef * phi_fixed[ii, jj]
+            else:
+                nn = node_of(ii, jj)
+                if nn == nc:
+                    continue
+                add(nc, nc, ef)
+                add(nc, nn, -ef)
+    sol = spsolve(csr_matrix((data, (rows, cols)), shape=(n_nodes, n_nodes)), b)
+    phi = phi_fixed.copy()
+    phi[diel] = sol[:m]
+    if n_float:
+        for i, j in np.argwhere(floating):
+            phi[i, j] = sol[m + int(float_lab[i, j]) - 1]
+
+    charges = []
+    for mask, volt in zip(electrode_masks, electrode_volts):
+        q = 0.0
+        for i, j in np.argwhere(mask):
+            for di, dj in neigh:
+                ii, jj = i + di, j + dj
+                if not (0 <= ii < h and 0 <= jj < w) or mask[ii, jj]:
+                    continue
+                q += face_cond(i, j, ii, jj) * (volt - phi[ii, jj])
+        charges.append(q)
+    return charges
+
+
+def capacitance_matrix_ff(wafer: Wafer, conductor_names, axis: str = "y") -> dict:
+    """2.5D 静電界ソルバで複数導体の Maxwell 容量行列（fF）を抽出する。
+
+    各導体 k を 1V、他の全リスト導体を 0V（接地）として ∇·(εr∇φ)=0 を解き、各導体
+    i の電荷から行列要素を求める：C[i][k] = 導体 i の電荷（k 励起時）。対角 C_kk は
+    その導体の総容量、非対角の絶対値 |C_ik| が i-k 間の結合容量。リスト外の導体は
+    浮遊扱い。返す辞書: conductors（名前リスト）/ matrix_ff（n×n）/ coupling_ff
+    （{"i-k": |C_ik|}）/ self_ff（{name: C_kk}）。存在する導体が 2 未満なら空。
+    """
+    names = [materials.get(n).name for n in conductor_names]
+    ids = [materials.get(n).id for n in names]
+    grid = wafer.grid
+    present = [i for i in range(len(ids)) if (grid == ids[i]).any()]
+    if len(present) < 2:
+        return {"conductors": [], "matrix_ff": [], "coupling_ff": {}, "self_ff": {}}
+    names = [names[i] for i in present]
+    ids = [ids[i] for i in present]
+    n = len(ids)
+    eps_field = permittivity_field(wafer)
+    cond_ids = list(_conductor_ids())
+    pitch_m = wafer.config.pitch_um * 1e-6
+    eps0 = 8.854e-12
+    ax = {"x": 2, "y": 1, "z": 0}.get(axis, 1)
+    factor = eps0 * pitch_m * 1e15  # ε0抜き電荷 → fF
+
+    mat = np.zeros((n, n))
+    for s in range(grid.shape[ax]):
+        sl = [slice(None)] * 3
+        sl[ax] = s
+        g2 = grid[tuple(sl)]
+        masks = [g2 == cid for cid in ids]
+        if sum(mk.any() for mk in masks) < 2:
+            continue
+        is_cond = np.isin(g2, cond_ids)
+        e2 = eps_field[tuple(sl)]
+        for k in range(n):  # 導体 k を 1V 励起、他を接地
+            if not masks[k].any():
+                continue
+            volts = [1.0 if t == k else 0.0 for t in range(n)]
+            charges = _solve_slice_charges(e2, masks, volts, is_cond)
+            for i in range(n):
+                mat[i][k] += charges[i] * factor
+
+    coupling = {}
+    self_c = {}
+    for k in range(n):
+        self_c[names[k]] = float(mat[k][k])
+        for i in range(k + 1, n):
+            coupling[f"{names[i]}-{names[k]}"] = float(abs(mat[i][k]))
+    return {
+        "conductors": names,
+        "matrix_ff": mat.tolist(),
+        "coupling_ff": coupling,
+        "self_ff": self_c,
+    }
+
+
 def total_net_capacitance_ff(wafer: Wafer, name_a, axis: str = "y") -> float:
     """ある導体から「他の全導体（接地）」への総容量（fF）を静電界ソルバで返す。
 
