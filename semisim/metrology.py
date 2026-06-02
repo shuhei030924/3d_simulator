@@ -1739,6 +1739,84 @@ def em_lifetime_wafer(
     return {"j_max_a_cm2": j, "mttf": mttf, "temperature_c": temperature_c}
 
 
+def em_lifetime_self_heated(
+    wafer: Wafer, conductor, current_ma: float, ambient_c: float = 85.0,
+    axis: str = "x", **black_kw,
+) -> dict:
+    """自己発熱を考慮した EM 寿命（ジュール熱で上昇した接合温度で Black 評価）。
+
+    配線のジュール発熱 P=I²R による温度上昇 ΔT（joule_self_heating_k）を周囲温度
+    ambient_c に加えた接合温度で電流密度 J_max から MTTF を求める。自己発熱は
+    温度を上げ EM 寿命を縮める（電流の正帰還）。返す辞書: j_max_a_cm2 /
+    delta_t_k / junction_temp_c / mttf / mttf_isothermal（自己発熱無視時）。
+    """
+    jh = joule_self_heating_k(wafer, conductor, current_ma, axis)
+    st = current_density_stats(wafer, conductor, current_ma, axis)
+    j = st["j_max_a_cm2"]
+    dt = jh["delta_t_k"]
+    if j == float("inf") or dt == float("inf"):
+        return {"j_max_a_cm2": j, "delta_t_k": dt, "junction_temp_c": float("inf"),
+                "mttf": 0.0, "mttf_isothermal": 0.0}
+    tj = ambient_c + dt
+    return {
+        "j_max_a_cm2": j,
+        "delta_t_k": float(dt),
+        "junction_temp_c": float(tj),
+        "mttf": electromigration_mttf(j, tj, **black_kw),
+        "mttf_isothermal": electromigration_mttf(j, ambient_c, **black_kw),
+    }
+
+
+def diode_current(
+    v: float, *, i_sat_a: float = 1.0e-15, ideality: float = 1.0,
+    temperature_c: float = 27.0, series_r_ohm: float = 0.0,
+) -> float:
+    """理想ダイオード（Shockley）電流 I（A）を返す。直列抵抗付き。
+
+    I = Is·(exp((V−I·Rs)/(n·Vt))−1)、Vt=kT/q。順方向は指数的に増え、逆方向は
+    −Is に飽和する。理想係数 n でサブスレショルド的な log(I)-V 傾斜が決まる
+    （n·(kT/q)·ln10）。直列抵抗 Rs>0 は高電流で電流を制限（Newton 法で陰解）。
+    """
+    vt = _K_BOLTZMANN_EV * (temperature_c + 273.15)
+    nvt = ideality * vt
+
+    def shockley(vj):
+        return i_sat_a * (np.exp(np.clip(vj / nvt, -200.0, 200.0)) - 1.0)
+
+    if series_r_ohm <= 0:
+        return float(shockley(v))
+    i = shockley(v)  # 初期値（Rs=0）
+    for _ in range(60):  # Newton 反復
+        vj = v - i * series_r_ohm
+        ex = np.exp(np.clip(vj / nvt, -200.0, 200.0))
+        f = i_sat_a * (ex - 1.0) - i
+        df = -i_sat_a * ex / nvt * series_r_ohm - 1.0
+        step = f / df
+        i -= step
+        if abs(step) < 1e-18:
+            break
+    return float(i)
+
+
+def diode_iv_curve(
+    *, v_min: float = -1.0, v_max: float = 0.8, n_points: int = 61,
+    i_sat_a: float = 1.0e-15, ideality: float = 1.0,
+    temperature_c: float = 27.0, series_r_ohm: float = 0.0,
+) -> dict:
+    """ダイオード I-V 曲線を返す（順方向指数・逆方向飽和）。
+
+    返す辞書: v（電圧配列）/ i（電流配列 A）/ i_sat_a。順方向 log(I)-V の傾斜から
+    理想係数 n（n·60mV/dec）、逆方向飽和電流 −Is が読み取れる。
+    """
+    v = np.linspace(v_min, v_max, n_points)
+    i = np.array([
+        diode_current(float(vv), i_sat_a=i_sat_a, ideality=ideality,
+                      temperature_c=temperature_c, series_r_ohm=series_r_ohm)
+        for vv in v
+    ])
+    return {"v": v, "i": i, "i_sat_a": i_sat_a}
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:
