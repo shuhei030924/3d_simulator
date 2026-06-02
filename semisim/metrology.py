@@ -1644,6 +1644,97 @@ def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dic
     }
 
 
+# 半導体物理定数（Si, 300K）
+_Q = 1.602176634e-19          # 素電荷 [C]
+_NI_SI_M3 = 1.0e16            # Si 真性キャリア濃度 [m^-3]（1e10 cm^-3）
+_KT_Q = 0.025852              # 熱電圧 kT/q [V] @300K
+_EPS_SI = 11.7 * 8.854e-12    # Si 誘電率 [F/m]
+
+
+def threshold_voltage_v(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, doping_cm3: float = 1.0e17, vfb: float = 0.0,
+) -> dict:
+    """MOS キャパシタのしきい値電圧 Vth（空乏近似, p 型基板の NMOS）を返す。
+
+    ゲート容量 Cox（mos_gate_capacitance）と基板ドーピング Na から、
+      φF = (kT/q)·ln(Na/ni)
+      Wmax = √(2·εs·2φF/(q·Na))            （最大空乏層幅）
+      Vth = Vfb + 2φF + √(4·εs·q·Na·φF)/Cox
+    を算出する。返す辞書: vth_v / phi_f_v / w_max_um / cox_f_m2。
+    Cox=0（ゲート無し）では Vth=None。
+    """
+    g = mos_gate_capacitance(wafer, gate_conductor, channel)
+    cox = g["cox_ff_per_um2"] * 1e-3  # fF/µm² → F/m²
+    if cox <= 0:
+        return {"vth_v": None, "phi_f_v": 0.0, "w_max_um": 0.0, "cox_f_m2": 0.0}
+    na = doping_cm3 * 1e6  # cm^-3 → m^-3
+    phi_f = _KT_Q * np.log(na / _NI_SI_M3)
+    w_max = np.sqrt(2.0 * _EPS_SI * 2.0 * phi_f / (_Q * na))
+    q_dep_max = np.sqrt(4.0 * _EPS_SI * _Q * na * phi_f)  # 最大空乏電荷 [C/m²]
+    vth = vfb + 2.0 * phi_f + q_dep_max / cox
+    return {
+        "vth_v": float(vth),
+        "phi_f_v": float(phi_f),
+        "w_max_um": float(w_max * 1e6),
+        "cox_f_m2": float(cox),
+    }
+
+
+def mos_cv_curve(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, doping_cm3: float = 1.0e17, vfb: float = 0.0,
+    v_min: float = -2.0, v_max: float = 2.0, n_points: int = 121,
+) -> dict:
+    """MOS キャパシタの高周波 C-V 特性曲線を返す（空乏近似, p 型基板）。
+
+    蓄積（V<Vfb で C=Cox）→空乏（空乏層拡大で C 低下）→反転（C=Cmin で飽和）の
+    古典的 HF C-V を、表面ポテンシャル ψs をパラメータに計算する。返す辞書:
+      - v: 印加電圧配列 [V]
+      - c_ff_per_um2: 容量密度配列 [fF/µm²]
+      - c_over_cox: 規格化容量 C/Cox 配列
+      - cox_ff_per_um2 / cmin_ff_per_um2 / vth_v / w_max_um
+    Cox=0（ゲート無し）では空配列。
+    """
+    th = threshold_voltage_v(wafer, gate_conductor, channel,
+                             doping_cm3=doping_cm3, vfb=vfb)
+    cox = th["cox_f_m2"]
+    if cox <= 0:
+        return {"v": np.array([]), "c_ff_per_um2": np.array([]),
+                "c_over_cox": np.array([]), "cox_ff_per_um2": 0.0,
+                "cmin_ff_per_um2": 0.0, "vth_v": None, "w_max_um": 0.0}
+    na = doping_cm3 * 1e6
+    phi_f = th["phi_f_v"]
+    w_max = th["w_max_um"] * 1e-6
+    cmin = cox * (_EPS_SI / w_max) / (cox + _EPS_SI / w_max)  # 直列最小容量
+
+    v = np.linspace(v_min, v_max, n_points)
+    c = np.empty_like(v)
+    vth = th["vth_v"]
+    # 空乏領域の V(ψs) を作り、各 V に対し ψs を逆引きして C を求める。
+    psi = np.linspace(1e-6, 2.0 * phi_f, 2000)
+    w_psi = np.sqrt(2.0 * _EPS_SI * psi / (_Q * na))
+    cdep = _EPS_SI / w_psi
+    c_depl = cox * cdep / (cox + cdep)
+    v_depl = vfb + psi + np.sqrt(2.0 * _EPS_SI * _Q * na * psi) / cox
+    for k, vv in enumerate(v):
+        if vv <= vfb:
+            c[k] = cox                      # 蓄積
+        elif vv >= vth:
+            c[k] = cmin                     # 反転（高周波）
+        else:
+            c[k] = float(np.interp(vv, v_depl, c_depl))  # 空乏
+    return {
+        "v": v,
+        "c_ff_per_um2": c * 1e3,
+        "c_over_cox": c / cox,
+        "cox_ff_per_um2": cox * 1e3,
+        "cmin_ff_per_um2": cmin * 1e3,
+        "vth_v": vth,
+        "w_max_um": th["w_max_um"],
+    }
+
+
 def stress_field_mpa(wafer: Wafer) -> np.ndarray:
     """各ボクセルの残留膜応力 σ（MPa）を格納した配列を返す。空気は 0。"""
     grid = wafer.grid
