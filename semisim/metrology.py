@@ -1681,6 +1681,26 @@ def tddb_lifetime(
     return float(a_const * np.exp(-gamma * field_mv_cm) * np.exp(ea_ev / (_K_BOLTZMANN_EV * t_k)))
 
 
+def nbti_vth_shift(
+    v_stress: float, temperature_c: float, time_s: float,
+    *, n_exp: float = 0.16, ea_ev: float = 0.10, gamma_per_v: float = 1.5,
+    a_const: float = 1.0e-3,
+) -> float:
+    """NBTI による pMOS しきい値電圧シフト |ΔVth|（V）を返す（経時劣化）。
+
+    反応律速 NBTI の代表式 |ΔVth| = A·exp(γ·|V|)·exp(−Ea/(k·T))·tⁿ。ストレス電圧
+    |V|（電界）、温度 T、ストレス時間 t が大きいほど ΔVth は増える。時間べき指数
+    n は ~0.16（H 拡散律速）。負の入力は ValueError。
+    """
+    if time_s < 0:
+        raise ValueError("ストレス時間は非負である必要があります。")
+    if time_s == 0:
+        return 0.0
+    t_k = temperature_c + 273.15
+    return float(a_const * np.exp(gamma_per_v * abs(v_stress))
+                 * np.exp(-ea_ev / (_K_BOLTZMANN_EV * t_k)) * time_s ** n_exp)
+
+
 def em_lifetime_wafer(
     wafer: Wafer, conductor, current_ma: float, temperature_c: float,
     axis: str = "x", **black_kw,
@@ -1947,14 +1967,15 @@ def mos_drain_current(
     doping_cm3: float = 1.0e17, vfb: float = 0.0, mobility_cm2_vs: float = 450.0,
     w_over_l: float = 10.0, lambda_per_v: float = 0.0, subthreshold_n: float = 1.3,
 ) -> float:
-    """長チャネル n-MOSFET のドレイン電流 Id（A）を返す（区分モデル）。
+    """長チャネル n-MOSFET のドレイン電流 Id（A）を返す（EKV 連続モデル）。
 
     ゲート容量 Cox（mos_gate_capacitance）としきい値 Vth（threshold_voltage_v）から、
-      - サブスレショルド（Vov=Vg−Vth≤0）: Id=β·n·Vt²·exp(Vov/(n·Vt))·(1−exp(−Vd/Vt))
-        （SS=n·(kT/q)·ln10 ≈ n·60mV/dec）
-      - 三極管（Vd<Vov）: Id=β·(Vov·Vd−Vd²/2)
-      - 飽和（Vd≥Vov）: Id=½·β·Vov²·(1+λ·Vd)
-    ここで β=µ·Cox·(W/L)。µ は mobility_cm2_vs、Vt=kT/q。Cox=0 では 0。
+    弱反転〜強反転・三極管〜飽和を単一の連続式で表す（区分モデルの不連続を解消）:
+      Id = 2n·β·Vt²·[ ln²(1+e^(Vov/(2n·Vt))) − ln²(1+e^((Vov−Vd)/(2n·Vt))) ]·(1+λ·Vd)
+    ここで β=µ·Cox·(W/L), Vov=Vg−Vth, Vt=kT/q。漸近的に
+      - 弱反転: Id∝exp(Vov/(n·Vt))（SS=n·(kT/q)·ln10≈n·60mV/dec）
+      - 強反転・飽和: Id→β·Vov²/(2n)（Idsat∝(Vg−Vth)²）, 三極管: Id∝(Vov·Vd−Vd²/2)
+    を満たし、全領域で滑らかに接続する。Cox=0 では 0。
     """
     th = threshold_voltage_v(wafer, gate_conductor, channel,
                              doping_cm3=doping_cm3, vfb=vfb)
@@ -1965,14 +1986,16 @@ def mos_drain_current(
     mu = mobility_cm2_vs * 1e-4  # cm²/Vs → m²/Vs
     beta = mu * cox * w_over_l   # A/V²
     vt = _KT_Q
+    n = subthreshold_n
     vov = vg - vth
-    sat_factor = 1.0 - np.exp(-max(vd, 0.0) / vt)
-    if vov <= 0.0:  # サブスレショルド（弱反転）
-        return float(beta * subthreshold_n * vt * vt
-                     * np.exp(vov / (subthreshold_n * vt)) * sat_factor)
-    if vd < vov:    # 三極管（線形）
-        return float(beta * (vov * vd - 0.5 * vd * vd))
-    return float(0.5 * beta * vov * vov * (1.0 + lambda_per_v * vd))  # 飽和
+
+    def _lse2(x):  # ln²(1+e^x)（オーバーフロー保護）
+        return np.log1p(np.exp(np.clip(x, -60.0, 60.0))) ** 2
+
+    spec = 2.0 * n * beta * vt * vt
+    i_fwd = _lse2(vov / (2.0 * n * vt))
+    i_rev = _lse2((vov - max(vd, 0.0)) / (2.0 * n * vt))
+    return float(spec * (i_fwd - i_rev) * (1.0 + lambda_per_v * vd))
 
 
 def mos_iv_curve(

@@ -591,6 +591,8 @@ def verification_section() -> str:
          f"MTTF={mttf:.3e}（相対, MTTF=A·J⁻ⁿ·exp(Ea/kT)）"),
         ("EM Blech 不死条件", "blech_immortal",
          "j·L < (jL)_crit で EM 免疫（短配線は故障しない）"),
+        ("NBTI しきい値劣化", "nbti_vth_shift",
+         "|ΔVth|∝exp(γ|V|)·exp(−Ea/kT)·tⁿ。電圧/温度/時間で pMOS 経時劣化"),
         ("絶縁破壊 / TDDB 寿命", "dielectric_breakdown / tddb_lifetime",
          "E=V/g vs 破壊電界, E モデル寿命"),
         ("アンテナ比", "antenna_ratio", "プラズマ帯電損傷 DRC（収集面積/ゲート面積）"),

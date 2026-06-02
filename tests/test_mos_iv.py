@@ -33,14 +33,14 @@ def test_idsat_square_law():
 
 
 def test_triode_to_saturation():
-    """Vd を上げると三極管→飽和で電流が頭打ち（λ=0 で一定）。"""
+    """Vd を上げると三極管→飽和で電流が滑らかに頭打ち（λ=0 でほぼ一定）。"""
     w = _mos()
     vth = _vth(w)
     id_lin = M.mos_drain_current(w, "metal_al", vg=vth + 0.5, vd=0.2)
-    id_sat1 = M.mos_drain_current(w, "metal_al", vg=vth + 0.5, vd=0.5)   # Vd=Vov
-    id_sat2 = M.mos_drain_current(w, "metal_al", vg=vth + 0.5, vd=1.5)
-    assert id_lin < id_sat1
-    assert id_sat2 == pytest.approx(id_sat1, rel=1e-9)  # 飽和で一定
+    id_deep1 = M.mos_drain_current(w, "metal_al", vg=vth + 0.5, vd=1.5)
+    id_deep2 = M.mos_drain_current(w, "metal_al", vg=vth + 0.5, vd=2.0)
+    assert id_lin < id_deep1                              # 三極管 < 飽和
+    assert id_deep2 == pytest.approx(id_deep1, rel=1e-3)  # 深飽和でほぼ一定
 
 
 def test_channel_length_modulation():
@@ -57,8 +57,9 @@ def test_subthreshold_slope():
     w = _mos()
     vth = _vth(w)
     for n in (1.0, 1.5):
-        i1 = M.mos_drain_current(w, "metal_al", vg=vth - 0.2, vd=1.0, subthreshold_n=n)
-        i2 = M.mos_drain_current(w, "metal_al", vg=vth - 0.1, vd=1.0, subthreshold_n=n)
+        # 深いサブスレショルドで漸近的な SS=n·(kT/q)·ln10 を抽出
+        i1 = M.mos_drain_current(w, "metal_al", vg=vth - 0.6, vd=1.0, subthreshold_n=n)
+        i2 = M.mos_drain_current(w, "metal_al", vg=vth - 0.5, vd=1.0, subthreshold_n=n)
         ss_mv = 0.1 / (np.log10(i2) - np.log10(i1)) * 1000
         assert ss_mv == pytest.approx(n * VT * np.log(10) * 1000, rel=0.02)
 
