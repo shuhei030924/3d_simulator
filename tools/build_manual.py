@@ -577,6 +577,8 @@ def verification_section() -> str:
         ("分布 RC Elmore 遅延", "elmore_delay_ps", "τ=Σ(ΣR)·C。一様線で ½RC（分布効果）"),
         ("伝送線路パラメータ", "transmission_line_params",
          "Z0・インダクタンス・信号速度 v=c/√εr・伝搬遅延（高速配線 RLC）"),
+        ("配線総合レポート", "interconnect_report",
+         "R/C/L/Z0/遅延/電流密度/EM/IRドロップ/断線を1コールで集計"),
         ("ロジックゲート遅延", "gate_switching_delay_ps", "CV/I モデル τ=C·Vdd/I_drive"),
         ("MOS ゲート容量 / EOT", "mos_gate_capacitance",
          "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),

@@ -2990,6 +2990,45 @@ def electrical_report(wafer: Wafer) -> dict:
     }
 
 
+def interconnect_report(
+    wafer: Wafer, signal, ground,
+    *, current_ma: float = 1.0, temperature_c: float = 110.0, axis: str = "x",
+) -> dict:
+    """配線（signal）と基準導体（ground）の総合特性を 1 コールで返す統合レポート。
+
+    抵抗・容量・インダクタンス・遅延・信号完全性・EM 信頼性を横断的に集計する
+    機械可読辞書。設計検証で配線を 1 本まとめて評価するのに使う。inf は None に
+    変換。返す辞書のキー: resistance_ohm / sheet_resistance_ohm_sq / capacitance_ff /
+    rc_delay_ps / elmore_delay_ps / inductance_ph_per_um / z0_ohm /
+    propagation_delay_ps / signal_velocity_m_s / current_density_a_cm2 / em_fail /
+    em_mttf / ir_drop_v / open(bool)。
+    """
+    def _j(x):
+        return None if x == float("inf") else x
+
+    r = line_resistance_ohm(wafer, signal, axis)
+    tl = transmission_line_params(wafer, signal, ground, axis="y")
+    em = electromigration_risk(wafer, signal, current_ma, axis)
+    life = em_lifetime_wafer(wafer, signal, current_ma, temperature_c, axis)
+    cds = current_density_stats(wafer, signal, current_ma, axis)
+    return {
+        "resistance_ohm": _j(r),
+        "sheet_resistance_ohm_sq": _j(sheet_resistance_ohm_sq(wafer, signal)),
+        "capacitance_ff": parasitic_capacitance_field_ff(wafer, signal, ground, axis="y"),
+        "rc_delay_ps": _j(rc_delay_ps(wafer, signal, ground, axis)),
+        "elmore_delay_ps": _j(elmore_delay_ps(wafer, signal, ground, axis)["elmore_delay_ps"]),
+        "inductance_ph_per_um": tl["inductance_ph_per_um"],
+        "z0_ohm": tl["z0_ohm"],
+        "propagation_delay_ps": tl["propagation_delay_ps"],
+        "signal_velocity_m_s": tl["signal_velocity_m_s"],
+        "current_density_a_cm2": _j(cds["j_max_a_cm2"]),
+        "em_fail": em["fail"],
+        "em_mttf": life["mttf"],
+        "ir_drop_v": _j(ir_drop_v(wafer, signal, current_ma, axis)["ir_drop_v"]),
+        "open": r == float("inf"),
+    }
+
+
 def defect_report(wafer: Wafer) -> dict:
     """各種不良モードを一括検査した機械可読な辞書を返す。
 
