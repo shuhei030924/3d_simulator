@@ -1023,6 +1023,29 @@ def line_resistance_ohm(wafer: Wafer, name_or_id, axis: str = "x") -> float:
     return float(total)
 
 
+def resistance_at_temperature(
+    wafer: Wafer, name_or_id, temperature_c: float,
+    axis: str = "x", ref_temp_c: float = 20.0,
+) -> dict:
+    """温度依存の配線抵抗 R(T)=R₀·(1+TCR·(T−T₀)) を返す。
+
+    R₀ は基準温度 ref_temp_c での line_resistance_ohm、TCR は材料の tcr_per_k。
+    金属は正 TCR のため高温で抵抗が増える（自己発熱との正帰還評価に有用）。返す辞書:
+      r_ref_ohm（基準温度抵抗）/ r_t_ohm（温度 T の抵抗）/ ratio（R(T)/R₀）。
+    断線/非導体では inf。TCR が物理的に負の温度では R が 0 未満にならないよう 0 でクリップ。
+    """
+    mat = materials.get(name_or_id)
+    r0 = line_resistance_ohm(wafer, name_or_id, axis)
+    if r0 == float("inf"):
+        return {"r_ref_ohm": float("inf"), "r_t_ohm": float("inf"), "ratio": float("nan")}
+    factor = max(0.0, 1.0 + mat.tcr_per_k * (temperature_c - ref_temp_c))
+    return {
+        "r_ref_ohm": float(r0),
+        "r_t_ohm": float(r0 * factor),
+        "ratio": float(factor),
+    }
+
+
 def sheet_resistance_ohm_sq(wafer: Wafer, name_or_id) -> float:
     """導体薄膜のシート抵抗（Ω/sq）を返す。標準的な薄膜評価指標。
 

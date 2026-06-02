@@ -30,6 +30,8 @@ class Material:
             0=未設定（破壊判定対象外）。
         thermal_conductivity_w_mk: 熱伝導率（W/m·K）。スタック熱抵抗の計算に使用。
             0=未設定（熱抵抗計算で空気相当 0.026 扱い）。
+        tcr_per_k: 抵抗温度係数（1/K）。ρ(T)=ρ0·(1+TCR·(T−T0)) の温度依存抵抗に使用。
+            金属は正（~0.004/K）。0=未設定（温度依存なし）。
     """
 
     id: int
@@ -45,6 +47,7 @@ class Material:
     em_jmax_a_cm2: float = 0.0
     breakdown_field_mv_cm: float = 0.0
     thermal_conductivity_w_mk: float = 0.0
+    tcr_per_k: float = 0.0
 
 
 # --- 標準材料テーブル -------------------------------------------------------
@@ -67,13 +70,13 @@ _MATERIALS: list[Material] = [
              rel_permittivity=3.0, thermal_conductivity_w_mk=0.2),
     Material(6, "metal_al", "金属 (Al)", (0.82, 0.82, 0.88), stress_mpa=100.0,
              resistivity_ohm_um=0.0265, em_jmax_a_cm2=2.0e5,
-             thermal_conductivity_w_mk=237.0),
+             thermal_conductivity_w_mk=237.0, tcr_per_k=0.0043),
     Material(7, "metal_cu", "金属 (Cu)", (0.85, 0.52, 0.25), stress_mpa=200.0,
              resistivity_ohm_um=0.0168, em_jmax_a_cm2=2.0e6,
-             thermal_conductivity_w_mk=400.0),
+             thermal_conductivity_w_mk=400.0, tcr_per_k=0.0039),
     Material(8, "tungsten", "タングステン (W)", (0.55, 0.55, 0.60), stress_mpa=1200.0,
              resistivity_ohm_um=0.056, em_jmax_a_cm2=1.0e7,
-             thermal_conductivity_w_mk=170.0),
+             thermal_conductivity_w_mk=170.0, tcr_per_k=0.0045),
     Material(9, "doped_n", "n型拡散層", (0.30, 0.45, 0.85), resistivity_ohm_um=1000.0,
              thermal_conductivity_w_mk=100.0),
     Material(10, "doped_p", "p型拡散層", (0.85, 0.35, 0.55), resistivity_ohm_um=2000.0,
