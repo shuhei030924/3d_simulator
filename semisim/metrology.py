@@ -11,6 +11,9 @@ from scipy import ndimage
 from . import materials
 from .grid import Wafer
 
+# 台形積分。NumPy 2.0+ は np.trapezoid、1.x は np.trapz（要件 numpy>=1.22 に対応）。
+_trapz = getattr(np, "trapezoid", None) or np.trapz
+
 
 def material_counts(wafer: Wafer) -> dict[str, int]:
     """存在する材料ごとのボクセル数を {材料名: 個数} で返す（空気を除く）。"""
@@ -1825,7 +1828,7 @@ def caa_short_yield(
     frac = ac_um2 / layout_area_um2 if layout_area_um2 > 0 else ac_um2 * 0.0
     k = 2.0 * defect_density_per_cm2 * x0_um ** 2  # サイズ分布の正規化定数
     dens = k / xs ** 3  # /cm²/µm
-    lam = float(chip_area_cm2 * np.trapezoid(frac * dens, xs))
+    lam = float(chip_area_cm2 * _trapz(frac * dens, xs))
     return {
         "yield": float(np.exp(-lam)),
         "lambda_faults": lam,
