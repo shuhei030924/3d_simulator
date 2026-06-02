@@ -199,3 +199,49 @@ def edge_placement_error_um(
         dose=dose, focus_um=focus_um,
         sigma0_um=sigma0_um, focus_coef=focus_coef, threshold=threshold)
     return float((cd - target_width_um) / 2.0)
+
+
+def monte_carlo_cd(
+    target_width_um: float,
+    pitch_um: float,
+    *,
+    n_samples: int = 2000,
+    dose_sigma: float = 0.03,
+    focus_sigma_um: float = 0.05,
+    tol_pct: float = 10.0,
+    seed: int = 0,
+    sigma0_um: float = DEFAULT_SIGMA0_UM,
+    focus_coef: float = DEFAULT_FOCUS_COEF,
+    threshold: float = DEFAULT_THRESHOLD,
+) -> dict:
+    """露光量・焦点のばらつき（プロセス変動）に対する印刷 CD の統計を返す。
+
+    dose~N(1, dose_sigma)、focus~N(0, focus_sigma_um) を n_samples 個サンプリングし、
+    各々の印刷 CD を計算してモンテカルロで CD 分布を求める。返す辞書:
+      - mean_cd_um / std_cd_um: CD の平均・標準偏差
+      - cdu_3sigma_um: 限界寸法均一性 CDU=3σ
+      - yield_in_spec: CD が target±tol% に入る割合（プロセス窓内歩留り）
+      - cd_samples: CD サンプル配列
+    ばらつき（dose_sigma/focus_sigma）が大きいほど CDU は増え歩留りは下がる。
+    seed で再現可能。
+    """
+    rng = np.random.default_rng(seed)
+    mask = isolated_space_mask(target_width_um, pitch_um)
+    doses = rng.normal(1.0, dose_sigma, n_samples)
+    focuses = rng.normal(0.0, focus_sigma_um, n_samples)
+    cds = np.array([
+        printed_cd_um(mask, pitch_um, dose=float(d), focus_um=float(f),
+                      sigma0_um=sigma0_um, focus_coef=focus_coef, threshold=threshold)
+        for d, f in zip(doses, focuses)
+    ])
+    lo = target_width_um * (1 - tol_pct / 100.0)
+    hi = target_width_um * (1 + tol_pct / 100.0)
+    in_spec = (cds >= lo) & (cds <= hi)
+    std = float(cds.std())
+    return {
+        "mean_cd_um": float(cds.mean()),
+        "std_cd_um": std,
+        "cdu_3sigma_um": 3.0 * std,
+        "yield_in_spec": float(in_spec.mean()),
+        "cd_samples": cds,
+    }

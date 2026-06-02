@@ -585,6 +585,8 @@ def verification_section() -> str:
          "Idsat∝(Vg−Vth)²・三極管/飽和・サブスレショルド傾斜 SS≈n·60mV/dec"),
         ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
          "断面積を考慮した直列抵抗・薄膜評価"),
+        ("温度依存抵抗（TCR）", "resistance_at_temperature",
+         "R(T)=R₀(1+TCR·ΔT)。金属は高温で抵抗増（自己発熱と正帰還）"),
         ("電流密度 / EM リスク", "current_density_stats / electromigration_risk",
          f"J_max={em['j_max_a_cm2']:.2e} A/cm², 余裕={em['margin']:.2f}"),
         ("EM 寿命（Black）", "electromigration_mttf / em_lifetime_wafer",
@@ -614,6 +616,8 @@ def verification_section() -> str:
          "容量・熱拡散ソルバが格子細分で解析解へ約1次収束することを定量検証"),
         ("リソ プロセスウィンドウ", "litho.bossung / process_window / meef / EPE",
          "空間像モデルで CD・DOF・露光裕度・MEEF・EPE を評価"),
+        ("リソ CD 統計ばらつき", "litho.monte_carlo_cd",
+         "露光/焦点変動のモンテカルロで CDU(3σ)・規格内歩留りを統計評価"),
     ]
     table = "".join(
         f"<tr><td>{html.escape(name)}</td><td><code>{html.escape(fn)}</code></td>"
