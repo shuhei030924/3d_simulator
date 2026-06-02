@@ -1735,6 +1735,75 @@ def mos_cv_curve(
     }
 
 
+def critical_area_short_um2(
+    wafer: Wafer, name_a, name_b, defect_diameter_um: float, z_index: int | None = None
+) -> float:
+    """直径 d の円形導電性欠陥が 2 導体をブリッジ（ショート）させ得る臨界面積(µm²)。
+
+    指定 z 断面（既定=導体が存在する代表層）の上面図で、欠陥中心が置かれたとき
+    両導体に同時に触れる（A までの距離 ≤ d/2 かつ B までの距離 ≤ d/2）点の面積を
+    距離変換で数える。d が 2 配線間隔より小さいと 0、d が大きいほど臨界面積は増える。
+    クリティカルエリア解析（CAA）によるショート歩留りの基礎量。
+    """
+    a = materials.get(name_a)
+    b = materials.get(name_b)
+    grid = wafer.grid
+    pitch = wafer.config.pitch_um
+    if z_index is None:
+        # A・B が最も多く共存する z 層を選ぶ
+        both_per_z = ((grid == a.id) | (grid == b.id)).sum(axis=(1, 2))
+        if both_per_z.max() == 0:
+            return 0.0
+        z_index = int(np.argmax(both_per_z))
+    plane = grid[z_index]
+    mask_a = plane == a.id
+    mask_b = plane == b.id
+    if not mask_a.any() or not mask_b.any():
+        return 0.0
+    r = defect_diameter_um / 2.0
+    tol = pitch * 1e-6  # ボクセル量子化による境界の取りこぼし防止
+    dist_a = ndimage.distance_transform_edt(~mask_a) * pitch
+    dist_b = ndimage.distance_transform_edt(~mask_b) * pitch
+    bridges = (dist_a <= r + tol) & (dist_b <= r + tol)
+    return float(bridges.sum()) * (pitch ** 2)
+
+
+def caa_short_yield(
+    wafer: Wafer, name_a, name_b,
+    *, defect_density_per_cm2: float = 0.1, chip_area_cm2: float = 0.1,
+    x0_um: float = 0.02, xmax_um: float = 1.0, n: int = 24, z_index: int | None = None,
+) -> dict:
+    """クリティカルエリア解析（CAA）でショート歩留りを推定する。
+
+    シミュレートした代表レイアウトの臨界面積 A_c(x) を版面面積で割った
+    「臨界面積率」を、実チップ面積 chip_area_cm2 に拡張して期待故障数を求める。
+    欠陥サイズ分布 dD/dx=k/x³（x≥x0, ∫=defect_density）に対し
+      λ = chip_area · ∫ frac_c(x)·(k/x³) dx
+    を数値積分し、Poisson 歩留り Y=exp(−λ) を返す。配線間隔が広い/欠陥が小さい/
+    欠陥密度が低いほど λ は小さく歩留りは高い。返す辞書: yield / lambda_faults /
+    diameters_um / critical_area_um2 / critical_area_fraction。
+    """
+    if defect_density_per_cm2 < 0 or x0_um <= 0 or xmax_um <= x0_um or chip_area_cm2 < 0:
+        raise ValueError("CAA パラメータが不正です（密度/面積≥0, 0<x0<xmax）。")
+    cfg = wafer.config
+    layout_area_um2 = cfg.nx * cfg.ny * (cfg.pitch_um ** 2)  # 上面図の版面面積
+    xs = np.logspace(np.log10(x0_um), np.log10(xmax_um), n)
+    ac_um2 = np.array([
+        critical_area_short_um2(wafer, name_a, name_b, x, z_index) for x in xs
+    ])
+    frac = ac_um2 / layout_area_um2 if layout_area_um2 > 0 else ac_um2 * 0.0
+    k = 2.0 * defect_density_per_cm2 * x0_um ** 2  # サイズ分布の正規化定数
+    dens = k / xs ** 3  # /cm²/µm
+    lam = float(chip_area_cm2 * np.trapezoid(frac * dens, xs))
+    return {
+        "yield": float(np.exp(-lam)),
+        "lambda_faults": lam,
+        "diameters_um": xs,
+        "critical_area_um2": ac_um2,
+        "critical_area_fraction": frac,
+    }
+
+
 def stress_field_mpa(wafer: Wafer) -> np.ndarray:
     """各ボクセルの残留膜応力 σ（MPa）を格納した配列を返す。空気は 0。"""
     grid = wafer.grid
