@@ -1976,66 +1976,97 @@ def max_stress_concentration(wafer: Wafer) -> dict:
     }
 
 
-def _solve_slice_capacitance(eps2d: np.ndarray, is_a: np.ndarray, is_b: np.ndarray) -> float:
+def _solve_slice_capacitance(
+    eps_diel: np.ndarray, is_a: np.ndarray, is_b: np.ndarray, is_cond: np.ndarray
+) -> float:
     """2D 断面で ∇·(εr∇φ)=0 を解き、電極 A(φ=1)/B(φ=0) 間の単位長あたり
-    容量（ε0 を除いた無次元値）を返す。面の εr は調和平均（直列誘電体に厳密）。
+    容量（ε0 を除いた無次元値）を返す。面の εr は誘電体同士で調和平均、導体表面では
+    誘電体側の値を使う（一様媒質で εr に厳密比例）。
 
-    境界は自然境界条件（ゼロ流束）。電極以外を未知数とする疎行列を直接解法で解き、
+    A・B 以外の導体（浮遊導体）は連結成分ごとに 1 つの等電位ノードへ束ねて未知数とし、
+    その正味電荷ゼロ条件（KCL）を自動的に満たす——これにより浮遊金属を物理的に
+    正しく（高 εr 近似でなく真の等電位として）扱う。境界は自然境界条件（ゼロ流束）。
     A の表面を貫く電束 Q'=Σ εr_face·(1−φ_nb) を容量（V=1）として返す。
     """
     from scipy.sparse import csr_matrix
     from scipy.sparse.linalg import spsolve
 
-    h, w = eps2d.shape
+    h, w = eps_diel.shape
     fixed = is_a | is_b
+    floating = is_cond & ~fixed
+    float_lab, n_float = ndimage.label(floating)  # 浮遊導体の連結成分
+    diel = ~is_cond  # 誘電体（非導体）セル
+
+    # ノード割当: 誘電体セル各 1 + 浮遊成分各 1
     idx = -np.ones((h, w), dtype=int)
-    unk = np.argwhere(~fixed)
-    if unk.size == 0:
-        return 0.0
-    for k, (i, j) in enumerate(unk):
+    diel_cells = np.argwhere(diel)
+    for k, (i, j) in enumerate(diel_cells):
         idx[i, j] = k
-    n = len(unk)
+    m = len(diel_cells)
+    n_nodes = m + n_float
+    if n_nodes == 0:
+        return 0.0
+
+    def node_of(i, j):
+        if diel[i, j]:
+            return idx[i, j]
+        return m + int(float_lab[i, j]) - 1  # 浮遊成分ノード
+
     phi_fixed = np.where(is_a, 1.0, 0.0)
     neigh = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    _SHORT = 1.0e8  # 導体同士の接触（短絡）を表す大コンダクタンス（稀）
 
-    def eps_face(i, j, ii, jj):
-        # 電極（A/B=導体）に接する面は誘電体側の εr を使う（導体表面=境界）。
-        # これにより一様 εr 媒質では容量が εr に厳密比例する。
-        ei, ej = fixed[i, j], fixed[ii, jj]
-        if ei and ej:
-            return 0.0
-        if ei:
-            return float(eps2d[ii, jj])
-        if ej:
-            return float(eps2d[i, j])
-        a, c = eps2d[i, j], eps2d[ii, jj]
+    def face_cond(i, j, ii, jj):
+        """セル (i,j) と隣接 (ii,jj) の面コンダクタンス（誘電体側 εr 規則）。"""
+        ci, cj = is_cond[i, j], is_cond[ii, jj]
+        if ci and cj:
+            return _SHORT  # 異材導体の接触＝短絡
+        if ci:  # i が導体 → 誘電体側 (ii,jj)
+            return float(eps_diel[ii, jj])
+        if cj:  # j が導体 → 誘電体側 (i,j)
+            return float(eps_diel[i, j])
+        a, c = eps_diel[i, j], eps_diel[ii, jj]
         return 2.0 * a * c / (a + c) if (a + c) > 0 else 0.0
 
     rows: list[int] = []
     cols: list[int] = []
     data: list[float] = []
-    b = np.zeros(n)
-    for k, (i, j) in enumerate(unk):
-        diag = 0.0
+    b = np.zeros(n_nodes)
+
+    def add(r, c, v):
+        rows.append(r)
+        cols.append(c)
+        data.append(v)
+
+    # 非固定セル（誘電体 + 浮遊導体）を走査し、面寄与を該当ノード行へ加算
+    for i, j in np.argwhere(~fixed):
+        nc = node_of(i, j)
         for di, dj in neigh:
             ii, jj = i + di, j + dj
             if not (0 <= ii < h and 0 <= jj < w):
                 continue
-            ef = eps_face(i, j, ii, jj)
-            diag += ef
+            ef = face_cond(i, j, ii, jj)
+            if ef == 0.0:
+                continue
             if fixed[ii, jj]:
-                b[k] += ef * phi_fixed[ii, jj]
+                add(nc, nc, ef)
+                b[nc] += ef * phi_fixed[ii, jj]
             else:
-                rows.append(k)
-                cols.append(idx[ii, jj])
-                data.append(-ef)
-        rows.append(k)
-        cols.append(k)
-        data.append(diag)
-    mat = csr_matrix((data, (rows, cols)), shape=(n, n))
-    phi_u = spsolve(mat, b)
-    phi = phi_fixed.copy()
-    phi[~fixed] = phi_u
+                nn = node_of(ii, jj)
+                if nn == nc:
+                    continue  # 同一浮遊成分の内部面（寄与なし）
+                add(nc, nc, ef)
+                add(nc, nn, -ef)
+    mat = csr_matrix((data, (rows, cols)), shape=(n_nodes, n_nodes))
+    sol = spsolve(mat, b)
+
+    phi = phi_fixed.copy().astype(float)
+    phi[diel] = sol[:m]
+    if n_float:
+        # 浮遊導体セルへ成分ノードの解を書き戻す
+        for i, j in np.argwhere(floating):
+            phi[i, j] = sol[m + int(float_lab[i, j]) - 1]
+
     # A 表面を貫く電束（= V=1 のときの容量）
     q = 0.0
     for i, j in np.argwhere(is_a):
@@ -2043,7 +2074,7 @@ def _solve_slice_capacitance(eps2d: np.ndarray, is_a: np.ndarray, is_b: np.ndarr
             ii, jj = i + di, j + dj
             if not (0 <= ii < h and 0 <= jj < w) or is_a[ii, jj]:
                 continue
-            q += eps_face(i, j, ii, jj) * (1.0 - phi[ii, jj])
+            q += face_cond(i, j, ii, jj) * (1.0 - phi[ii, jj])
     return float(q)
 
 
@@ -2054,7 +2085,8 @@ def parasitic_capacitance_field_ff(wafer: Wafer, name_a, name_b, axis: str = "y"
     直接解法で解き、電極 A の表面電束から単位長容量を求め、断面厚 pitch を掛けて
     積算する。`parasitic_capacitance_ff`（面対向平行平板近似）と異なり、電極端の
     フリンジ電界も捉えるため、有限幅の電極では平行平板近似より大きい容量を与える。
-    A・B 以外の導体はフローティング金属として高 εr で近似する。
+    A・B 以外の導体は浮遊（フローティング）金属として連結成分ごとに等電位ノードに
+    束ね、正味電荷ゼロ条件で物理的に正しく扱う（接地シールドではなく浮遊導体）。
     計算量は断面サイズに依存（大規模グリッドでは重い）。どちらかの材料が
     無ければ 0。
     """
@@ -2080,10 +2112,9 @@ def parasitic_capacitance_field_ff(wafer: Wafer, name_a, name_b, axis: str = "y"
         is_b = g2 == b.id
         if not (is_a.any() and is_b.any()):
             continue
-        e2 = eps_field[tuple(sl)].copy()
-        other_cond = np.isin(g2, cond_ids) & ~is_a & ~is_b
-        e2[other_cond] = 1e4  # フローティング金属を高 εr で近似
-        cp = _solve_slice_capacitance(e2, is_a, is_b)  # ε0 抜き・単位長
+        e2 = eps_field[tuple(sl)]
+        is_cond = np.isin(g2, cond_ids)
+        cp = _solve_slice_capacitance(e2, is_a, is_b, is_cond)  # ε0 抜き・単位長
         total += cp * eps0 * pitch_m
     return float(total * 1e15)  # F → fF
 
