@@ -2354,6 +2354,33 @@ def mos_iv_curve(
     return {"vd": vd, "curves": curves}
 
 
+def mos_small_signal(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float, vd: float, delta: float = 1e-3, **mos_kw,
+) -> dict:
+    """MOS の小信号パラメータ（gm・gds・真性利得）を数値微分で返す。
+
+    動作点 (vg, vd) のドレイン電流を中心差分し、
+      - gm = ∂Id/∂Vg（トランスコンダクタンス, S）
+      - gds = ∂Id/∂Vd（出力コンダクタンス, S）
+      - intrinsic_gain = gm/gds（真性電圧利得 Av）
+    を求める。飽和域では gds が小さく利得が高い。返す辞書:
+      gm_s / gds_s / intrinsic_gain / id_a。
+    """
+    def idr(g, d):
+        return mos_drain_current(wafer, gate_conductor, channel, vg=g, vd=d, **mos_kw)
+
+    gm = (idr(vg + delta, vd) - idr(vg - delta, vd)) / (2 * delta)
+    gds = (idr(vg, vd + delta) - idr(vg, vd - delta)) / (2 * delta)
+    gain = float("inf") if gds == 0 else gm / gds
+    return {
+        "gm_s": float(gm),
+        "gds_s": float(gds),
+        "intrinsic_gain": float(gain),
+        "id_a": float(idr(vg, vd)),
+    }
+
+
 def gate_switching_delay_ps(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, load_cap_ff: float, vdd: float = 1.0, **mos_kw,
