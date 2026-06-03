@@ -658,6 +658,8 @@ def verification_section() -> str:
         ("CTE 不整合熱応力", "thermal_mismatch_stress",
          "σ=E/(1−ν)·Δα·ΔT（冷却で高CTE膜が引張・最弱材料を特定）"),
         ("ウェハ反り（膜応力）", "wafer_bow_um", "Stoney 則による等価反り"),
+        ("薄膜光学反射率（TMM）", "optical_reflectance",
+         "垂直入射 R=|r|²（λ/4 反射防止膜で R→0・反射測光/ARC 設計）"),
         ("歩留り推定", "yield_estimate", "Poisson/Murphy/Seeds モデル"),
         ("クリティカルエリア解析", "critical_area_short_um2 / caa_short_yield",
          "欠陥径ごとの臨界面積を距離変換で算出しサイズ分布で積分→ショート歩留り"),
