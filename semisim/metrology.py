@@ -2027,6 +2027,73 @@ def diode_iv_curve(
     return {"v": v, "i": i, "i_sat_a": i_sat_a}
 
 
+def tunnel_diode_iv(
+    *, peak_current_a: float = 1.0e-3, peak_voltage_v: float = 0.065,
+    valley_current_a: float = 1.0e-4, valley_voltage_v: float = 0.35,
+    excess_slope_per_v: float = 6.0,
+    i_sat_a: float = 1.0e-13, ideality: float = 1.0, temperature_c: float = 27.0,
+    v_max: float = 0.6, n_points: int = 601,
+) -> dict:
+    """トンネルダイオードの I-V（負性抵抗領域・ピーク/谷・PVCR）を返す。
+
+    縮退ドープの pn 接合では低電圧で帯間トンネル電流が流れ、I-V に
+    負性微分抵抗（NDR, dI/dV<0）を生む。電流は 3 成分の和（いずれも V=0 で 0）:
+      I_tunnel = Ip·(V/Vp)·exp(1 − V/Vp)            （V=Vp でピーク Ip）
+      I_excess = Iv·(V/Vv)·exp(a·(V − Vv))          （谷の超過電流, a で立上り）
+      I_diode  = Is·(exp(V/(n·Vt)) − 1)             （通常の熱拡散電流）
+    ピーク(Vp, Ip)の後 NDR で電流が下がり谷(Vv 付近)を経て、熱拡散電流で再び増える
+    N 字特性になる。ピーク谷電流比 PVCR=Ip/Iv は素子品質（発振器/高速スイッチ用途）
+    の指標。返す辞書: voltage_v / current_a（配列）/ peak_voltage_v / peak_current_a /
+    valley_voltage_v / valley_current_a / pvcr / ndr_v_range / has_ndr。
+    """
+    if peak_current_a <= 0 or peak_voltage_v <= 0:
+        raise ValueError("ピーク電流・電圧は正の値が必要です。")
+    if valley_voltage_v <= peak_voltage_v:
+        raise ValueError("谷電圧はピーク電圧より大きい必要があります。")
+    if i_sat_a <= 0 or ideality <= 0:
+        raise ValueError("i_sat_a・ideality は正の値が必要です。")
+    vt = _K_BOLTZMANN_EV * (temperature_c + 273.15)
+    nvt = ideality * vt
+    v = np.linspace(0.0, v_max, n_points)
+    i_tunnel = peak_current_a * (v / peak_voltage_v) * np.exp(1.0 - v / peak_voltage_v)
+    i_excess = (valley_current_a * (v / valley_voltage_v)
+                * np.exp(np.clip((v - valley_voltage_v) * excess_slope_per_v,
+                                 -200.0, 200.0)))
+    i_diode = i_sat_a * np.expm1(np.clip(v / nvt, -200.0, 200.0))
+    i = i_tunnel + i_excess + i_diode
+    # ピーク（最初の極大）と谷（その後の極小）を勾配符号変化から抽出
+    di = np.diff(i)
+    peak_k = None
+    valley_k = None
+    for k in range(len(di) - 1):
+        if peak_k is None and di[k] > 0 and di[k + 1] <= 0:
+            peak_k = k + 1
+        elif peak_k is not None and di[k] < 0 and di[k + 1] >= 0:
+            valley_k = k + 1
+            break
+    has_ndr = peak_k is not None and valley_k is not None
+    if has_ndr:
+        pv, pi = float(v[peak_k]), float(i[peak_k])
+        vv, vi = float(v[valley_k]), float(i[valley_k])
+        pvcr = pi / vi if vi > 0 else float("inf")
+        ndr_range = (pv, vv)
+    else:
+        pv, pi, vv, vi, pvcr, ndr_range = (float(peak_voltage_v),
+                                           float(peak_current_a), 0.0, 0.0, 0.0,
+                                           (0.0, 0.0))
+    return {
+        "voltage_v": v,
+        "current_a": i,
+        "peak_voltage_v": pv,
+        "peak_current_a": pi,
+        "valley_voltage_v": vv,
+        "valley_current_a": vi,
+        "pvcr": float(pvcr),
+        "ndr_v_range": ndr_range,
+        "has_ndr": bool(has_ndr),
+    }
+
+
 def solar_cell_iv(
     *, photocurrent_a: float = 35.0e-3, i_sat_a: float = 1.0e-12,
     ideality: float = 1.0, temperature_c: float = 25.0, eg_ev: float = 1.12,
