@@ -2905,6 +2905,95 @@ def thermal_mismatch_stress(
     }
 
 
+def _column_optical_layers(wafer: Wafer, y: int, x: int):
+    """列 (y,x) を上面から下へ走査し (複素屈折率 N, 厚み[m]) の薄膜リストと
+    基板（最下層, 半無限）の複素屈折率を返す。空気は入射媒質として除外する。
+
+    返り値: (films, n_substrate)。films は上→下の順の [(N_complex, d_m), ...]。
+    固体が無ければ ([], None)。
+    """
+    grid = wafer.grid
+    col = grid[:, y, x]
+    p_m = wafer.config.pitch_um * 1e-6
+    solid_zs = np.nonzero(col != materials.AIR)[0]
+    if solid_zs.size == 0:
+        return [], None
+
+    def n_of(mid: int) -> complex:
+        m = materials.BY_ID.get(int(mid))
+        if m is None or m.refractive_index_n <= 0:
+            return complex(1.0, 0.0)  # 未設定は空気相当
+        return complex(m.refractive_index_n, m.extinction_k)
+
+    top = int(solid_zs.max())
+    bottom = int(solid_zs.min())
+    # 上面 top から下へ、連続する同一材料を 1 層にまとめる
+    layers: list[tuple[int, int]] = []  # (材料 id, ボクセル数)
+    z = top
+    while z >= bottom:
+        mid = int(col[z])
+        count = 0
+        while z >= bottom and int(col[z]) == mid:
+            count += 1
+            z -= 1
+        layers.append((mid, count))
+    # 最下層 = 半無限基板（厚みを持たない出射媒質）
+    sub_mid = layers[-1][0]
+    films = [(n_of(mid), cnt * p_m) for mid, cnt in layers[:-1]]
+    return films, n_of(sub_mid)
+
+
+def optical_reflectance(
+    wafer: Wafer, *, wavelength_um: float, y_index: int | None = None,
+    x_index: int | None = None, n_incident: float = 1.0,
+) -> dict:
+    """薄膜スタックの垂直入射反射率 R を特性行列法（TMM）で返す。
+
+    指定列（既定は中央）の上面から基板までの薄膜積層を、各層の複素屈折率
+    N=n−ik と厚み d から特性行列
+      M_j = [[cos δ, i·sin δ/N],[i·N·sin δ, cos δ]],  δ=2π·N·d/λ
+    の積で合成し、入射媒質 n0（既定 1.0=空気）と半無限基板 ns に対する
+    振幅反射率 r からエネルギー反射率 R=|r|² を求める。応用:
+      - λ/4 反射防止膜（n_film=√(n0·ns), d=λ/4n）で R→0
+      - 裸基板では Fresnel R=((n0−ns)/(n0+ns))²
+      - λ/2 膜は光学的に不可視（基板の R に戻る）
+    返す辞書: reflectance / n_layers（薄膜数）/ wavelength_um。固体が無ければ
+    R は入射→真空の 0。
+    """
+    if wavelength_um <= 0:
+        raise ValueError("波長は正の値が必要です。")
+    grid = wafer.grid
+    ny, nx = grid.shape[1], grid.shape[2]
+    y = ny // 2 if y_index is None else int(y_index)
+    x = nx // 2 if x_index is None else int(x_index)
+    films, n_sub = _column_optical_layers(wafer, y, x)
+    if n_sub is None:
+        return {"reflectance": 0.0, "n_layers": 0, "wavelength_um": float(wavelength_um)}
+    lam_m = wavelength_um * 1e-6
+    n0 = complex(n_incident, 0.0)
+    # 特性行列の積（上→下）。基板側を出射媒質 η_s=n_sub とする。
+    m11, m12, m21, m22 = 1.0 + 0j, 0j, 0j, 1.0 + 0j
+    for n_c, d_m in films:
+        delta = 2.0 * np.pi * n_c * d_m / lam_m
+        cos_d = np.cos(delta)
+        sin_d = np.sin(delta)
+        a11, a12 = cos_d, 1j * sin_d / n_c
+        a21, a22 = 1j * n_c * sin_d, cos_d
+        # M = M · A（順に下層へ）
+        m11, m12, m21, m22 = (
+            m11 * a11 + m12 * a21, m11 * a12 + m12 * a22,
+            m21 * a11 + m22 * a21, m21 * a12 + m22 * a22,
+        )
+    num = n0 * m11 + n0 * n_sub * m12 - m21 - n_sub * m22
+    den = n0 * m11 + n0 * n_sub * m12 + m21 + n_sub * m22
+    r = num / den
+    return {
+        "reflectance": float(abs(r) ** 2),
+        "n_layers": len(films),
+        "wavelength_um": float(wavelength_um),
+    }
+
+
 def _solve_slice_capacitance(
     eps_diel: np.ndarray, is_a: np.ndarray, is_b: np.ndarray, is_cond: np.ndarray
 ) -> float:
