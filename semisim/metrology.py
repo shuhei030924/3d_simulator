@@ -2027,6 +2027,72 @@ def diode_iv_curve(
     return {"v": v, "i": i, "i_sat_a": i_sat_a}
 
 
+def schottky_saturation_current(
+    area_um2: float, *, barrier_ev: float = 0.6, temp_k: float = 300.0,
+    richardson_a_cm2_k2: float = 110.0,
+) -> dict:
+    """ショットキー接合の熱電子放出 飽和電流（A）を返す（Richardson 式）。
+
+    金属-半導体接触では多数キャリアの熱電子放出が電流を支配し、飽和電流密度は
+      J_s = A*·T²·exp(−q·Φ_B / kT)
+    （A*=実効リチャードソン定数, 既定 110 A/cm²K²=n 型 Si, Φ_B=障壁高さ[eV]）。
+    障壁が低い・温度が高いほど J_s は指数的に大きく、pn 接合より桁違いに高い
+    （=ショットキーの低い立ち上がり電圧）。返す辞書: i_sat_a / j_sat_a_cm2 /
+    barrier_ev / temp_k。面積は µm²（1µm²=1e−8 cm²）。
+    """
+    if area_um2 < 0:
+        raise ValueError("面積は非負である必要があります。")
+    if temp_k <= 0:
+        raise ValueError("温度は正の値が必要です。")
+    j_sat = richardson_a_cm2_k2 * temp_k ** 2 * np.exp(
+        -barrier_ev / (_K_BOLTZMANN_EV * temp_k))  # A/cm²
+    area_cm2 = area_um2 * 1e-8
+    return {
+        "i_sat_a": float(j_sat * area_cm2),
+        "j_sat_a_cm2": float(j_sat),
+        "barrier_ev": float(barrier_ev),
+        "temp_k": float(temp_k),
+    }
+
+
+def schottky_diode_current(
+    area_um2: float, v: float, *, barrier_ev: float = 0.6, temp_k: float = 300.0,
+    richardson_a_cm2_k2: float = 110.0, ideality: float = 1.05,
+    series_r_ohm: float = 0.0,
+) -> float:
+    """ショットキーバリアダイオードの電流 I（A）を返す（熱電子放出, 直列抵抗付き）。
+
+    飽和電流 Is（schottky_saturation_current, Richardson 式）を用い
+      I = Is·(exp((V−I·Rs)/(n·Vt)) − 1),  Vt=kT/q
+    で順方向は指数的に増え逆方向は −Is に飽和する。pn 接合（Shockley）と同形だが
+    Is が熱電子放出律速で桁違いに大きく、立ち上がり電圧が低い（高速整流/低 Vf の
+    パワー/RF 用途）。Rs>0 は高電流を制限（Newton 法で陰解）。
+    """
+    s = schottky_saturation_current(
+        area_um2, barrier_ev=barrier_ev, temp_k=temp_k,
+        richardson_a_cm2_k2=richardson_a_cm2_k2)
+    i_sat = s["i_sat_a"]
+    vt = _K_BOLTZMANN_EV * temp_k
+    nvt = ideality * vt
+
+    def thermionic(vj):
+        return i_sat * (np.exp(np.clip(vj / nvt, -200.0, 200.0)) - 1.0)
+
+    if series_r_ohm <= 0:
+        return float(thermionic(v))
+    i = thermionic(v)
+    for _ in range(60):  # Newton 反復
+        vj = v - i * series_r_ohm
+        ex = np.exp(np.clip(vj / nvt, -200.0, 200.0))
+        f = i_sat * (ex - 1.0) - i
+        df = -i_sat * ex / nvt * series_r_ohm - 1.0
+        step = f / df
+        i -= step
+        if abs(step) < 1e-18:
+            break
+    return float(i)
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:
