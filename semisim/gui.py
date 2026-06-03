@@ -1180,10 +1180,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self._redo_stack: list[dict] = []
 
         self._build_ui()
+        self._install_menubar()
         self._install_shortcuts()
         self._restore_geometry()
         self._load_sample_recipe()
         self.rebuild_and_render()
+
+    # -- メニューバー（表示テーマ等） --------------------------------------
+    def _install_menubar(self):
+        """表示メニュー（ライト/ダークテーマ切替）を設置する。"""
+        view = self.menuBar().addMenu("表示")
+        self.dark_action = view.addAction("ダークテーマ")
+        self.dark_action.setCheckable(True)
+        self.dark_action.setChecked(self.settings.ui_theme == "dark")
+        self.dark_action.setShortcut("Ctrl+D")
+        self.dark_action.triggered.connect(self.toggle_theme)
+
+    def toggle_theme(self):
+        """ライト/ダークテーマを切り替え、即時適用して設定に保存する。"""
+        from .gui_style import stylesheet
+        self.settings.ui_theme = "dark" if self.settings.ui_theme != "dark" else "light"
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(stylesheet(self.settings.ui_theme))
+        if hasattr(self, "dark_action"):
+            self.dark_action.setChecked(self.settings.ui_theme == "dark")
+        try:
+            self.settings.save()
+        except Exception:  # noqa: BLE001
+            pass
 
     # -- アンドゥ/リドゥ ----------------------------------------------------
     def _install_shortcuts(self):
@@ -1960,7 +1985,12 @@ class MainWindow(QtWidgets.QMainWindow):
 def run():
     import sys
 
+    from .gui_style import stylesheet
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    # 起動時に保存テーマ（既定ライト）の QSS を適用してフラットな外観にする
+    theme = AppSettings.load().ui_theme
+    app.setStyleSheet(stylesheet(theme))
     win = MainWindow()
     win.show()
     sys.exit(app.exec_())
