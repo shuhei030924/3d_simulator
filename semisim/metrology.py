@@ -2942,6 +2942,69 @@ def mos_iv_curve(
     return {"vd": vd, "curves": curves}
 
 
+def jfet_drain_current(
+    vgs: float, vds: float, *, idss_a: float = 1.0e-3, v_pinch_v: float = -2.0,
+    lambda_per_v: float = 0.0,
+) -> float:
+    """接合型 FET（n チャネル JFET）のドレイン電流 Id（A）を返す（Shichman–Hodges）。
+
+    JFET はゲート逆バイアスで空乏層がチャネルを狭める空乏（ノーマリオン）素子。
+    ピンチオフ電圧 Vp（n チャネルは負）と Vgs=0 飽和電流 Idss から、過剰電圧
+    Vov=Vgs−Vp（活性域で正）・k=Idss/Vp² を用い
+      - 遮断   (Vgs≤Vp)        : Id = 0
+      - 三極管 (0≤Vds<Vov)     : Id = k·(2·Vov·Vds − Vds²)
+      - 飽和   (Vds≥Vov)       : Id = Idss·(1−Vgs/Vp)²·(1+λ·(Vds−Vov))
+    で表す（飽和開始 Vds=Vov で λ 項=1 となり三極管と厳密に連続）。Vgs=0 で
+    Id→Idss、Vgs=Vp で Id=0、
+    飽和電流は (1−Vgs/Vp)² の二乗則に従う。返り値は Id（A）。
+    """
+    if idss_a < 0:
+        raise ValueError("idss_a は非負である必要があります。")
+    if v_pinch_v >= 0:
+        raise ValueError("n チャネル JFET のピンチオフ電圧は負である必要があります。")
+    if vgs <= v_pinch_v or vds < 0:
+        return 0.0
+    vov = vgs - v_pinch_v  # >0（活性域）
+    k = idss_a / v_pinch_v ** 2
+    if vds < vov:  # 三極管
+        return float(k * (2.0 * vov * vds - vds * vds))
+    # 飽和（Vds=Vov で λ 項=1 → 三極管と厳密連続）
+    return float(idss_a * (1.0 - vgs / v_pinch_v) ** 2
+                 * (1.0 + lambda_per_v * (vds - vov)))
+
+
+def jfet_iv_curve(
+    *, vgs_list=(0.0, -0.5, -1.0, -1.5), vds_max: float = 5.0, n_points: int = 51,
+    idss_a: float = 1.0e-3, v_pinch_v: float = -2.0, lambda_per_v: float = 0.02,
+) -> dict:
+    """JFET の出力特性 Id-Vds 族（複数 Vgs）と伝達特性 Id-Vgs を返す。
+
+    各 Vgs について Id-Vds（三極管→飽和）を、また Vds=vds_max 固定で Vgs を Vp→0
+    に掃引した伝達特性 Id-Vgs（二乗則の放物線）を算出する。返す辞書:
+      vds（配列）/ curves（{vgs: Id 配列}）/ vgs（配列）/ id_transfer（配列）/
+      idss_a / v_pinch_v。
+    """
+    vds = np.linspace(0.0, vds_max, n_points)
+    curves = {}
+    for vgs in vgs_list:
+        curves[float(vgs)] = np.array([
+            jfet_drain_current(float(vgs), float(v), idss_a=idss_a,
+                               v_pinch_v=v_pinch_v, lambda_per_v=lambda_per_v)
+            for v in vds
+        ])
+    vgs_sweep = np.linspace(v_pinch_v, 0.0, n_points)
+    id_transfer = np.array([
+        jfet_drain_current(float(vg), vds_max, idss_a=idss_a,
+                           v_pinch_v=v_pinch_v, lambda_per_v=lambda_per_v)
+        for vg in vgs_sweep
+    ])
+    return {
+        "vds": vds, "curves": curves,
+        "vgs": vgs_sweep, "id_transfer": id_transfer,
+        "idss_a": float(idss_a), "v_pinch_v": float(v_pinch_v),
+    }
+
+
 def mos_small_signal(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vg: float, vd: float, delta: float = 1e-3, **mos_kw,

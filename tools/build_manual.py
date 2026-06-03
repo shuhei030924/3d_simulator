@@ -704,6 +704,19 @@ def _curve_varactor(fname: str) -> None:
     _save_fig(fig, fname)
 
 
+def _curve_jfet(fname: str) -> None:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    c = metrology.jfet_iv_curve(vgs_list=(0.0, -0.5, -1.0, -1.5),
+                                idss_a=1e-3, v_pinch_v=-2.0, lambda_per_v=0.02)
+    for vgs, col in zip((0.0, -0.5, -1.0, -1.5), ("C0", "C1", "C2", "C3")):
+        a1.plot(c["vds"], c["curves"][vgs] * 1e3, col, label=f"Vgs={vgs}V")
+    _axfmt(a1, "Vds [V]", "Id [mA]", "JFET 出力特性 Id-Vds")
+    a2.plot(c["vgs"], c["id_transfer"] * 1e3, "C0")
+    a2.axvline(-2.0, color="gray", ls=":", lw=0.8, label="ピンチオフ Vp")
+    _axfmt(a2, "Vgs [V]", "Id [mA]", "伝達特性 Id=Idss(1−Vgs/Vp)²")
+    _save_fig(fig, fname)
+
+
 def _curve_tunnel_diode(fname: str) -> None:
     fig, ax = plt.subplots(figsize=(6.4, 4.2))
     r = metrology.tunnel_diode_iv()
@@ -802,6 +815,11 @@ _DEVICE_CURVES = [
      "超階段 m>0.5）で容量可変比 TR=C(0)/C(Vmax) が決まり、VCO/PLL の発振周波数同調"
      "範囲（√TR）を与えます。超階段ほど広いチューニングレンジになります。",
      _curve_varactor),
+    ("char_jfet", "接合型 FET (JFET) 出力・伝達特性",
+     "ゲート逆バイアスで空乏層がチャネルを狭める空乏（ノーマリオン）型 FET です。"
+     "左は出力特性 Id-Vds（三極管→飽和）、右は伝達特性 Id=Idss·(1−Vgs/Vp)²（二乗則の"
+     "放物線）で、Vgs=0 で Idss・Vgs=Vp（ピンチオフ）で 0 になります。",
+     _curve_jfet),
     ("char_bjt", "バイポーラトランジスタ (BJT) Gummel・出力特性",
      "Ebers–Moll 順活性モデルのコレクタ/ベース電流です。左の Gummel プロットは"
      "log Ic・log Ib が ln(βF) だけ平行に離れた 2 直線になり、右の出力特性は"
@@ -904,6 +922,8 @@ def verification_section() -> str:
          "熱電子放出 Js=A*·T²·exp(−Φ_B/kT)（Richardson）。pn より低い立ち上がり電圧"),
         ("バイポーラ (BJT) 電流・利得", "bjt_currents",
          "Ic=Is·exp(Vbe/Vt)·(1+Vce/VA)・β=Ic/Ib=βF(1+Vce/VA)・gm=Ic/Vt・ro=VA/Ic"),
+        ("接合型 FET (JFET)", "jfet_drain_current / jfet_iv_curve",
+         "Id=Idss(1−Vgs/Vp)²（飽和）・三極管/飽和・空乏型のピンチオフ二乗則"),
         ("アバランシェ増倍係数", "avalanche_multiplication",
          "Miller 式 M=1/(1−(V/BV)^n)。V→BV で M→∞（APD 利得・SOA）"),
         ("フォトダイオード応答度", "photodiode_responsivity",
