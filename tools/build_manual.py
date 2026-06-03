@@ -590,6 +590,8 @@ def verification_section() -> str:
          "空乏近似の高周波 C-V（蓄積→空乏→反転）としきい値電圧・空乏層幅"),
         ("短チャネル Vth / DIBL", "short_channel_vth_v",
          "Vth ロールオフ（SCE）+ ドレイン誘起障壁低下（DIBL）"),
+        ("ボディ効果 / 基板バイアス", "body_effect",
+         "Vth(Vsb)=Vth0+γ(√(2φF+Vsb)−√(2φF)), γ=√(2εs·q·Na)/Cox"),
         ("接合リーク電流", "junction_leakage_a",
          "逆リーク∝ni(T)²·面積。温度で指数加速（待機電力）"),
         ("DRAM リテンション時間", "dram_retention_time_s",
