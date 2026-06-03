@@ -2381,6 +2381,57 @@ def mos_small_signal(
     }
 
 
+def mos_transfer_characteristics(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vd: float = 1.0, vdd: float = 1.0, vg_min: float = 0.0,
+    n_points: int = 161, **mos_kw,
+) -> dict:
+    """MOS 伝達特性 Id-Vg から SS・Ion・Ioff・Ion/Ioff を抽出する。
+
+    ゲート電圧 Vg を vg_min〜vdd まで掃引したドレイン電流 Id(Vg) から、
+      - サブスレショルドスイング SS = min(ΔVg/Δlog10 Id)（mV/dec, 最急部）
+        弱反転で Id∝exp(Vov/(n·Vt)) より SS→n·(kT/q)·ln10≈n·60mV/dec に漸近。
+      - Ion  = Id(Vg=vdd, Vd)        （オン電流, 駆動力）
+      - Ioff = Id(Vg=0,   Vd)        （オフリーク電流, 待機電力）
+      - on_off_ratio = Ion/Ioff      （スイッチ品質, 大きいほど良い）
+    を求める。返す辞書: ss_mv_dec / ion_a / ioff_a / on_off_ratio /
+    vg（配列）/ id（配列）。Ion=0（ゲート無し）では Ion/Ioff=0・SS=inf。
+    """
+    if n_points < 3:
+        raise ValueError("n_points は 3 以上が必要です。")
+    vg = np.linspace(vg_min, vdd, n_points)
+    id_arr = np.array([
+        mos_drain_current(wafer, gate_conductor, channel, vg=float(v), vd=vd, **mos_kw)
+        for v in vg
+    ])
+    ion = float(mos_drain_current(wafer, gate_conductor, channel,
+                                  vg=vdd, vd=vd, **mos_kw))
+    ioff = float(mos_drain_current(wafer, gate_conductor, channel,
+                                   vg=0.0, vd=vd, **mos_kw))
+    if ion <= 0:
+        return {"ss_mv_dec": float("inf"), "ion_a": 0.0, "ioff_a": 0.0,
+                "on_off_ratio": 0.0, "vg": vg, "id": id_arr}
+    # サブスレショルドスイング: log10(Id) 対 Vg の最急勾配の逆数（最小 SS）
+    pos = id_arr > 0
+    log_id = np.log10(np.where(pos, id_arr, np.nan))
+    dvg = np.diff(vg)
+    dlog = np.diff(log_id)
+    valid = np.isfinite(dlog) & (dlog > 0)
+    if not np.any(valid):
+        ss = float("inf")
+    else:
+        ss = float(np.min(dvg[valid] / dlog[valid]) * 1e3)  # V/dec → mV/dec
+    ratio = float(ion / ioff) if ioff > 0 else float("inf")
+    return {
+        "ss_mv_dec": ss,
+        "ion_a": ion,
+        "ioff_a": ioff,
+        "on_off_ratio": ratio,
+        "vg": vg,
+        "id": id_arr,
+    }
+
+
 def mos_cutoff_frequency(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vg: float, vd: float, **mos_kw,
