@@ -2555,6 +2555,40 @@ def gate_switching_delay_ps(
     }
 
 
+def mos_power_dissipation(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vdd: float, freq_hz: float, load_cap_ff: float,
+    activity: float = 0.15, **mos_kw,
+) -> dict:
+    """CMOS ロジックの消費電力（動的＋静的リーク）を返す。
+
+    スイッチング充放電による動的電力と、オフ状態のサブスレショルドリークによる
+    静的電力を合算する:
+      P_dyn    = α·C_load·Vdd²·f          （動的, α=スイッチング活性率）
+      P_static = Ioff·Vdd                  （静的, Ioff=mos_drain_current(Vg=0)）
+      P_total  = P_dyn + P_static
+    周波数を上げると動的が支配的、低活性・高温・微細化では静的が支配的になる。
+    返す辞書: p_dynamic_w / p_static_w / p_total_w / ioff_a / static_fraction。
+    """
+    if vdd < 0 or freq_hz < 0 or load_cap_ff < 0:
+        raise ValueError("vdd・freq_hz・load_cap_ff は非負である必要があります。")
+    if not 0.0 <= activity <= 1.0:
+        raise ValueError("activity は 0〜1 の範囲で指定してください。")
+    ioff = float(mos_drain_current(wafer, gate_conductor, channel,
+                                   vg=0.0, vd=vdd, **mos_kw))
+    p_dyn = activity * (load_cap_ff * 1e-15) * vdd * vdd * freq_hz
+    p_static = ioff * vdd
+    p_total = p_dyn + p_static
+    frac = float(p_static / p_total) if p_total > 0 else 0.0
+    return {
+        "p_dynamic_w": float(p_dyn),
+        "p_static_w": float(p_static),
+        "p_total_w": float(p_total),
+        "ioff_a": ioff,
+        "static_fraction": frac,
+    }
+
+
 def hci_lifetime(vds: float, *, b_volt: float = 30.0, a_const: float = 1.0e-6) -> float:
     """ホットキャリア注入（HCI）寿命 TTF を返す（相対寿命指標, ラッキー電子モデル）。
 
