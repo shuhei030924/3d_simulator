@@ -2858,6 +2858,131 @@ def ring_oscillator_frequency(
     }
 
 
+def _ekv_id_mag(vov: float, vd: float, beta: float, n: float, vt: float) -> float:
+    """EKV 連続モデルのドレイン電流の大きさ（A）。mos_drain_current と同形の
+    Id = 2n·β·Vt²·[ln²(1+e^(Vov/2nVt)) − ln²(1+e^((Vov−Vd)/2nVt))]。
+    Vd<0 は 0 にクリップ（逆バイアスは扱わない）。"""
+    vd = max(vd, 0.0)
+    spec = 2.0 * n * beta * vt * vt
+
+    def _lse2(x):
+        return np.log1p(np.exp(np.clip(x, -60.0, 60.0))) ** 2
+
+    return spec * (_lse2(vov / (2.0 * n * vt)) - _lse2((vov - vd) / (2.0 * n * vt)))
+
+
+def cmos_inverter_vtc(
+    wafer: Wafer, gate_conductor, channel="silicon", *,
+    vdd: float = 1.0, vthn: float | None = None, vthp_mag: float | None = None,
+    mobility_n_cm2_vs: float = 450.0, mobility_p_cm2_vs: float = 180.0,
+    w_over_l_n: float = 10.0, w_over_l_p: float | None = None,
+    doping_cm3: float = 1.0e17, vfb: float = 0.0,
+    subthreshold_n: float = 1.3, n_points: int = 201,
+) -> dict:
+    """CMOS インバータの直流伝達特性 (VTC)・反転しきい値 VM・雑音マージンを返す。
+
+    実際に作製したゲート積層の Cox（mos_gate_capacitance）を共有する n/pMOS
+    （EKV 連続電流 _ekv_id_mag）で、入力 Vin に対し pull-down(nMOS) と
+    pull-up(pMOS) の電流が釣り合う出力 Vout を各点で二分法により解く:
+      I_n(Vin,Vout) = I_p(Vin,Vout)
+      nMOS: Vov=Vin−Vthn,        Vd=Vout
+      pMOS: Vov=(Vdd−Vin)−|Vthp|, Vd=Vdd−Vout
+    から VTC 全体を求め、さらに
+      - VM   : Vin=Vout を満たす反転しきい値（論理スレッショルド）
+      - VIL/VIH : 利得 dVout/dVin=−1 となる 2 点（単位利得点）
+      - VOH=Vout(VIL), VOL=Vout(VIH)
+      - 雑音マージン NMH=VOH−VIH, NML=VIL−VOL
+      - max_gain : VM 近傍の最大電圧利得 |dVout/dVin|
+    を抽出する。既定では βp=βn（pMOS を移動度比 µn/µp だけ広く取る対称設計,
+    w_over_l_p 未指定時）・|Vthp|=Vthn とし、対称インバータでは VM=Vdd/2 に一致。
+    βp/βn を上げる（pMOS を強くする）と VM は Vdd 側へ動く。返す辞書:
+      vin / vout / gain（配列）/ vm_v / vil_v / vih_v / vol_v / voh_v /
+      nml_v / nmh_v / max_gain / vthn_v / vthp_v / beta_ratio。
+    Cox=0（ゲート無し）では全電圧 None・VTC は空。
+    """
+    if vdd <= 0:
+        raise ValueError("vdd は正の値が必要です。")
+    if n_points < 11:
+        raise ValueError("n_points は 11 以上が必要です。")
+    th = threshold_voltage_v(wafer, gate_conductor, channel,
+                             doping_cm3=doping_cm3, vfb=vfb)
+    cox = th["cox_f_m2"]
+    if cox <= 0:
+        return {"vin": np.array([]), "vout": np.array([]), "gain": np.array([]),
+                "vm_v": None, "vil_v": None, "vih_v": None, "vol_v": None,
+                "voh_v": None, "nml_v": None, "nmh_v": None, "max_gain": None,
+                "vthn_v": None, "vthp_v": None, "beta_ratio": None}
+    vthn = float(th["vth_v"]) if vthn is None else float(vthn)
+    vthp = vthn if vthp_mag is None else float(vthp_mag)
+    mu_n = mobility_n_cm2_vs * 1e-4
+    mu_p = mobility_p_cm2_vs * 1e-4
+    # 既定は βp=βn の対称設計（pMOS を移動度比だけ広く取る）
+    wl_p = (w_over_l_n * mobility_n_cm2_vs / mobility_p_cm2_vs
+            if w_over_l_p is None else float(w_over_l_p))
+    beta_n = mu_n * cox * w_over_l_n
+    beta_p = mu_p * cox * wl_p
+    n = subthreshold_n
+    vt = _KT_Q
+
+    def _imbalance(vin: float, vout: float) -> float:
+        i_n = _ekv_id_mag(vin - vthn, vout, beta_n, n, vt)
+        i_p = _ekv_id_mag((vdd - vin) - vthp, vdd - vout, beta_p, n, vt)
+        return i_n - i_p  # Vout について単調増加
+
+    def _solve_vout(vin: float) -> float:
+        lo, hi = 0.0, vdd
+        for _ in range(80):
+            mid = 0.5 * (lo + hi)
+            if _imbalance(vin, mid) > 0.0:
+                hi = mid
+            else:
+                lo = mid
+        return 0.5 * (lo + hi)
+
+    vin = np.linspace(0.0, vdd, n_points)
+    vout = np.array([_solve_vout(float(v)) for v in vin])
+    gain = np.gradient(vout, vin)
+
+    # VM: Vin=Vout を満たす点（_imbalance(vin,vin) は Vin について単調増加）
+    lo, hi = 0.0, vdd
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if _imbalance(mid, mid) > 0.0:
+            hi = mid
+        else:
+            lo = mid
+    vm = 0.5 * (lo + hi)
+
+    # 単位利得点（dVout/dVin=−1）の交差を線形補間で抽出
+    crossings = []
+    for i in range(len(vin) - 1):
+        a, b = gain[i] + 1.0, gain[i + 1] + 1.0
+        if a == 0.0 and b == 0.0:
+            continue
+        if a * b <= 0.0 and gain[i + 1] != gain[i]:
+            t = (-1.0 - gain[i]) / (gain[i + 1] - gain[i])
+            vx = vin[i] + t * (vin[i + 1] - vin[i])
+            vy = vout[i] + t * (vout[i + 1] - vout[i])
+            crossings.append((float(vx), float(vy)))
+    if len(crossings) >= 2:
+        vil, voh = crossings[0]
+        vih, vol = crossings[-1]
+        nml = vil - vol
+        nmh = voh - vih
+    else:
+        vil = vih = vol = voh = nml = nmh = None
+
+    return {
+        "vin": vin, "vout": vout, "gain": gain,
+        "vm_v": float(vm),
+        "vil_v": vil, "vih_v": vih, "vol_v": vol, "voh_v": voh,
+        "nml_v": nml, "nmh_v": nmh,
+        "max_gain": float(np.max(np.abs(gain))),
+        "vthn_v": float(vthn), "vthp_v": float(vthp),
+        "beta_ratio": float(beta_p / beta_n),
+    }
+
+
 def slew_rate(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vdd: float, load_cap_ff: float, v_peak: float | None = None, **mos_kw,
