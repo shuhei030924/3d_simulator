@@ -1617,6 +1617,71 @@ def temperature_rise_k(wafer: Wafer, power_w: float) -> float:
     return float(power_w * rth)
 
 
+def volumetric_heat_capacity_field(wafer: Wafer) -> np.ndarray:
+    """各ボクセルの体積熱容量 C_v=ρ·c_p（J/m³·K）を格納した配列を返す。
+
+    定義済み volumetric_heat_capacity_j_m3k を使用。未設定（0）の材料は空気
+    相当（1.2e3 J/m³·K）として扱う。熱時定数（熱容量）計算の補助。
+    """
+    grid = wafer.grid
+    air_cv = materials.BY_NAME["air"].volumetric_heat_capacity_j_m3k
+    cv = np.full(grid.shape, air_cv, dtype=float)
+    for m in materials.all_materials():
+        if m.volumetric_heat_capacity_j_m3k > 0:
+            cv[grid == m.id] = m.volumetric_heat_capacity_j_m3k
+    return cv
+
+
+def thermal_capacitance_j_k(wafer: Wafer) -> float:
+    """固体領域の総熱容量 C_th=Σ C_v·ΔV（J/K）を返す。
+
+    空気を除く全ボクセルについて、体積熱容量 C_v とボクセル体積 ΔV=pitch³ の
+    積を積算する。熱時定数 τ_th=R_th·C_th の過渡熱応答評価に使う。
+    """
+    grid = wafer.grid
+    cv = volumetric_heat_capacity_field(wafer)
+    p_m = wafer.config.pitch_um * 1e-6
+    dv = p_m ** 3
+    solid = grid != materials.AIR
+    return float(np.sum(cv[solid]) * dv)
+
+
+def thermal_time_constant_s(wafer: Wafer) -> dict:
+    """熱時定数 τ_th=R_th·C_th（s）と過渡熱応答の特性量を返す。
+
+    縦方向熱抵抗 R_th（thermal_resistance_k_w）と固体総熱容量 C_th
+    （thermal_capacitance_j_k）の積で、自己発熱に対する温度応答の時定数を
+    与える（一次 RC 集中定数モデル）。発熱開始後 ΔT(t)=ΔT_final·(1−e^(−t/τ))
+    で立ち上がり、τ で約 63% に達する。返す辞書:
+      tau_s / rth_k_w / cth_j_k。R_th=inf（放熱経路無し）では τ=inf。
+    """
+    rth = thermal_resistance_k_w(wafer)
+    cth = thermal_capacitance_j_k(wafer)
+    tau = float("inf") if not np.isfinite(rth) else float(rth * cth)
+    return {"tau_s": tau, "rth_k_w": float(rth), "cth_j_k": float(cth)}
+
+
+def transient_temperature_rise_k(
+    wafer: Wafer, power_w: float, time_s: float
+) -> float:
+    """発熱開始から time_s 後の過渡温度上昇 ΔT(t)（K）を返す。
+
+    一次 RC モデル ΔT(t)=P·R_th·(1−e^(−t/τ)), τ=R_th·C_th。t→∞ で定常
+    ΔT=P·R_th（temperature_rise_k）に一致し、t=τ で約 63%。放熱経路が無い
+    （R_th=inf）場合は inf。
+    """
+    if power_w < 0 or time_s < 0:
+        raise ValueError("power_w・time_s は非負である必要があります。")
+    tc = thermal_time_constant_s(wafer)
+    rth, tau = tc["rth_k_w"], tc["tau_s"]
+    if not np.isfinite(rth):
+        return float("inf")
+    dt_final = power_w * rth
+    if tau <= 0:
+        return float(dt_final)
+    return float(dt_final * (1.0 - np.exp(-time_s / tau)))
+
+
 def joule_self_heating_k(
     wafer: Wafer, conductor, current_ma: float, axis: str = "x"
 ) -> dict:
