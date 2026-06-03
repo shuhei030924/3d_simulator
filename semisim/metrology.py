@@ -3287,6 +3287,69 @@ def channel_strain_mobility(
                              base_mobility_cm2_vs=base_mobility_cm2_vs)
 
 
+# Caughey–Thomas 移動度モデルの Si パラメータ（300K, cm²/Vs / cm⁻³）
+#   μ(N)=μ_min+(μ_max−μ_min)/(1+(N/N_ref)^α)
+_CT_MOBILITY = {
+    "electron": {"mu_min": 92.0, "mu_max": 1360.0, "n_ref": 1.3e17, "alpha": 0.91},
+    "hole": {"mu_min": 47.7, "mu_max": 495.0, "n_ref": 6.3e16, "alpha": 0.76},
+}
+
+
+def carrier_mobility(doping_cm3: float, *, carrier: str = "electron") -> dict:
+    """ドーピング依存キャリア移動度 µ(N)（Caughey–Thomas モデル, cm²/Vs）を返す。
+
+    不純物散乱により移動度はドーピング濃度 N とともに低下する:
+      µ(N) = µ_min + (µ_max − µ_min) / (1 + (N/N_ref)^α)
+    低ドープで格子散乱律速の µ_max（電子 1360 / 正孔 495）、高ドープで不純物散乱
+    律速の µ_min（電子 92 / 正孔 47.7）に漸近し、N=N_ref で両者の中点となる。
+    返す辞書: mobility_cm2_vs / carrier / doping_cm3 と各モデルパラメータ。
+    N≤0 では µ_max を返す。
+    """
+    if carrier not in _CT_MOBILITY:
+        raise ValueError("carrier は 'electron' または 'hole' を指定してください。")
+    p = _CT_MOBILITY[carrier]
+    if doping_cm3 <= 0:
+        mu = p["mu_max"]
+    else:
+        mu = p["mu_min"] + (p["mu_max"] - p["mu_min"]) / (
+            1.0 + (doping_cm3 / p["n_ref"]) ** p["alpha"]
+        )
+    return {
+        "mobility_cm2_vs": float(mu),
+        "carrier": carrier,
+        "doping_cm3": float(doping_cm3),
+        "mu_min": p["mu_min"], "mu_max": p["mu_max"],
+        "n_ref": p["n_ref"], "alpha": p["alpha"],
+    }
+
+
+def bulk_resistivity_ohm_cm(doping_cm3: float, *, carrier: str = "electron") -> dict:
+    """ドープ Si の体積抵抗率 ρ（Ω·cm, Irvin 曲線）を返す。
+
+    多数キャリア濃度 n≈N（完全イオン化）とドーピング依存移動度 µ(N)
+    （carrier_mobility）から
+      ρ = 1 / (q·N·µ)
+    を求める。µ が cm²/Vs・N が cm⁻³ のとき ρ は Ω·cm。例として n 型 Si で
+    N=1e16 → ρ≈0.5 Ω·cm と Irvin 曲線に一致する。返す辞書:
+      resistivity_ohm_cm / conductivity_s_cm / mobility_cm2_vs / carrier /
+      doping_cm3。N≤0 では ρ=inf。
+    """
+    m = carrier_mobility(doping_cm3, carrier=carrier)
+    mu = m["mobility_cm2_vs"]
+    if doping_cm3 <= 0 or mu <= 0:
+        return {"resistivity_ohm_cm": float("inf"), "conductivity_s_cm": 0.0,
+                "mobility_cm2_vs": float(mu), "carrier": carrier,
+                "doping_cm3": float(doping_cm3)}
+    sigma = _Q * doping_cm3 * mu  # S/cm（q[C]·N[cm⁻³]·µ[cm²/Vs]）
+    return {
+        "resistivity_ohm_cm": float(1.0 / sigma),
+        "conductivity_s_cm": float(sigma),
+        "mobility_cm2_vs": float(mu),
+        "carrier": carrier,
+        "doping_cm3": float(doping_cm3),
+    }
+
+
 def _column_optical_layers(wafer: Wafer, y: int, x: int):
     """列 (y,x) を上面から下へ走査し (複素屈折率 N, 厚み[m]) の薄膜リストと
     基板（最下層, 半無限）の複素屈折率を返す。空気は入射媒質として除外する。
