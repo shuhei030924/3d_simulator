@@ -2512,6 +2512,36 @@ def mos_gm_id_efficiency(
     }
 
 
+def early_voltage(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float, vd: float, **mos_kw,
+) -> dict:
+    """MOS のアーリー電圧 VA=Id/gds（V）と真性利得の分解を返す。
+
+    出力コンダクタンス gds（mos_small_signal）とドレイン電流 Id から、出力特性の
+    傾きの外挿が Vd 軸と交わる点（飽和域の出力抵抗の指標）
+      VA = Id / gds         [V]
+    を求める。チャネル長変調 Id∝(1+λ·Vd) のとき gds≈λ·Id より VA≈1/λ となり、
+    チャネルが長い（λ 小）ほど大きい。真性利得は
+      Av = gm/gds = (gm/Id)·VA
+    と分解でき、効率 gm/Id とアーリー電圧 VA の積で表される。返す辞書:
+      early_voltage_v / gds_s / id_a / gm_s / intrinsic_gain / gm_id_per_v。
+    gds≤0 では VA=inf。
+    """
+    ss = mos_small_signal(wafer, gate_conductor, channel, vg=vg, vd=vd, **mos_kw)
+    gm, gds, id_a = ss["gm_s"], ss["gds_s"], ss["id_a"]
+    va = float(id_a / gds) if gds > 0 else float("inf")
+    gm_id = float(gm / id_a) if id_a > 0 else 0.0
+    return {
+        "early_voltage_v": va,
+        "gds_s": float(gds),
+        "id_a": float(id_a),
+        "gm_s": float(gm),
+        "intrinsic_gain": float(ss["intrinsic_gain"]),
+        "gm_id_per_v": gm_id,
+    }
+
+
 def mos_transfer_characteristics(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vd: float = 1.0, vdd: float = 1.0, vg_min: float = 0.0,
