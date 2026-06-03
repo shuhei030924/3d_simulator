@@ -602,6 +602,8 @@ def verification_section() -> str:
          "Id-Vg から SS=min(ΔVg/Δlog Id)≈n·60mV/dec・Ion・Ioff・Ion/Ioff 比"),
         ("MOS チャネル熱雑音", "mos_thermal_noise",
          "S_id=4kT·γ·gm・入力換算電圧雑音 √(4kTγ/gm)（gm↑で低雑音）"),
+        ("MOS マッチング（Pelgrom）", "mos_mismatch",
+         "σ(ΔVth)=A_VT/√(W·L)・σ(Δβ/β)=A_β/√(W·L)（大面積ほど高マッチング）"),
         ("pn 接合 空乏層容量", "junction_capacitance / junction_cv_curve",
          "ビルトイン電位・空乏層幅・接合容量。1/Cj²-V 直線（C-V プロファイリング）"),
         ("MOS I-V 特性", "mos_drain_current / mos_iv_curve",
