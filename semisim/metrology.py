@@ -2090,6 +2090,7 @@ def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dic
     eps_sio2 = materials.BY_NAME["oxide"].rel_permittivity
 
     d_effs: list[float] = []
+    t_physs: list[float] = []  # 物理膜厚（トンネルリーク評価用）
     gate_cols = np.argwhere((grid == gate.id).any(axis=0))  # (y, x) のリスト
     for y, x in gate_cols:
         col = grid[:, y, x]
@@ -2106,10 +2107,12 @@ def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dic
             continue  # 間に別の導体 → 純粋なゲート誘電体でない
         d_eff = sum(pitch_m / eps_field[z, y, x] for z in between)
         d_effs.append(d_eff)
+        t_physs.append(len(between) * pitch_m)
 
     if not d_effs:
         return {"cox_ff_per_um2": 0.0, "eot_nm": 0.0,
-                "gate_area_um2": 0.0, "total_cap_ff": 0.0}
+                "gate_area_um2": 0.0, "total_cap_ff": 0.0,
+                "phys_thickness_nm": 0.0}
     d_eff_avg = float(np.mean(d_effs))
     gate_area = len(d_effs) * (wafer.config.pitch_um ** 2)
     cox_f_m2 = eps0 / d_eff_avg
@@ -2119,6 +2122,7 @@ def mos_gate_capacitance(wafer: Wafer, gate_conductor, channel="silicon") -> dic
         "eot_nm": float(eps_sio2 * d_eff_avg * 1e9),
         "gate_area_um2": float(gate_area),
         "total_cap_ff": float(cox_ff_um2 * gate_area),
+        "phys_thickness_nm": float(np.mean(t_physs) * 1e9),
     }
 
 
@@ -2128,6 +2132,40 @@ _NI_SI_M3 = 1.0e16            # Si 真性キャリア濃度 [m^-3]（1e10 cm^-3�
 _KT_Q = 0.025852              # 熱電圧 kT/q [V] @300K
 _EPS_SI = 11.7 * 8.854e-12    # Si 誘電率 [F/m]
 _K_B = 1.380649e-23           # ボルツマン定数 [J/K]
+
+
+def gate_tunneling_leakage(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float = 1.0, j0_a_cm2: float = 1.0e3, t_char_nm: float = 0.3,
+) -> dict:
+    """ゲート誘電体の直接トンネルリーク電流と high-k 効果を返す。
+
+    薄いゲート酸化膜を量子トンネルで貫くリーク電流密度は物理膜厚 t_phys に対して
+    指数的に増える:
+      J_g = J0·(Vg)²·exp(−t_phys/t_char)        [A/cm²]
+    （J0=前指数係数, t_char=減衰長 ~0.3nm）。同じ EOT でも high-k 採用で物理膜厚を
+    厚くできるため J_g を桁で下げられる（high-k 採用の主動機）。総リークは
+    ゲート面積を掛ける。返す辞書:
+      jg_a_cm2 / ig_total_a / phys_thickness_nm / eot_nm / gate_area_um2。
+    ゲート誘電体が無ければ全て 0。
+    """
+    if t_char_nm <= 0:
+        raise ValueError("t_char_nm は正の値が必要です。")
+    g = mos_gate_capacitance(wafer, gate_conductor, channel)
+    t_phys = g["phys_thickness_nm"]
+    area_um2 = g["gate_area_um2"]
+    if t_phys <= 0 or area_um2 <= 0:
+        return {"jg_a_cm2": 0.0, "ig_total_a": 0.0, "phys_thickness_nm": 0.0,
+                "eot_nm": float(g["eot_nm"]), "gate_area_um2": float(area_um2)}
+    jg = j0_a_cm2 * (vg ** 2) * float(np.exp(-t_phys / t_char_nm))  # A/cm²
+    area_cm2 = area_um2 * 1e-8  # µm² → cm²
+    return {
+        "jg_a_cm2": float(jg),
+        "ig_total_a": float(jg * area_cm2),
+        "phys_thickness_nm": float(t_phys),
+        "eot_nm": float(g["eot_nm"]),
+        "gate_area_um2": float(area_um2),
+    }
 
 
 def threshold_voltage_v(
