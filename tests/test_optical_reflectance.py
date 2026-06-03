@@ -1,6 +1,4 @@
 """薄膜光学反射率（TMM 垂直入射）のテスト。"""
-import math
-
 import pytest
 
 from semisim import materials
