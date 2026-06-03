@@ -580,6 +580,8 @@ def verification_section() -> str:
         ("配線総合レポート", "interconnect_report",
          "R/C/L/Z0/遅延/電流密度/EM/IRドロップ/断線を1コールで集計"),
         ("ロジックゲート遅延", "gate_switching_delay_ps", "CV/I モデル τ=C·Vdd/I_drive"),
+        ("CMOS 消費電力", "mos_power_dissipation",
+         "動的 P=α·C·Vdd²·f ＋ 静的 P=Ioff·Vdd（周波数で支配項が交代）"),
         ("MOS ゲート容量 / EOT", "mos_gate_capacitance",
          "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),
         ("MOS C-V 特性 / Vth", "mos_cv_curve / threshold_voltage_v",
