@@ -2828,6 +2828,43 @@ def mos_cutoff_frequency(
     }
 
 
+def miller_effect(
+    c_feedback_ff: float, gain: float, *, source_resistance_ohm: float | None = None,
+) -> dict:
+    """ミラー効果による実効入力/出力容量と入力極帯域を返す。
+
+    反転増幅段（電圧利得 −Av）の入出力をまたぐ帰還容量 Cf（ゲート-ドレイン容量
+    など）は、ミラーの定理により入力側で
+      C_in  = Cf·(1 + |Av|)        （ミラー増倍, |Av| 倍に拡大）
+      C_out = Cf·(1 + 1/|Av|)      （出力側はほぼ Cf）
+    に見える。大きな利得ほど入力容量が膨れ、入力極で帯域が制限される。源抵抗 Rs
+    を与えると入力極の −3dB 帯域
+      f_in = 1 / (2π·Rs·C_in)
+    も返す。返す辞書: cin_ff / cout_ff / gain / c_feedback_ff（+ Rs 指定時
+    input_pole_hz）。Cf<0 はエラー。|Av|=0 では C_in=C_out=Cf。
+    """
+    if c_feedback_ff < 0:
+        raise ValueError("帰還容量は非負である必要があります。")
+    av = abs(gain)
+    cin = c_feedback_ff * (1.0 + av)
+    cout = c_feedback_ff * (1.0 + 1.0 / av) if av > 0 else c_feedback_ff
+    out = {
+        "cin_ff": float(cin),
+        "cout_ff": float(cout),
+        "gain": float(gain),
+        "c_feedback_ff": float(c_feedback_ff),
+    }
+    if source_resistance_ohm is not None:
+        if source_resistance_ohm < 0:
+            raise ValueError("源抵抗は非負である必要があります。")
+        cin_f = cin * 1e-15
+        if source_resistance_ohm > 0 and cin_f > 0:
+            out["input_pole_hz"] = float(1.0 / (2.0 * np.pi * source_resistance_ohm * cin_f))
+        else:
+            out["input_pole_hz"] = float("inf")
+    return out
+
+
 def mos_thermal_noise(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vg: float, vd: float, gamma: float = 2.0 / 3.0, temp_k: float = 300.0,
