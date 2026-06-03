@@ -643,6 +643,8 @@ def verification_section() -> str:
          "R=ΣΔz/(k·A) を列毎に算出し並列合成"),
         ("自己発熱 ΔT", "temperature_rise_k / joule_self_heating_k",
          "ΔT=P·Rth, ジュール発熱 P=I²R"),
+        ("熱過渡応答 / 熱時定数", "thermal_time_constant_s / transient_temperature_rise_k",
+         "τ_th=R_th·C_th, ΔT(t)=P·R_th·(1−e^(−t/τ))（t=τ で 63%）"),
         ("熱拡散ソルバ（温度分布）", "temperature_field_2d / peak_temperature_rise_k",
          "∇·(k∇T)=−q で横方向ヒートスプレッディングを解く"),
         ("完全 3D 熱拡散ソルバ", "temperature_field_3d / peak_temperature_rise_3d",
