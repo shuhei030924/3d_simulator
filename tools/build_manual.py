@@ -704,6 +704,20 @@ def _curve_varactor(fname: str) -> None:
     _save_fig(fig, fname)
 
 
+def _curve_tunnel_diode(fname: str) -> None:
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    r = metrology.tunnel_diode_iv()
+    ax.plot(r["voltage_v"], r["current_a"] * 1e3, "C0")
+    ax.plot(r["peak_voltage_v"], r["peak_current_a"] * 1e3, "C1o",
+            label=f"ピーク ({r['peak_voltage_v']:.3f}V)")
+    ax.plot(r["valley_voltage_v"], r["valley_current_a"] * 1e3, "C3o",
+            label=f"谷 ({r['valley_voltage_v']:.3f}V)")
+    ax.axvspan(*r["ndr_v_range"], color="red", alpha=0.08, label="負性抵抗 NDR")
+    _axfmt(ax, "電圧 V [V]", "電流 I [mA]",
+           f"トンネルダイオード I-V（PVCR={r['pvcr']:.1f}）")
+    _save_fig(fig, fname)
+
+
 def _curve_bjt(fname: str) -> None:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
     # Gummel プロット: log Ic・log Ib 対 Vbe（ln βF だけ平行に離れる）
@@ -793,6 +807,11 @@ _DEVICE_CURVES = [
      "log Ic・log Ib が ln(βF) だけ平行に離れた 2 直線になり、右の出力特性は"
      "アーリー効果（基極幅変調）で Ic が Vce とともにわずかに増えます。",
      _curve_bjt),
+    ("char_tunnel", "トンネルダイオード（負性微分抵抗 NDR）",
+     "縮退ドープ pn 接合の帯間トンネル電流が生む N 字 I-V です。ピーク後に電流が"
+     "下がる負性微分抵抗（NDR）領域を経て谷に達し、熱拡散電流で再上昇します。"
+     "ピーク谷電流比 PVCR は発振器/高速スイッチの品質指標です。",
+     _curve_tunnel_diode),
     ("char_diodes", "ショットキーダイオード・アバランシェ増倍",
      "熱電子放出（Richardson 式）のショットキーダイオードは pn 接合より飽和電流が桁違いに"
      "大きく、立ち上がり電圧が低い様子を再現します。右図は降伏前のアバランシェ増倍係数"
@@ -891,6 +910,8 @@ def verification_section() -> str:
          "R=η·λ/1.24 [A/W]・遮断波長 λ_c=hc/Eg（Si 1.107µm で R=0）"),
         ("太陽電池 I-V", "solar_cell_iv",
          "I=IL−Is(T)·(exp(V/nVt)−1)。Voc/Isc/FF/効率, Voc が −2mV/℃ で温度低下"),
+        ("トンネルダイオード", "tunnel_diode_iv",
+         "帯間トンネルの N 字 I-V・負性微分抵抗(NDR)・ピーク谷電流比 PVCR"),
         ("ミラー効果", "miller_effect",
          "C_in=Cf(1+|Av|)・入力極 f_in=1/(2π·Rs·C_in)（利得-帯域トレードオフ）"),
         ("MOS 小信号特性", "mos_small_signal",
