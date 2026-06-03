@@ -704,6 +704,24 @@ def _curve_bjt(fname: str) -> None:
     _save_fig(fig, fname)
 
 
+def _curve_solar_cell(fname: str) -> None:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    # I-V と電力曲線（最大電力点 MPP）
+    r = metrology.solar_cell_iv(photocurrent_a=35e-3, i_sat_a=1e-12)
+    a1.plot(r["v"], r["i"] * 1e3, "C0", label="I-V")
+    a1.plot(r["v"], r["v"] * r["i"] * 1e3, "C1", label="電力 P=V·I")
+    a1.plot(r["v_mp_v"], r["i_mp_a"] * 1e3, "ko", label="MPP")
+    a1.axvline(r["voc_v"], color="gray", ls=":", lw=0.8)
+    _axfmt(a1, "電圧 V [V]", "電流 [mA] / 電力 [mW]",
+           f"太陽電池 I-V (FF={r['fill_factor']:.3f}, η={r['efficiency']*100:.1f}%)")
+    # 温度依存: Voc が下がる（約 −2mV/℃）
+    for temp, c in [(15, "C0"), (45, "C1"), (75, "C2")]:
+        rr = metrology.solar_cell_iv(temperature_c=temp, i_sat_a=1e-12)
+        a2.plot(rr["v"], rr["i"] * 1e3, c, label=f"{temp}℃ (Voc={rr['voc_v']:.3f})")
+    _axfmt(a2, "電圧 V [V]", "電流 [mA]", "温度依存（Voc が −2mV/℃ で低下）")
+    _save_fig(fig, fname)
+
+
 def _curve_miller_photodiode(fname: str) -> None:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
     av = np.linspace(0, 200, 200)
@@ -757,6 +775,11 @@ _DEVICE_CURVES = [
      "大きく、立ち上がり電圧が低い様子を再現します。右図は降伏前のアバランシェ増倍係数"
      "M=1/(1−(V/BV)^n)（V→BV で M→∞）。",
      _curve_diodes),
+    ("char_solar", "太陽電池 I-V（Voc/Isc/FF/効率）",
+     "光生成電流とダイオード暗電流の重ね合わせ I=IL−Is(T)·(exp(V/nVt)−1) です。"
+     "短絡電流 Isc=IL・開放電圧 Voc・最大電力点 MPP・曲線因子 FF・変換効率 η を抽出。"
+     "右図は温度依存で、Is(T)∝T³·exp(−Eg/kT) の増加により Voc が約 −2mV/℃ で下がります。",
+     _curve_solar_cell),
     ("char_miller_pd", "ミラー効果・フォトダイオード応答度",
      "反転増幅段の帰還容量がミラーの定理で入力側に C_in=Cf(1+|Av|) として増倍される様子と、"
      "光検出器の応答度 R=η·λ/1.24（バンドギャップ遮断波長 λ_c で R=0）です。",
@@ -843,6 +866,8 @@ def verification_section() -> str:
          "Miller 式 M=1/(1−(V/BV)^n)。V→BV で M→∞（APD 利得・SOA）"),
         ("フォトダイオード応答度", "photodiode_responsivity",
          "R=η·λ/1.24 [A/W]・遮断波長 λ_c=hc/Eg（Si 1.107µm で R=0）"),
+        ("太陽電池 I-V", "solar_cell_iv",
+         "I=IL−Is(T)·(exp(V/nVt)−1)。Voc/Isc/FF/効率, Voc が −2mV/℃ で温度低下"),
         ("ミラー効果", "miller_effect",
          "C_in=Cf(1+|Av|)・入力極 f_in=1/(2π·Rs·C_in)（利得-帯域トレードオフ）"),
         ("MOS 小信号特性", "mos_small_signal",
