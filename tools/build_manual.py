@@ -686,6 +686,24 @@ def _curve_hall(fname: str) -> None:
     _save_fig(fig, fname)
 
 
+def _curve_varactor(fname: str) -> None:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    # C-V（傾斜係数 m ごと）
+    for m, lab, c in [(1 / 3, "線形傾斜 m=1/3", "C0"),
+                      (0.5, "階段 m=0.5", "C1"), (2.0, "超階段 m=2", "C2")]:
+        r = metrology.varactor_cv(cj0_ff=2.0, vbi=0.7, grading_m=m, vr_max=4.0)
+        a1.plot(r["reverse_bias_v"], r["capacitance_ff"], c,
+                label=f"{lab} (TR={r['tuning_ratio']:.1f})")
+    _axfmt(a1, "逆バイアス Vr [V]", "容量 C [fF]", "バラクタ C-V (C=Cj0/(1+Vr/Vbi)^m)")
+    # チューニングレンジ（容量可変比）対 傾斜係数 m
+    ms = np.linspace(0.3, 2.5, 60)
+    a2.plot(ms, [metrology.varactor_cv(grading_m=mm, vr_max=4.0)["tuning_ratio"]
+                 for mm in ms], "C3")
+    _axfmt(a2, "傾斜係数 m", "容量可変比 TR", "チューニングレンジ（m 大ほど広い）",
+           legend=False)
+    _save_fig(fig, fname)
+
+
 def _curve_bjt(fname: str) -> None:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
     # Gummel プロット: log Ic・log Ib 対 Vbe（ln βF だけ平行に離れる）
@@ -765,6 +783,11 @@ _DEVICE_CURVES = [
      "ホール係数 R_H=1/(qn) はドーピング濃度に反比例（log-log で傾き −1）。"
      "キャリア型（符号）・濃度・移動度を非接触で測る基本手法です。",
      _curve_hall),
+    ("char_varactor", "バラクタ（電圧可変容量）C-V・チューニングレンジ",
+     "逆バイアス接合容量 C=Cj0/(1+Vr/Vbi)^m です。傾斜係数 m（階段 0.5・線形傾斜 1/3・"
+     "超階段 m>0.5）で容量可変比 TR=C(0)/C(Vmax) が決まり、VCO/PLL の発振周波数同調"
+     "範囲（√TR）を与えます。超階段ほど広いチューニングレンジになります。",
+     _curve_varactor),
     ("char_bjt", "バイポーラトランジスタ (BJT) Gummel・出力特性",
      "Ebers–Moll 順活性モデルのコレクタ/ベース電流です。左の Gummel プロットは"
      "log Ic・log Ib が ln(βF) だけ平行に離れた 2 直線になり、右の出力特性は"
@@ -888,6 +911,8 @@ def verification_section() -> str:
          "σ(ΔVth)=A_VT/√(W·L)・σ(Δβ/β)=A_β/√(W·L)（大面積ほど高マッチング）"),
         ("pn 接合 空乏層容量", "junction_capacitance / junction_cv_curve",
          "ビルトイン電位・空乏層幅・接合容量。1/Cj²-V 直線（C-V プロファイリング）"),
+        ("バラクタ（電圧可変容量）", "varactor_cv",
+         "C=Cj0/(1+Vr/Vbi)^m・容量可変比 TR・周波数同調比 √TR（VCO/PLL）"),
         ("pn 接合 降伏電圧", "junction_breakdown_voltage",
          "アバランシェ BV=60·(Eg/1.1)^1.5·(N/1e16)^−¾・降伏時空乏幅/臨界電界"),
         ("MOS I-V 特性", "mos_drain_current / mos_iv_curve",

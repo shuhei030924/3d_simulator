@@ -2781,6 +2781,45 @@ def junction_cv_curve(
     }
 
 
+def varactor_cv(
+    *, cj0_ff: float = 2.0, vbi: float = 0.7, grading_m: float = 0.5,
+    vr_min: float = 0.0, vr_max: float = 4.0, n_points: int = 81,
+) -> dict:
+    """電圧可変容量（バラクタ）の C-V と容量可変比（チューニングレンジ）を返す。
+
+    逆バイアス接合容量は接合の不純物分布で決まる傾斜係数 m を用い
+      C(Vr) = Cj0 / (1 + Vr/Vbi)^m
+    で逆バイアス Vr とともに減る（Cj0=ゼロバイアス容量）。傾斜係数は
+      - m=0.5 : 階段接合（abrupt）
+      - m=1/3 : 線形傾斜接合（linearly-graded）
+      - m>0.5 : 超階段接合（hyperabrupt, 広いチューニングレンジ）
+    で、容量可変比 TR=C(Vr_min)/C(Vr_max) が VCO/PLL の発振周波数同調範囲を決める
+    （f∝1/√C より周波数比は √TR）。返す辞書: reverse_bias_v / capacitance_ff
+    （配列）/ c_max_ff / c_min_ff / tuning_ratio / freq_tuning_ratio / grading_m。
+    Cj0≤0・Vbi≤0 はエラー。
+    """
+    if cj0_ff <= 0 or vbi <= 0:
+        raise ValueError("cj0_ff・vbi は正の値が必要です。")
+    if grading_m <= 0:
+        raise ValueError("傾斜係数 m は正の値が必要です。")
+    if vr_min < 0 or vr_max <= vr_min:
+        raise ValueError("逆バイアス範囲が不正です（0≤vr_min<vr_max）。")
+    vr = np.linspace(vr_min, vr_max, n_points)
+    cap = cj0_ff / (1.0 + vr / vbi) ** grading_m
+    c_max = float(cap[0])   # 最小逆バイアスで最大容量
+    c_min = float(cap[-1])  # 最大逆バイアスで最小容量
+    tr = c_max / c_min if c_min > 0 else float("inf")
+    return {
+        "reverse_bias_v": vr,
+        "capacitance_ff": cap,
+        "c_max_ff": c_max,
+        "c_min_ff": c_min,
+        "tuning_ratio": float(tr),
+        "freq_tuning_ratio": float(np.sqrt(tr)),
+        "grading_m": float(grading_m),
+    }
+
+
 def mos_drain_current(
     wafer: Wafer, gate_conductor, channel="silicon", *, vg: float, vd: float,
     doping_cm3: float = 1.0e17, vfb: float = 0.0, mobility_cm2_vs: float = 450.0,
