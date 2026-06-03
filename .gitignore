@@ -26,3 +26,6 @@ docs/verify/
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude Code ローカル設定
+.claude/
