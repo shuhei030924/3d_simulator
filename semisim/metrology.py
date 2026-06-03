@@ -2445,6 +2445,37 @@ def junction_breakdown_voltage(
     }
 
 
+def avalanche_multiplication(
+    reverse_bias_v: float, breakdown_v: float, *, miller_exponent: float = 4.0
+) -> dict:
+    """アバランシェ増倍係数 M（Miller の経験式）を返す。
+
+    逆バイアス V が降伏電圧 BV に近づくと、空乏層内の衝突電離で 1 つのキャリアが
+    雪崩的に増える。Miller の経験式
+      M = 1 / (1 − (V/BV)^n)
+    （n=Miller 指数, 接合種別で 3〜6, 既定 4）で増倍率を表す。V≪BV で M→1
+    （増倍なし）、V→BV で M→∞（降伏）。アバランシェフォトダイオード(APD)の利得や
+    BJT の BVceo・パワー素子の安全動作領域(SOA)を決める。返す辞書:
+      multiplication / reverse_bias_v / breakdown_v / v_over_bv。
+    V≥BV では M=inf、V<0 や BV≤0 はエラー。
+    """
+    if breakdown_v <= 0:
+        raise ValueError("降伏電圧は正の値が必要です。")
+    if reverse_bias_v < 0:
+        raise ValueError("逆バイアスは非負である必要があります。")
+    ratio = reverse_bias_v / breakdown_v
+    if ratio >= 1.0:
+        m = float("inf")
+    else:
+        m = 1.0 / (1.0 - ratio ** miller_exponent)
+    return {
+        "multiplication": float(m),
+        "reverse_bias_v": float(reverse_bias_v),
+        "breakdown_v": float(breakdown_v),
+        "v_over_bv": float(ratio),
+    }
+
+
 # Varshni バンドギャップ温度依存の Si パラメータ
 #   Eg(T)=Eg(0)−α·T²/(T+β)
 _EG0_SI_EV = 1.166      # Eg(0K) [eV]
