@@ -2497,6 +2497,38 @@ def mos_thermal_noise(
     }
 
 
+def mos_mismatch(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, avt_mv_um: float = 3.0, abeta_pct_um: float = 1.0, n_sigma: float = 3.0,
+) -> dict:
+    """Pelgrom 則による MOS のしきい値/電流ばらつき σ を返す。
+
+    対向ペア素子の特性ばらつきは活性面積に反比例して小さくなる（平均化効果）:
+      σ(ΔVth)   = A_VT  / √(W·L)        （しきい値ミスマッチ, mV）
+      σ(Δβ/β)   = A_β   / √(W·L)        （電流係数ミスマッチ, %）
+    ここで W·L はゲート活性面積（mos_gate_capacitance の gate_area_um2）。
+    A_VT・A_β はプロセス固有のマッチング係数。返す辞書:
+      sigma_vth_mv / sigma_beta_pct / gate_area_um2 / nsigma_vth_mv
+      （= n_sigma·σ(ΔVth), 最悪オフセット見積り）。
+    面積が 4 倍なら σ は半分（√面積で改善）。ゲート面積 0 では σ=inf。
+    """
+    if avt_mv_um < 0 or abeta_pct_um < 0:
+        raise ValueError("マッチング係数は非負である必要があります。")
+    area = mos_gate_capacitance(wafer, gate_conductor, channel)["gate_area_um2"]
+    if area <= 0:
+        return {"sigma_vth_mv": float("inf"), "sigma_beta_pct": float("inf"),
+                "gate_area_um2": 0.0, "nsigma_vth_mv": float("inf")}
+    sqrt_wl = np.sqrt(area)
+    sigma_vth = avt_mv_um / sqrt_wl
+    sigma_beta = abeta_pct_um / sqrt_wl
+    return {
+        "sigma_vth_mv": float(sigma_vth),
+        "sigma_beta_pct": float(sigma_beta),
+        "gate_area_um2": float(area),
+        "nsigma_vth_mv": float(n_sigma * sigma_vth),
+    }
+
+
 def gate_switching_delay_ps(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, load_cap_ff: float, vdd: float = 1.0, **mos_kw,
