@@ -2168,6 +2168,48 @@ def bjt_currents(
     }
 
 
+def hall_effect(
+    doping_cm3: float, *, carrier: str = "electron", current_a: float = 1.0e-3,
+    b_field_t: float = 0.5, thickness_um: float = 1.0, hall_factor: float = 1.0,
+) -> dict:
+    """ホール効果（ホール係数・ホール電圧・ホール移動度）を返す。
+
+    磁場 B 中を電流 I が流れると、ローレンツ力でキャリアが偏向し、電流・磁場に
+    直交する向きにホール電圧が生じる。ホール係数とホール電圧は
+      R_H = r_H/(q·n)（n 型は負, p 型は正）,  V_H = R_H·I·B / t
+    （n=多数キャリア濃度, t=試料厚, r_H=ホール散乱係数）。キャリア濃度・型を
+    非接触で測る基本手法で、ホール移動度 µ_H=|R_H|·σ=r_H·µ も得られる
+    （導電率 σ は bulk_resistivity_ohm_cm 由来）。V_H は B・I に比例し n・t に反比例。
+    返す辞書: hall_voltage_v / hall_coefficient_m3_c / hall_coefficient_cm3_c /
+    hall_mobility_cm2_vs / carrier_sign / sheet_density_cm2。N≤0 ではゼロ。
+    """
+    if carrier not in ("electron", "hole"):
+        raise ValueError("carrier は 'electron' または 'hole' を指定してください。")
+    if thickness_um <= 0:
+        raise ValueError("試料厚は正の値が必要です。")
+    if doping_cm3 <= 0:
+        return {"hall_voltage_v": 0.0, "hall_coefficient_m3_c": 0.0,
+                "hall_coefficient_cm3_c": 0.0, "hall_mobility_cm2_vs": 0.0,
+                "carrier_sign": -1 if carrier == "electron" else 1,
+                "sheet_density_cm2": 0.0}
+    sign = -1.0 if carrier == "electron" else 1.0
+    n_m3 = doping_cm3 * 1e6
+    r_h = sign * hall_factor / (_Q * n_m3)  # m³/C
+    t_m = thickness_um * 1e-6
+    v_h = r_h * current_a * b_field_t / t_m  # V
+    sigma_s_cm = bulk_resistivity_ohm_cm(doping_cm3, carrier=carrier)["conductivity_s_cm"]
+    # µ_H = |R_H|·σ。R_H[m³/C]→[cm³/C]×σ[S/cm] = cm²/(V·s)
+    mu_h = abs(r_h) * 1e6 * sigma_s_cm
+    return {
+        "hall_voltage_v": float(v_h),
+        "hall_coefficient_m3_c": float(r_h),
+        "hall_coefficient_cm3_c": float(r_h * 1e6),
+        "hall_mobility_cm2_vs": float(mu_h),
+        "carrier_sign": int(sign),
+        "sheet_density_cm2": float(doping_cm3 * thickness_um * 1e-4),
+    }
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:
