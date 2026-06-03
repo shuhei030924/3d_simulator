@@ -669,6 +669,23 @@ def _curve_diodes(fname: str) -> None:
     _save_fig(fig, fname)
 
 
+def _curve_hall(fname: str) -> None:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    # ホール電圧 V_H 対 磁場 B（ドーピングごとに傾き 1/n の直線）
+    b = np.linspace(0, 1.0, 100)
+    for nd, c in [(1e15, "C0"), (1e16, "C1"), (1e17, "C2")]:
+        a1.plot(b, [metrology.hall_effect(nd, b_field_t=bb)["hall_voltage_v"] * 1e3
+                    for bb in b], c, label=f"n={nd:.0e}")
+    _axfmt(a1, "磁場 B [T]", "ホール電圧 V_H [mV]", "ホール電圧 V_H=R_H·I·B/t")
+    # ホール係数 |R_H| 対ドーピング（1/n の直線, log-log）
+    n_arr = np.logspace(14, 19, 120)
+    a2.loglog(n_arr, [abs(metrology.hall_effect(n)["hall_coefficient_cm3_c"])
+                      for n in n_arr], "C3")
+    _axfmt(a2, "ドーピング n [cm^-3]", "|R_H| [cm3/C]",
+           "ホール係数 |R_H|=1/(qn)", legend=False, which="both")
+    _save_fig(fig, fname)
+
+
 def _curve_bjt(fname: str) -> None:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
     # Gummel プロット: log Ic・log Ib 対 Vbe（ln βF だけ平行に離れる）
@@ -725,6 +742,11 @@ _DEVICE_CURVES = [
      "アインシュタイン関係 D=µ·kT/q（電子≈35 cm²/s）、誘電遮蔽長 L_D=√(εs·kT/q²N)"
      "（N=1e16 で約 40nm, ∝1/√N）、少数キャリア拡散長 L=√(Dτ)（∝√τ）です。",
      _curve_transport),
+    ("char_hall", "ホール効果（ホール電圧・ホール係数）",
+     "磁場中の電流に直交して生じるホール電圧 V_H=R_H·I·B/t です。B に比例し、"
+     "ホール係数 R_H=1/(qn) はドーピング濃度に反比例（log-log で傾き −1）。"
+     "キャリア型（符号）・濃度・移動度を非接触で測る基本手法です。",
+     _curve_hall),
     ("char_bjt", "バイポーラトランジスタ (BJT) Gummel・出力特性",
      "Ebers–Moll 順活性モデルのコレクタ/ベース電流です。左の Gummel プロットは"
      "log Ic・log Ib が ln(βF) だけ平行に離れた 2 直線になり、右の出力特性は"
@@ -849,6 +871,8 @@ def verification_section() -> str:
          "断面積を考慮した直列抵抗・薄膜評価"),
         ("ドーピング依存移動度 / 抵抗率", "carrier_mobility / bulk_resistivity_ohm_cm",
          "Caughey–Thomas µ(N) と ρ=1/(qNµ)（n@1e16→0.5 Ω·cm, Irvin 曲線）"),
+        ("ホール効果", "hall_effect",
+         "R_H=1/(qn)・V_H=R_H·I·B/t・µ_H=|R_H|·σ（キャリア型/濃度/移動度の非接触測定）"),
         ("真性キャリア濃度 / バンドギャップ", "intrinsic_carrier_concentration / bandgap_ev",
          "ni(T)∝T^1.5·exp(−Eg/2kT)（300K で 1e10）・Varshni Eg(T)"),
         ("拡散係数 / デバイ長 / 拡散長", "diffusion_coefficient / debye_length / diffusion_length",
