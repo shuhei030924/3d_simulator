@@ -596,6 +596,8 @@ def verification_section() -> str:
          "Shockley 式。順方向指数・逆方向 −Is 飽和・直列抵抗で高電流飽和"),
         ("MOS 小信号特性", "mos_small_signal",
          "gm=∂Id/∂Vg・gds=∂Id/∂Vd・真性利得 Av=gm/gds（飽和域で高利得）"),
+        ("MOS 遮断周波数 fT", "mos_cutoff_frequency",
+         "fT=gm/(2π·Cgg)・トランジット時間 τ=Cgg/gm（RF/アナログ FoM）"),
         ("pn 接合 空乏層容量", "junction_capacitance / junction_cv_curve",
          "ビルトイン電位・空乏層幅・接合容量。1/Cj²-V 直線（C-V プロファイリング）"),
         ("MOS I-V 特性", "mos_drain_current / mos_iv_curve",
