@@ -2381,6 +2381,37 @@ def mos_small_signal(
     }
 
 
+def mos_cutoff_frequency(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float, vd: float, **mos_kw,
+) -> dict:
+    """MOS の電流利得遮断周波数 fT（RF/アナログの最重要 FoM, Hz）を返す。
+
+    小信号 gm（mos_small_signal）とゲート総容量 Cgg（mos_gate_capacitance の
+    total_cap_ff）から、電流利得が 1 になる周波数
+      fT = gm / (2π·Cgg)
+    を求める。トランジット時間 τ=1/(2π·fT)=Cgg/gm も併せて返す。gm が大きい
+    （過剰電圧大・W/L 大）ほど、また Cgg が小さい（ゲート面積小・EOT 厚）ほど
+    高速。返す辞書: ft_hz / ft_ghz / gm_s / cgg_ff / transit_time_ps。
+    gm≤0 または Cgg≤0 では fT=0・τ=inf。
+    """
+    ss = mos_small_signal(wafer, gate_conductor, channel, vg=vg, vd=vd, **mos_kw)
+    gm = ss["gm_s"]
+    cgg_ff = mos_gate_capacitance(wafer, gate_conductor, channel)["total_cap_ff"]
+    cgg_f = cgg_ff * 1e-15
+    if gm <= 0 or cgg_f <= 0:
+        return {"ft_hz": 0.0, "ft_ghz": 0.0, "gm_s": float(gm),
+                "cgg_ff": float(cgg_ff), "transit_time_ps": float("inf")}
+    ft = gm / (2.0 * np.pi * cgg_f)
+    return {
+        "ft_hz": float(ft),
+        "ft_ghz": float(ft / 1e9),
+        "gm_s": float(gm),
+        "cgg_ff": float(cgg_ff),
+        "transit_time_ps": float(cgg_f / gm * 1e12),
+    }
+
+
 def gate_switching_delay_ps(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, load_cap_ff: float, vdd: float = 1.0, **mos_kw,
