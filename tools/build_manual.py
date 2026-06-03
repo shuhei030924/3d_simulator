@@ -582,6 +582,8 @@ def verification_section() -> str:
         ("ロジックゲート遅延", "gate_switching_delay_ps", "CV/I モデル τ=C·Vdd/I_drive"),
         ("CMOS 消費電力", "mos_power_dissipation",
          "動的 P=α·C·Vdd²·f ＋ 静的 P=Ioff·Vdd（周波数で支配項が交代）"),
+        ("リングオシレータ周波数", "ring_oscillator_frequency",
+         "f_osc=1/(2·N·τ_pd)（段数 N に反比例・素子速度の標準テスト回路）"),
         ("MOS ゲート容量 / EOT", "mos_gate_capacitance",
          "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),
         ("MOS C-V 特性 / Vth", "mos_cv_curve / threshold_voltage_v",
