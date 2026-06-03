@@ -584,6 +584,8 @@ def verification_section() -> str:
          "動的 P=α·C·Vdd²·f ＋ 静的 P=Ioff·Vdd（周波数で支配項が交代）"),
         ("リングオシレータ周波数", "ring_oscillator_frequency",
          "f_osc=1/(2·N·τ_pd)（段数 N に反比例・素子速度の標準テスト回路）"),
+        ("スルーレート / 全電力帯域", "slew_rate",
+         "SR=I_drive/C_load・f_FP=SR/(2π·V_peak)（大信号アナログ FoM）"),
         ("MOS ゲート容量 / EOT", "mos_gate_capacitance",
          "Cox=ε0/Σ(tᵢ/εrᵢ), EOT。high-k で EOT 薄化"),
         ("MOS C-V 特性 / Vth", "mos_cv_curve / threshold_voltage_v",
