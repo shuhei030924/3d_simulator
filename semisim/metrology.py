@@ -2379,6 +2379,47 @@ def junction_breakdown_voltage(
     }
 
 
+# Varshni バンドギャップ温度依存の Si パラメータ
+#   Eg(T)=Eg(0)−α·T²/(T+β)
+_EG0_SI_EV = 1.166      # Eg(0K) [eV]
+_VARSHNI_ALPHA = 4.73e-4  # [eV/K]
+_VARSHNI_BETA = 636.0    # [K]
+
+
+def bandgap_ev(temp_k: float = 300.0) -> float:
+    """Si のバンドギャップ Eg(T)（eV, Varshni 式）を返す。
+
+    Eg(T)=Eg(0)−α·T²/(T+β)（Si: Eg(0)=1.166eV, α=4.73e-4eV/K, β=636K）。
+    温度上昇で格子膨張・電子格子相互作用により Eg は単調に縮小し、
+    Eg(300K)≈1.12eV（コード内の既定値と一致）。T≤0 では Eg(0)。
+    """
+    if temp_k <= 0:
+        return float(_EG0_SI_EV)
+    return float(_EG0_SI_EV - _VARSHNI_ALPHA * temp_k ** 2 / (temp_k + _VARSHNI_BETA))
+
+
+def intrinsic_carrier_concentration(temp_k: float = 300.0) -> dict:
+    """Si の真性キャリア濃度 ni(T)（cm⁻³）を返す。
+
+    状態密度 Nc,Nv∝T^1.5 とバンドギャップ Eg(T)（bandgap_ev, Varshni）から
+      ni(T) = √(Nc·Nv)·exp(−Eg/2kT) ∝ T^1.5·exp(−Eg(T)/2kT)
+    を、300K で ni=1×10¹⁰ cm⁻³（コード内の _NI_SI_M3 と整合）となるよう規格化:
+      ni(T) = 1e10·(T/300)^1.5·exp( Eg(300)/2k·300 − Eg(T)/2kT )
+    温度上昇で指数的に急増（室温付近で約 8K ごとに倍増）し、接合リーク・DRAM
+    リテンション・デバイスオフ電流の温度加速を支配する。返す辞書:
+      ni_cm3 / eg_ev / temp_k。T≤0 では ni=0。
+    """
+    if temp_k <= 0:
+        return {"ni_cm3": 0.0, "eg_ev": float(_EG0_SI_EV), "temp_k": float(temp_k)}
+    t0 = 300.0
+    eg_t = bandgap_ev(temp_k)
+    eg_0 = bandgap_ev(t0)
+    expo = (eg_0 / (2.0 * _K_BOLTZMANN_EV * t0)
+            - eg_t / (2.0 * _K_BOLTZMANN_EV * temp_k))
+    ni = 1.0e10 * (temp_k / t0) ** 1.5 * np.exp(expo)
+    return {"ni_cm3": float(ni), "eg_ev": float(eg_t), "temp_k": float(temp_k)}
+
+
 def junction_leakage_a(
     area_um2: float, temperature_c: float = 27.0,
     *, j0_a_per_um2: float = 1.0e-15, eg_ev: float = 1.12,
