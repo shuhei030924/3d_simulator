@@ -604,6 +604,8 @@ def verification_section() -> str:
          "gm=∂Id/∂Vg・gds=∂Id/∂Vd・真性利得 Av=gm/gds（飽和域で高利得）"),
         ("MOS gm/Id 効率", "mos_gm_id_efficiency",
          "gm/Id（弱反転で最大 1/(n·Vt)・強反転で低下, gm/Id 設計法）"),
+        ("MOS アーリー電圧 VA", "early_voltage",
+         "VA=Id/gds≈1/λ・真性利得分解 Av=(gm/Id)·VA"),
         ("MOS 遮断周波数 fT", "mos_cutoff_frequency",
          "fT=gm/(2π·Cgg)・トランジット時間 τ=Cgg/gm（RF/アナログ FoM）"),
         ("MOS 伝達特性 / SS", "mos_transfer_characteristics",
