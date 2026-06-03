@@ -2820,6 +2820,39 @@ def ring_oscillator_frequency(
     }
 
 
+def slew_rate(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vdd: float, load_cap_ff: float, v_peak: float | None = None, **mos_kw,
+) -> dict:
+    """アナログ出力段のスルーレート SR と全電力帯域 f_FP を返す。
+
+    出力が電流制限（駆動 MOS の飽和電流 I_drive=mos_drain_current(Vg=Vd=Vdd)）で
+    負荷容量を充放電するときの最大電圧変化率
+      SR = I_drive / C_load            [V/s]（=V/µs で返す）
+    と、振幅 V_peak の正弦波をスルー歪み無く出力できる上限周波数（全電力帯域）
+      f_FP = SR / (2π·V_peak)          [Hz]
+    を求める。駆動電流が大きい・負荷容量が小さいほど高速。返す辞書:
+      slew_rate_v_per_us / full_power_bw_hz / drive_current_a / load_cap_ff /
+      v_peak_v。I_drive=0 では SR=0・f_FP=0。V_peak 既定は Vdd/2。
+    """
+    if load_cap_ff <= 0:
+        raise ValueError("負荷容量は正の値が必要です。")
+    vp = vdd / 2.0 if v_peak is None else float(v_peak)
+    if vp <= 0:
+        raise ValueError("v_peak は正の値が必要です。")
+    i_drive = float(mos_drain_current(wafer, gate_conductor, channel,
+                                      vg=vdd, vd=vdd, **mos_kw))
+    sr_v_s = i_drive / (load_cap_ff * 1e-15)  # V/s
+    f_fp = sr_v_s / (2.0 * np.pi * vp) if i_drive > 0 else 0.0
+    return {
+        "slew_rate_v_per_us": float(sr_v_s / 1e6),
+        "full_power_bw_hz": float(f_fp),
+        "drive_current_a": float(i_drive),
+        "load_cap_ff": float(load_cap_ff),
+        "v_peak_v": float(vp),
+    }
+
+
 def mos_power_dissipation(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vdd: float, freq_hz: float, load_cap_ff: float,
