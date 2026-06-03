@@ -600,6 +600,8 @@ def verification_section() -> str:
          "Shockley 式。順方向指数・逆方向 −Is 飽和・直列抵抗で高電流飽和"),
         ("MOS 小信号特性", "mos_small_signal",
          "gm=∂Id/∂Vg・gds=∂Id/∂Vd・真性利得 Av=gm/gds（飽和域で高利得）"),
+        ("MOS gm/Id 効率", "mos_gm_id_efficiency",
+         "gm/Id（弱反転で最大 1/(n·Vt)・強反転で低下, gm/Id 設計法）"),
         ("MOS 遮断周波数 fT", "mos_cutoff_frequency",
          "fT=gm/(2π·Cgg)・トランジット時間 τ=Cgg/gm（RF/アナログ FoM）"),
         ("MOS 伝達特性 / SS", "mos_transfer_characteristics",
