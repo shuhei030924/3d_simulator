@@ -2864,6 +2864,47 @@ def max_stress_concentration(wafer: Wafer) -> dict:
     }
 
 
+def thermal_mismatch_stress(
+    wafer: Wafer, *, delta_t_k: float, reference: str = "silicon",
+    poisson: float = 0.25,
+) -> dict:
+    """CTE 不整合による熱応力 σ=M·(α_ref−α_film)·ΔT を材料別に返す。
+
+    各膜は基板（reference, 既定 silicon）の熱膨張に拘束されるため、温度変化 ΔT
+    （= T_最終 − T_成膜, 冷却なら負）で二軸熱応力
+      σ_film = [E_film/(1−ν)]·(α_ref − α_film)·ΔT
+    が生じる。α は線膨張係数（cte_ppm_k）、E はヤング率（youngs_modulus_gpa）、
+    M=E/(1−ν) は二軸弾性率。冷却（ΔT<0）では高 CTE 膜（Al 等）が引張応力に、
+    加熱では圧縮になる。返す辞書:
+      stress_by_material（{材料名: σ_MPa}）/ max_abs_material / max_abs_stress_mpa /
+      delta_t_k。基板/未設定（E・CTE=0）材料は対象外。固体が無ければ空。
+    """
+    ref = materials.get(reference)
+    a_ref = ref.cte_ppm_k * 1e-6
+    biaxial = 1.0 / (1.0 - poisson)
+    grid = wafer.grid
+    present = set(np.unique(grid)) - {materials.AIR, ref.id}
+    stress_by_material: dict[str, float] = {}
+    for mid in present:
+        m = materials.BY_ID.get(int(mid))
+        if m is None or m.youngs_modulus_gpa <= 0:
+            continue
+        a_f = m.cte_ppm_k * 1e-6
+        e_mpa = m.youngs_modulus_gpa * 1e3  # GPa → MPa
+        sigma = e_mpa * biaxial * (a_ref - a_f) * delta_t_k
+        stress_by_material[m.name] = float(sigma)
+    if not stress_by_material:
+        return {"stress_by_material": {}, "max_abs_material": None,
+                "max_abs_stress_mpa": 0.0, "delta_t_k": float(delta_t_k)}
+    worst = max(stress_by_material, key=lambda k: abs(stress_by_material[k]))
+    return {
+        "stress_by_material": stress_by_material,
+        "max_abs_material": worst,
+        "max_abs_stress_mpa": float(stress_by_material[worst]),
+        "delta_t_k": float(delta_t_k),
+    }
+
+
 def _solve_slice_capacitance(
     eps_diel: np.ndarray, is_a: np.ndarray, is_b: np.ndarray, is_cond: np.ndarray
 ) -> float:

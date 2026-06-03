@@ -35,6 +35,10 @@ class Material:
         volumetric_heat_capacity_j_m3k: 体積熱容量 ρ·c_p（J/m³·K）。熱時定数
             τ_th=R_th·C_th の過渡熱応答に使用。0=未設定（熱容量計算で空気相当
             ~1.2e3 扱い）。
+        cte_ppm_k: 線膨張係数 CTE（ppm/K）。CTE 不整合による熱応力
+            σ=E/(1−ν)·Δα·ΔT の評価に使用。0=未設定。
+        youngs_modulus_gpa: ヤング率（GPa）。熱応力・機械応力の評価に使用。
+            0=未設定（熱応力対象外）。
     """
 
     id: int
@@ -52,6 +56,8 @@ class Material:
     thermal_conductivity_w_mk: float = 0.0
     tcr_per_k: float = 0.0
     volumetric_heat_capacity_j_m3k: float = 0.0
+    cte_ppm_k: float = 0.0
+    youngs_modulus_gpa: float = 0.0
 
 
 # --- 標準材料テーブル -------------------------------------------------------
@@ -62,52 +68,68 @@ _MATERIALS: list[Material] = [
              thermal_conductivity_w_mk=0.026, volumetric_heat_capacity_j_m3k=1.2e3),
     Material(1, "silicon", "シリコン基板", (0.45, 0.45, 0.50), etchable=False,
              rel_permittivity=11.7, thermal_conductivity_w_mk=150.0,
-             volumetric_heat_capacity_j_m3k=1.63e6),
+             volumetric_heat_capacity_j_m3k=1.63e6, cte_ppm_k=2.6,
+             youngs_modulus_gpa=165.0),
     Material(2, "oxide", "酸化膜 (SiO2)", (0.40, 0.78, 0.95), stress_mpa=-300.0,
              rel_permittivity=3.9, breakdown_field_mv_cm=10.0,
-             thermal_conductivity_w_mk=1.4, volumetric_heat_capacity_j_m3k=1.62e6),
+             thermal_conductivity_w_mk=1.4, volumetric_heat_capacity_j_m3k=1.62e6,
+             cte_ppm_k=0.5, youngs_modulus_gpa=70.0),
     Material(3, "poly", "ポリシリコン", (0.80, 0.25, 0.25), stress_mpa=-200.0,
-             thermal_conductivity_w_mk=30.0, volumetric_heat_capacity_j_m3k=1.63e6),
+             thermal_conductivity_w_mk=30.0, volumetric_heat_capacity_j_m3k=1.63e6,
+             cte_ppm_k=2.6, youngs_modulus_gpa=160.0),
     Material(4, "nitride", "窒化膜 (Si3N4)", (0.30, 0.72, 0.40), stress_mpa=1000.0,
              rel_permittivity=7.5, breakdown_field_mv_cm=10.0,
-             thermal_conductivity_w_mk=30.0, volumetric_heat_capacity_j_m3k=2.1e6),
+             thermal_conductivity_w_mk=30.0, volumetric_heat_capacity_j_m3k=2.1e6,
+             cte_ppm_k=3.3, youngs_modulus_gpa=250.0),
     Material(5, "photoresist", "フォトレジスト", (0.95, 0.82, 0.25), opacity=0.85, is_resist=True,
              rel_permittivity=3.0, thermal_conductivity_w_mk=0.2,
-             volumetric_heat_capacity_j_m3k=1.5e6),
+             volumetric_heat_capacity_j_m3k=1.5e6, cte_ppm_k=50.0,
+             youngs_modulus_gpa=5.0),
     Material(6, "metal_al", "金属 (Al)", (0.82, 0.82, 0.88), stress_mpa=100.0,
              resistivity_ohm_um=0.0265, em_jmax_a_cm2=2.0e5,
              thermal_conductivity_w_mk=237.0, tcr_per_k=0.0043,
-             volumetric_heat_capacity_j_m3k=2.42e6),
+             volumetric_heat_capacity_j_m3k=2.42e6, cte_ppm_k=23.1,
+             youngs_modulus_gpa=70.0),
     Material(7, "metal_cu", "金属 (Cu)", (0.85, 0.52, 0.25), stress_mpa=200.0,
              resistivity_ohm_um=0.0168, em_jmax_a_cm2=2.0e6,
              thermal_conductivity_w_mk=400.0, tcr_per_k=0.0039,
-             volumetric_heat_capacity_j_m3k=3.45e6),
+             volumetric_heat_capacity_j_m3k=3.45e6, cte_ppm_k=16.5,
+             youngs_modulus_gpa=130.0),
     Material(8, "tungsten", "タングステン (W)", (0.55, 0.55, 0.60), stress_mpa=1200.0,
              resistivity_ohm_um=0.056, em_jmax_a_cm2=1.0e7,
              thermal_conductivity_w_mk=170.0, tcr_per_k=0.0045,
-             volumetric_heat_capacity_j_m3k=2.58e6),
+             volumetric_heat_capacity_j_m3k=2.58e6, cte_ppm_k=4.5,
+             youngs_modulus_gpa=410.0),
     Material(9, "doped_n", "n型拡散層", (0.30, 0.45, 0.85), resistivity_ohm_um=1000.0,
-             thermal_conductivity_w_mk=100.0, volumetric_heat_capacity_j_m3k=1.63e6),
+             thermal_conductivity_w_mk=100.0, volumetric_heat_capacity_j_m3k=1.63e6,
+             cte_ppm_k=2.6, youngs_modulus_gpa=165.0),
     Material(10, "doped_p", "p型拡散層", (0.85, 0.35, 0.55), resistivity_ohm_um=2000.0,
-             thermal_conductivity_w_mk=100.0, volumetric_heat_capacity_j_m3k=1.63e6),
+             thermal_conductivity_w_mk=100.0, volumetric_heat_capacity_j_m3k=1.63e6,
+             cte_ppm_k=2.6, youngs_modulus_gpa=165.0),
     Material(11, "tin", "バリア (TiN)", (0.65, 0.62, 0.45), stress_mpa=-500.0,
              resistivity_ohm_um=0.25, thermal_conductivity_w_mk=30.0,
-             volumetric_heat_capacity_j_m3k=3.2e6),
+             volumetric_heat_capacity_j_m3k=3.2e6, cte_ppm_k=9.4,
+             youngs_modulus_gpa=600.0),
     Material(12, "low_k", "Low-k 絶縁膜", (0.55, 0.80, 0.78), stress_mpa=-60.0,
              rel_permittivity=2.5, breakdown_field_mv_cm=4.0,
-             thermal_conductivity_w_mk=0.3, volumetric_heat_capacity_j_m3k=1.5e6),
+             thermal_conductivity_w_mk=0.3, volumetric_heat_capacity_j_m3k=1.5e6,
+             cte_ppm_k=20.0, youngs_modulus_gpa=10.0),
     Material(13, "epi_si", "エピ層 (Si)", (0.55, 0.55, 0.62), etchable=False,
              rel_permittivity=11.7, thermal_conductivity_w_mk=150.0,
-             volumetric_heat_capacity_j_m3k=1.63e6),
+             volumetric_heat_capacity_j_m3k=1.63e6, cte_ppm_k=2.6,
+             youngs_modulus_gpa=165.0),
     Material(14, "hafnia", "High-k (HfO2)", (0.72, 0.45, 0.80), stress_mpa=500.0,
              rel_permittivity=25.0, breakdown_field_mv_cm=5.0,
-             thermal_conductivity_w_mk=23.0, volumetric_heat_capacity_j_m3k=2.2e6),
+             thermal_conductivity_w_mk=23.0, volumetric_heat_capacity_j_m3k=2.2e6,
+             cte_ppm_k=5.3, youngs_modulus_gpa=220.0),
     Material(15, "tan", "バリア (TaN)", (0.50, 0.48, 0.55), stress_mpa=-1000.0,
              resistivity_ohm_um=2.5, thermal_conductivity_w_mk=12.0,
-             volumetric_heat_capacity_j_m3k=2.7e6),
+             volumetric_heat_capacity_j_m3k=2.7e6, cte_ppm_k=3.6,
+             youngs_modulus_gpa=300.0),
     Material(16, "silicide", "シリサイド (NiSi)", (0.78, 0.70, 0.30), stress_mpa=500.0,
              resistivity_ohm_um=0.15, thermal_conductivity_w_mk=50.0,
-             volumetric_heat_capacity_j_m3k=3.5e6),
+             volumetric_heat_capacity_j_m3k=3.5e6, cte_ppm_k=12.0,
+             youngs_modulus_gpa=130.0),
 ]
 
 # 名前 / ID での高速参照
