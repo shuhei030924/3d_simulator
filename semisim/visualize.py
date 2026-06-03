@@ -131,5 +131,5 @@ def export_stl(
     solid = solid_unstructured(
         wafer, include_resist=include_resist, hidden_ids=hidden_ids
     )
-    surface = solid.extract_surface().triangulate()
+    surface = solid.extract_surface(algorithm="dataset_surface").triangulate()
     surface.save(path)
