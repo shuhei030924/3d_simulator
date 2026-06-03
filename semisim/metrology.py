@@ -2131,6 +2131,43 @@ def photodiode_responsivity(
     }
 
 
+def bjt_currents(
+    vbe: float, *, vce: float = 1.0, is_a: float = 1.0e-16, beta_f: float = 100.0,
+    early_v: float = 50.0, ideality: float = 1.0, temp_k: float = 300.0,
+) -> dict:
+    """バイポーラトランジスタ(BJT)の各電流・電流利得・小信号量を返す（順活性）。
+
+    Ebers–Moll/Gummel の順活性モデルで、ベース-エミッタ電圧 Vbe に対し
+      Ic = Is·(exp(Vbe/(n·Vt))−1)·(1 + Vce/VA)    （アーリー効果込みコレクタ電流）
+      Ib = Is/βF·(exp(Vbe/(n·Vt))−1)               （ベース電流, βF=順方向電流利得）
+      β  = Ic/Ib = βF·(1 + Vce/VA)                  （実効電流利得）
+    を求める。Vt=kT/q。アーリー電圧 VA は出力コンダクタンスを与え、Vce を上げると
+    Ic がわずかに増える（基極幅変調）。小信号 gm=Ic/Vt・出力抵抗 ro=VA/Ic も返す。
+    Gummel プロット（log Ic・log Ib 対 Vbe）は ln(βF) だけ平行に離れた 2 直線になる。
+    返す辞書: ic_a / ib_a / beta / gm_s / ro_ohm / vt_v。
+    """
+    if is_a <= 0 or beta_f <= 0 or early_v <= 0:
+        raise ValueError("is_a・beta_f・early_v は正の値が必要です。")
+    if temp_k <= 0:
+        raise ValueError("温度は正の値が必要です。")
+    vt = _K_BOLTZMANN_EV * temp_k
+    drive = np.expm1(np.clip(vbe / (ideality * vt), -200.0, 200.0))
+    early = 1.0 + vce / early_v
+    ic = is_a * drive * early
+    ib = is_a / beta_f * drive
+    beta = ic / ib if ib > 0 else float(beta_f * early)
+    gm = ic / vt
+    ro = early_v / ic if ic > 0 else float("inf")
+    return {
+        "ic_a": float(ic),
+        "ib_a": float(ib),
+        "beta": float(beta),
+        "gm_s": float(gm),
+        "ro_ohm": float(ro),
+        "vt_v": float(vt),
+    }
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:

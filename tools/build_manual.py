@@ -669,6 +669,24 @@ def _curve_diodes(fname: str) -> None:
     _save_fig(fig, fname)
 
 
+def _curve_bjt(fname: str) -> None:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    # Gummel プロット: log Ic・log Ib 対 Vbe（ln βF だけ平行に離れる）
+    vbe = np.linspace(0.3, 0.85, 200)
+    a1.semilogy(vbe, [metrology.bjt_currents(v, vce=1.0)["ic_a"] for v in vbe],
+                "C0", label="Ic")
+    a1.semilogy(vbe, [metrology.bjt_currents(v, vce=1.0)["ib_a"] for v in vbe],
+                "C1", label="Ib (×1/βF)")
+    _axfmt(a1, "Vbe [V]", "電流 [A]", "Gummel プロット (βF=100)", which="both")
+    # 出力特性 Ic-Vce 族（アーリー効果で右肩上がり）
+    vce = np.linspace(0.0, 5.0, 120)
+    for vbe0, c in [(0.66, "C0"), (0.68, "C1"), (0.70, "C2")]:
+        a2.plot(vce, [metrology.bjt_currents(vbe0, vce=v)["ic_a"] * 1e3 for v in vce],
+                c, label=f"Vbe={vbe0}")
+    _axfmt(a2, "Vce [V]", "Ic [mA]", "出力特性（アーリー効果 VA=50V）")
+    _save_fig(fig, fname)
+
+
 def _curve_miller_photodiode(fname: str) -> None:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
     av = np.linspace(0, 200, 200)
@@ -707,6 +725,11 @@ _DEVICE_CURVES = [
      "アインシュタイン関係 D=µ·kT/q（電子≈35 cm²/s）、誘電遮蔽長 L_D=√(εs·kT/q²N)"
      "（N=1e16 で約 40nm, ∝1/√N）、少数キャリア拡散長 L=√(Dτ)（∝√τ）です。",
      _curve_transport),
+    ("char_bjt", "バイポーラトランジスタ (BJT) Gummel・出力特性",
+     "Ebers–Moll 順活性モデルのコレクタ/ベース電流です。左の Gummel プロットは"
+     "log Ic・log Ib が ln(βF) だけ平行に離れた 2 直線になり、右の出力特性は"
+     "アーリー効果（基極幅変調）で Ic が Vce とともにわずかに増えます。",
+     _curve_bjt),
     ("char_diodes", "ショットキーダイオード・アバランシェ増倍",
      "熱電子放出（Richardson 式）のショットキーダイオードは pn 接合より飽和電流が桁違いに"
      "大きく、立ち上がり電圧が低い様子を再現します。右図は降伏前のアバランシェ増倍係数"
@@ -792,6 +815,8 @@ def verification_section() -> str:
          "Shockley 式。順方向指数・逆方向 −Is 飽和・直列抵抗で高電流飽和"),
         ("ショットキーダイオード", "schottky_diode_current / schottky_saturation_current",
          "熱電子放出 Js=A*·T²·exp(−Φ_B/kT)（Richardson）。pn より低い立ち上がり電圧"),
+        ("バイポーラ (BJT) 電流・利得", "bjt_currents",
+         "Ic=Is·exp(Vbe/Vt)·(1+Vce/VA)・β=Ic/Ib=βF(1+Vce/VA)・gm=Ic/Vt・ro=VA/Ic"),
         ("アバランシェ増倍係数", "avalanche_multiplication",
          "Miller 式 M=1/(1−(V/BV)^n)。V→BV で M→∞（APD 利得・SOA）"),
         ("フォトダイオード応答度", "photodiode_responsivity",
