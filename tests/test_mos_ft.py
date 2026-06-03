@@ -50,17 +50,26 @@ def test_transit_time_is_inverse_of_2pi_ft():
     assert tau_s == pytest.approx(1.0 / (2 * math.pi * r["ft_hz"]), rel=1e-9)
 
 
-def test_higher_wl_does_not_change_ft_much():
-    """W/L は gm も Cgg(総容量) も比例して増やすため fT はほぼ不変。
+def test_ft_independent_of_wl():
+    """fT は W/L に依らず一定（gm も Cgg も W に比例するため）。
 
-    gm∝(W/L)、Cgg はゲート面積に比例。ここでは w_over_l は gm のみに効くので
-    fT は W/L とともに上がる（電流駆動が増える）ことを確認する。
+    実機の fT はチャネル幅 W に依存しない。本モデルも Cgg を w_over_l で
+    スケールさせ、gm∝(W/L) と相殺して fT が W/L 不変になることを確認する。
     """
     w = _mos()
     vth = _vth(w)
     f1 = M.mos_cutoff_frequency(w, "metal_al", vg=vth + 0.5, vd=1.5, w_over_l=5)["ft_hz"]
     f2 = M.mos_cutoff_frequency(w, "metal_al", vg=vth + 0.5, vd=1.5, w_over_l=20)["ft_hz"]
-    assert f2 > f1
+    assert f2 == pytest.approx(f1, rel=1e-9)
+
+
+def test_ft_rises_with_overdrive_and_thinner_eot():
+    """fT は過剰電圧（gm 増）とともに上がる。"""
+    w = _mos()
+    vth = _vth(w)
+    lo = M.mos_cutoff_frequency(w, "metal_al", vg=vth + 0.2, vd=1.5)["ft_hz"]
+    hi = M.mos_cutoff_frequency(w, "metal_al", vg=vth + 0.9, vd=1.5)["ft_hz"]
+    assert hi > lo > 0
 
 
 def test_no_gate_returns_zero():

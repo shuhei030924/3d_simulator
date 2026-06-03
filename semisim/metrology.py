@@ -2920,17 +2920,21 @@ def mos_cutoff_frequency(
 ) -> dict:
     """MOS の電流利得遮断周波数 fT（RF/アナログの最重要 FoM, Hz）を返す。
 
-    小信号 gm（mos_small_signal）とゲート総容量 Cgg（mos_gate_capacitance の
-    total_cap_ff）から、電流利得が 1 になる周波数
+    小信号 gm（mos_small_signal）とゲート総容量 Cgg から、電流利得が 1 になる周波数
       fT = gm / (2π·Cgg)
-    を求める。トランジット時間 τ=1/(2π·fT)=Cgg/gm も併せて返す。gm が大きい
-    （過剰電圧大・W/L 大）ほど、また Cgg が小さい（ゲート面積小・EOT 厚）ほど
-    高速。返す辞書: ft_hz / ft_ghz / gm_s / cgg_ff / transit_time_ps。
+    を求める。トランジット時間 τ=1/(2π·fT)=Cgg/gm も併せて返す。gm も Cgg も
+    チャネル幅 W（=w_over_l）に比例するため、Cgg は幾何容量（mos_gate_capacitance
+    の total_cap_ff）に w_over_l を掛けた実効値を用い、fT は W/L に依らず過剰電圧・
+    移動度・Cox（EOT）・チャネル長で決まる（実機どおり）。過剰電圧が大きい
+    （gm 増）ほど、また EOT が厚い（Cox 小）ほど高速。返す辞書:
+      ft_hz / ft_ghz / gm_s / cgg_ff / transit_time_ps。
     gm≤0 または Cgg≤0 では fT=0・τ=inf。
     """
     ss = mos_small_signal(wafer, gate_conductor, channel, vg=vg, vd=vd, **mos_kw)
     gm = ss["gm_s"]
-    cgg_ff = mos_gate_capacitance(wafer, gate_conductor, channel)["total_cap_ff"]
+    # Cgg も gm と同じチャネル幅 W/L でスケールさせ、fT を W/L 非依存にする
+    w_over_l = mos_kw.get("w_over_l", 10.0)
+    cgg_ff = mos_gate_capacitance(wafer, gate_conductor, channel)["total_cap_ff"] * w_over_l
     cgg_f = cgg_ff * 1e-15
     if gm <= 0 or cgg_f <= 0:
         return {"ft_hz": 0.0, "ft_ghz": 0.0, "gm_s": float(gm),
