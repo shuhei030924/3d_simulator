@@ -2620,6 +2620,40 @@ def gate_switching_delay_ps(
     }
 
 
+def ring_oscillator_frequency(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, n_stages: int, load_cap_ff: float, vdd: float = 1.0, **mos_kw,
+) -> dict:
+    """N 段リングオシレータの発振周波数 f_osc=1/(2·N·τ_pd)（Hz）を返す。
+
+    1 段あたりの伝搬遅延 τ_pd（gate_switching_delay_ps の CV/I 遅延）を用い、
+    奇数段のインバータをリング接続したときの発振周期 T=2·N·τ_pd（1 周で各段が
+    立上り・立下りの 2 回遷移）から
+      f_osc = 1 / (2·N·τ_pd)
+    を求める。段数 N が多い・段遅延が大きいほど低周波。半導体の素子速度を測る
+    標準的なテスト回路。返す辞書: f_osc_hz / f_osc_ghz / stage_delay_ps /
+    period_ps / n_stages。τ_pd=inf（駆動電流 0）では f_osc=0。
+    n_stages は 3 以上の奇数（リング発振条件）。
+    """
+    if n_stages < 3 or n_stages % 2 == 0:
+        raise ValueError("n_stages は 3 以上の奇数である必要があります。")
+    d = gate_switching_delay_ps(wafer, gate_conductor, channel,
+                                load_cap_ff=load_cap_ff, vdd=vdd, **mos_kw)
+    tau_ps = d["delay_ps"]
+    if not np.isfinite(tau_ps) or tau_ps <= 0:
+        return {"f_osc_hz": 0.0, "f_osc_ghz": 0.0, "stage_delay_ps": float(tau_ps),
+                "period_ps": float("inf"), "n_stages": int(n_stages)}
+    period_ps = 2.0 * n_stages * tau_ps
+    f = 1.0 / (period_ps * 1e-12)
+    return {
+        "f_osc_hz": float(f),
+        "f_osc_ghz": float(f / 1e9),
+        "stage_delay_ps": float(tau_ps),
+        "period_ps": float(period_ps),
+        "n_stages": int(n_stages),
+    }
+
+
 def mos_power_dissipation(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vdd: float, freq_hz: float, load_cap_ff: float,
