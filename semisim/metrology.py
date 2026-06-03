@@ -2313,6 +2313,34 @@ def junction_capacitance(
     }
 
 
+def junction_breakdown_voltage(
+    na_cm3: float, nd_cm3: float, *, eg_ev: float = 1.12,
+) -> dict:
+    """pn 接合（一方的階段接合）のアバランシェ降伏電圧 BV を返す。
+
+    軽くドープした側 N_light が空乏層を支配し、Sze の経験式
+      BV = 60·(Eg/1.1)^1.5·(N_light/1e16)^(−3/4)  [V]
+    で降伏電圧を求める（Si, 室温）。高ドープほど空乏層が薄く電界が立つため
+    BV は低い（BV∝N^−¾）。降伏時の空乏層幅と最大電界（≈臨界電界）も返す:
+      W_BD = √(2·εs·BV/(q·N_light)),  E_crit = 2·BV/W_BD。
+    返す辞書: bv_v / n_light_cm3 / w_bd_um / ecrit_mv_cm。
+    片側を高ドープにすると片側階段接合（軽ドープ側で決まる）を再現する。
+    """
+    if na_cm3 <= 0 or nd_cm3 <= 0:
+        raise ValueError("ドーピングは正である必要があります。")
+    n_light_cm3 = min(na_cm3, nd_cm3)
+    bv = 60.0 * (eg_ev / 1.1) ** 1.5 * (n_light_cm3 / 1.0e16) ** (-0.75)
+    n_light = n_light_cm3 * 1e6  # m^-3
+    w_bd = np.sqrt(2.0 * _EPS_SI * bv / (_Q * n_light))  # m
+    e_crit = 2.0 * bv / w_bd  # V/m
+    return {
+        "bv_v": float(bv),
+        "n_light_cm3": float(n_light_cm3),
+        "w_bd_um": float(w_bd * 1e6),
+        "ecrit_mv_cm": float(e_crit / 1e8),  # V/m → MV/cm
+    }
+
+
 def junction_leakage_a(
     area_um2: float, temperature_c: float = 27.0,
     *, j0_a_per_um2: float = 1.0e-15, eg_ev: float = 1.12,
