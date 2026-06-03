@@ -2027,6 +2027,66 @@ def diode_iv_curve(
     return {"v": v, "i": i, "i_sat_a": i_sat_a}
 
 
+def solar_cell_iv(
+    *, photocurrent_a: float = 35.0e-3, i_sat_a: float = 1.0e-12,
+    ideality: float = 1.0, temperature_c: float = 25.0, eg_ev: float = 1.12,
+    input_power_w: float = 100.0e-3, n_points: int = 401,
+) -> dict:
+    """太陽電池の I-V から開放電圧・短絡電流・曲線因子・変換効率を返す。
+
+    照射下の太陽電池は光生成電流 IL とダイオード暗電流の重ね合わせ
+      I(V) = IL − Is(T)·(exp(V/(n·Vt)) − 1)
+    で表される（生成側を正符号）。ここから
+      - 短絡電流 Isc = I(0) = IL
+      - 開放電圧 Voc = n·Vt·ln(IL/Is(T) + 1)       （I=0 の電圧）
+      - 最大電力点 Pmax = max(V·I)（0≤V≤Voc を走査）
+      - 曲線因子 FF = Pmax / (Voc·Isc)             （理想的な矩形度, 0.7〜0.85）
+      - 変換効率 η = Pmax / P_in                    （入射光電力 P_in に対する比）
+    を求める。i_sat_a は基準 25℃ の飽和電流で、内部では Is(T)∝T³·exp(−Eg/kT)
+    として温度依存させる（Is は ni²∝T³·exp(−Eg/kT) に比例）。このため温度上昇で
+    Is が指数的に増え Voc は低下する（Si で約 −2mV/℃）。FF は理想係数 n が
+    小さいほど高い。返す辞書: voc_v / isc_a / v_mp_v / i_mp_a / p_max_w /
+    fill_factor / efficiency / i_sat_t_a / v（配列）/ i（配列）。IL≤0 では全てゼロ。
+    """
+    if i_sat_a <= 0 or ideality <= 0:
+        raise ValueError("i_sat_a・ideality は正の値が必要です。")
+    if input_power_w <= 0:
+        raise ValueError("入射光電力は正の値が必要です。")
+    il = photocurrent_a
+    t_k = temperature_c + 273.15
+    t_ref = 298.15  # 25℃ 基準
+    # 飽和電流の温度依存: Is(T) ∝ ni²(T) ∝ T³·exp(−Eg/kT)
+    is_t = i_sat_a * (t_k / t_ref) ** 3 * np.exp(
+        -eg_ev / _K_BOLTZMANN_EV * (1.0 / t_k - 1.0 / t_ref))
+    vt = _K_BOLTZMANN_EV * t_k
+    nvt = ideality * vt
+    if il <= 0:
+        zero = np.zeros(max(n_points, 2))
+        return {"voc_v": 0.0, "isc_a": 0.0, "v_mp_v": 0.0, "i_mp_a": 0.0,
+                "p_max_w": 0.0, "fill_factor": 0.0, "efficiency": 0.0,
+                "i_sat_t_a": float(is_t), "v": zero, "i": zero}
+    voc = nvt * np.log(il / is_t + 1.0)
+    v = np.linspace(0.0, voc, n_points)
+    i = il - is_t * (np.expm1(np.clip(v / nvt, -200.0, 200.0)))
+    p = v * i
+    k = int(np.argmax(p))
+    p_max = float(p[k])
+    isc = float(il)
+    ff = p_max / (voc * isc) if voc > 0 and isc > 0 else 0.0
+    return {
+        "voc_v": float(voc),
+        "isc_a": isc,
+        "v_mp_v": float(v[k]),
+        "i_mp_a": float(i[k]),
+        "p_max_w": p_max,
+        "fill_factor": float(ff),
+        "efficiency": float(p_max / input_power_w),
+        "i_sat_t_a": float(is_t),
+        "v": v,
+        "i": i,
+    }
+
+
 def schottky_saturation_current(
     area_um2: float, *, barrier_ev: float = 0.6, temp_k: float = 300.0,
     richardson_a_cm2_k2: float = 110.0,
