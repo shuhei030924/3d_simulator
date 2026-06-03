@@ -618,6 +618,8 @@ def verification_section() -> str:
          "σ(ΔVth)=A_VT/√(W·L)・σ(Δβ/β)=A_β/√(W·L)（大面積ほど高マッチング）"),
         ("pn 接合 空乏層容量", "junction_capacitance / junction_cv_curve",
          "ビルトイン電位・空乏層幅・接合容量。1/Cj²-V 直線（C-V プロファイリング）"),
+        ("pn 接合 降伏電圧", "junction_breakdown_voltage",
+         "アバランシェ BV=60·(Eg/1.1)^1.5·(N/1e16)^−¾・降伏時空乏幅/臨界電界"),
         ("MOS I-V 特性", "mos_drain_current / mos_iv_curve",
          "Idsat∝(Vg−Vth)²・三極管/飽和・サブスレショルド傾斜 SS≈n·60mV/dec"),
         ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
