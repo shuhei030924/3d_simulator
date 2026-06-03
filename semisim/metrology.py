@@ -3391,6 +3391,82 @@ def bulk_resistivity_ohm_cm(doping_cm3: float, *, carrier: str = "electron") -> 
     }
 
 
+def diffusion_coefficient(
+    doping_cm3: float, *, carrier: str = "electron", temp_k: float = 300.0
+) -> dict:
+    """アインシュタイン関係によるキャリア拡散係数 D（cm²/s）を返す。
+
+    熱平衡では拡散と移動度が
+      D = µ·(kT/q)               （アインシュタイン関係）
+    で結ばれる。ドーピング依存移動度 µ(N)（carrier_mobility）と熱電圧
+    Vt=kT/q から D を求める。µ が cm²/Vs・Vt が V のとき D は cm²/s で、
+    低ドープ電子で D≈35 cm²/s（µ≈1350·0.0259）と教科書値に一致する。
+    返す辞書: diffusion_cm2_s / mobility_cm2_vs / thermal_voltage_v /
+    carrier / temp_k。
+    """
+    if temp_k <= 0:
+        raise ValueError("温度は正の値が必要です。")
+    mu = carrier_mobility(doping_cm3, carrier=carrier)["mobility_cm2_vs"]
+    vt = _K_B * temp_k / _Q  # 熱電圧 [V]
+    return {
+        "diffusion_cm2_s": float(mu * vt),
+        "mobility_cm2_vs": float(mu),
+        "thermal_voltage_v": float(vt),
+        "carrier": carrier,
+        "temp_k": float(temp_k),
+    }
+
+
+def debye_length(doping_cm3: float, *, temp_k: float = 300.0) -> dict:
+    """誘電遮蔽長（デバイ長）L_D=√(εs·kT/(q²·N))（µm）を返す。
+
+    ドープ半導体中の電位擾乱が遮蔽される特性長で、空乏層エッジの広がりや
+    擾乱応答の最小スケールを与える。ドーピング濃度 N（多数キャリア濃度）に
+    対し L_D∝1/√N で短くなり、n 型 N=1e16 で L_D≈40nm。返す辞書:
+      debye_length_um / debye_length_nm / temp_k / doping_cm3。N≤0 では inf。
+    """
+    if temp_k <= 0:
+        raise ValueError("温度は正の値が必要です。")
+    if doping_cm3 <= 0:
+        return {"debye_length_um": float("inf"), "debye_length_nm": float("inf"),
+                "temp_k": float(temp_k), "doping_cm3": float(doping_cm3)}
+    n_m3 = doping_cm3 * 1e6  # cm⁻³ → m⁻³
+    ld_m = np.sqrt(_EPS_SI * _K_B * temp_k / (_Q ** 2 * n_m3))
+    return {
+        "debye_length_um": float(ld_m * 1e6),
+        "debye_length_nm": float(ld_m * 1e9),
+        "temp_k": float(temp_k),
+        "doping_cm3": float(doping_cm3),
+    }
+
+
+def diffusion_length(
+    doping_cm3: float, lifetime_s: float, *,
+    carrier: str = "electron", temp_k: float = 300.0,
+) -> dict:
+    """少数キャリア拡散長 L=√(D·τ)（µm）を返す。
+
+    寿命 τ の間に少数キャリアが拡散で進む平均距離で、拡散係数 D
+    （diffusion_coefficient, アインシュタイン関係）と再結合寿命 lifetime_s から
+      L = √(D·τ)
+    を求める。太陽電池/バイポーラ/接合の少数キャリア収集長を決める。D が
+    cm²/s・τ が s のとき L は cm で算出し µm で返す（例: D≈35, τ=1µs → L≈59µm）。
+    返す辞書: diffusion_length_um / diffusion_coefficient_cm2_s / lifetime_s /
+    carrier。τ≤0 では L=0。
+    """
+    if lifetime_s < 0:
+        raise ValueError("寿命は非負である必要があります。")
+    d = diffusion_coefficient(doping_cm3, carrier=carrier, temp_k=temp_k)
+    d_cm2_s = d["diffusion_cm2_s"]
+    l_cm = np.sqrt(d_cm2_s * lifetime_s)
+    return {
+        "diffusion_length_um": float(l_cm * 1e4),  # cm → µm
+        "diffusion_coefficient_cm2_s": float(d_cm2_s),
+        "lifetime_s": float(lifetime_s),
+        "carrier": carrier,
+    }
+
+
 def _column_optical_layers(wafer: Wafer, y: int, x: int):
     """列 (y,x) を上面から下へ走査し (複素屈折率 N, 厚み[m]) の薄膜リストと
     基板（最下層, 半無限）の複素屈折率を返す。空気は入射媒質として除外する。
