@@ -47,6 +47,7 @@ class AppSettings:
     show_resist: bool = True
     window_geometry: str = ""
     max_recent: int = DEFAULT_MAX_RECENT
+    ui_theme: str = "light"  # GUI のテーマ（"light" / "dark"）
 
     # -- 編集ヘルパ --------------------------------------------------------
     def add_recent(self, path: str) -> None:
@@ -83,6 +84,7 @@ class AppSettings:
             show_resist=bool(d.get("show_resist", True)),
             window_geometry=str(d.get("window_geometry", "")),
             max_recent=int(d.get("max_recent", DEFAULT_MAX_RECENT)),
+            ui_theme=("dark" if str(d.get("ui_theme", "light")) == "dark" else "light"),
         )
 
     # -- 永続化 ------------------------------------------------------------
