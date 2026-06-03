@@ -2062,6 +2062,7 @@ _Q = 1.602176634e-19          # 素電荷 [C]
 _NI_SI_M3 = 1.0e16            # Si 真性キャリア濃度 [m^-3]（1e10 cm^-3）
 _KT_Q = 0.025852              # 熱電圧 kT/q [V] @300K
 _EPS_SI = 11.7 * 8.854e-12    # Si 誘電率 [F/m]
+_K_B = 1.380649e-23           # ボルツマン定数 [J/K]
 
 
 def threshold_voltage_v(
@@ -2460,6 +2461,39 @@ def mos_cutoff_frequency(
         "gm_s": float(gm),
         "cgg_ff": float(cgg_ff),
         "transit_time_ps": float(cgg_f / gm * 1e12),
+    }
+
+
+def mos_thermal_noise(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float, vd: float, gamma: float = 2.0 / 3.0, temp_k: float = 300.0,
+    bandwidth_hz: float = 1.0, **mos_kw,
+) -> dict:
+    """MOS チャネル熱雑音（ドレイン電流雑音・入力換算電圧雑音）を返す。
+
+    小信号 gm（mos_small_signal）から、チャネル抵抗の熱揺らぎによる
+      - ドレイン電流雑音 PSD  S_id = 4kT·γ·gm          [A²/Hz]
+      - 入力換算電圧雑音 PSD  S_vg = S_id/gm² = 4kT·γ/gm [V²/Hz]
+    を算出する。γ は熱雑音係数（長チャネル 2/3, 短チャネルで増大）。gm が
+    大きい（過剰電圧大）ほど入力換算雑音は小さい（低雑音）。返す辞書:
+      sid_a2_hz / svg_v2_hz / vn_input_nv_sqrthz（入力換算 nV/√Hz）/
+      in_rms_a（帯域 bandwidth_hz での電流雑音実効値）/ gm_s。
+    gm≤0 では雑音 0・入力換算は inf。
+    """
+    gm = mos_small_signal(wafer, gate_conductor, channel, vg=vg, vd=vd, **mos_kw)["gm_s"]
+    four_kt = 4.0 * _K_B * temp_k
+    if gm <= 0:
+        return {"sid_a2_hz": 0.0, "svg_v2_hz": float("inf"),
+                "vn_input_nv_sqrthz": float("inf"), "in_rms_a": 0.0, "gm_s": float(gm)}
+    sid = four_kt * gamma * gm           # A²/Hz
+    svg = sid / (gm * gm)                # V²/Hz = 4kTγ/gm
+    in_rms = float(np.sqrt(sid * bandwidth_hz))
+    return {
+        "sid_a2_hz": float(sid),
+        "svg_v2_hz": float(svg),
+        "vn_input_nv_sqrthz": float(np.sqrt(svg) * 1e9),
+        "in_rms_a": in_rms,
+        "gm_s": float(gm),
     }
 
 
