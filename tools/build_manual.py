@@ -655,6 +655,8 @@ def verification_section() -> str:
          "局所発熱を x・y・z の 3 方向に等方拡散（断面ソルバの上位）"),
         ("局所応力集中", "stress_concentration_map / max_stress_concentration",
          "界面 Δσ×幾何係数でクラック/剥離リスク箇所を検出"),
+        ("CTE 不整合熱応力", "thermal_mismatch_stress",
+         "σ=E/(1−ν)·Δα·ΔT（冷却で高CTE膜が引張・最弱材料を特定）"),
         ("ウェハ反り（膜応力）", "wafer_bow_um", "Stoney 則による等価反り"),
         ("歩留り推定", "yield_estimate", "Poisson/Murphy/Seeds モデル"),
         ("クリティカルエリア解析", "critical_area_short_um2 / caa_short_yield",
