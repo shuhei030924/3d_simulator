@@ -2192,6 +2192,41 @@ def short_channel_vth_v(
     }
 
 
+def body_effect(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vsb: float, doping_cm3: float = 1.0e17, vfb: float = 0.0,
+) -> dict:
+    """基板バイアス効果（ボディ効果）による Vth シフトを返す。
+
+    ソース・基板間の逆バイアス Vsb（≥0）が空乏電荷を増やし、しきい値が
+      Vth(Vsb) = Vth0 + γ·(√(2φF + Vsb) − √(2φF))
+    と上昇する。ボディ係数 γ=√(2·εs·q·Na)/Cox（√V）はドーピングと Cox で決まり、
+    高ドープ・薄 EOT ほど大きい。スタック素子（積み重ねた NMOS）の実効 Vth 上昇や
+    バックバイアスによる Vth 調整の評価に使う。返す辞書:
+      vth_v / vth0_v / gamma_sqrt_v / dvth_v / phi_f_v。Cox=0 では Vth=None。
+    """
+    if vsb < 0:
+        raise ValueError("vsb は逆バイアス量(≥0)で指定してください。")
+    th = threshold_voltage_v(wafer, gate_conductor, channel,
+                             doping_cm3=doping_cm3, vfb=vfb)
+    vth0 = th["vth_v"]
+    cox = th["cox_f_m2"]
+    phi_f = th["phi_f_v"]
+    if vth0 is None or cox <= 0:
+        return {"vth_v": None, "vth0_v": None, "gamma_sqrt_v": 0.0,
+                "dvth_v": 0.0, "phi_f_v": float(phi_f)}
+    na = doping_cm3 * 1e6
+    gamma = np.sqrt(2.0 * _EPS_SI * _Q * na) / cox
+    dvth = gamma * (np.sqrt(2.0 * phi_f + vsb) - np.sqrt(2.0 * phi_f))
+    return {
+        "vth_v": float(vth0 + dvth),
+        "vth0_v": float(vth0),
+        "gamma_sqrt_v": float(gamma),
+        "dvth_v": float(dvth),
+        "phi_f_v": float(phi_f),
+    }
+
+
 def mos_cv_curve(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, doping_cm3: float = 1.0e17, vfb: float = 0.0,
