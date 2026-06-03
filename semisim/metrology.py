@@ -2447,6 +2447,36 @@ def mos_small_signal(
     }
 
 
+def mos_gm_id_efficiency(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float, vd: float, **mos_kw,
+) -> dict:
+    """MOS のトランスコンダクタンス効率 gm/Id（1/V）を返す。
+
+    小信号 gm（mos_small_signal）とドレイン電流 Id から、単位電流あたり得られる
+    トランスコンダクタンス
+      gm/Id  [1/V]
+    を求める。現代アナログ設計（gm/Id 法）の中核指標で、消費電流に対する利得効率
+    を表す。漸近挙動:
+      - 弱反転（サブスレショルド）: gm/Id → 1/(n·Vt)（最大, ~30〜38 1/V）
+      - 強反転: gm/Id ∝ 1/Vov（過剰電圧とともに低下）
+    高効率（弱反転寄り）＝低電力高利得だが帯域は犠牲。返す辞書:
+      gm_id_per_v / gm_s / id_a / gm_id_max_ideal（=1/(n·Vt) の理論上限）。
+    Id≤0 では gm/Id=0。
+    """
+    n = mos_kw.get("subthreshold_n", 1.3)
+    ss = mos_small_signal(wafer, gate_conductor, channel, vg=vg, vd=vd, **mos_kw)
+    gm = ss["gm_s"]
+    id_a = ss["id_a"]
+    eff = float(gm / id_a) if id_a > 0 else 0.0
+    return {
+        "gm_id_per_v": eff,
+        "gm_s": float(gm),
+        "id_a": float(id_a),
+        "gm_id_max_ideal": float(1.0 / (n * _KT_Q)),
+    }
+
+
 def mos_transfer_characteristics(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, vd: float = 1.0, vdd: float = 1.0, vg_min: float = 0.0,
