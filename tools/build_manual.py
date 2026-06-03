@@ -553,6 +553,190 @@ def defect_section() -> tuple[str, str]:
     return "不良モード検証 (metrology)", body
 
 
+def _mos_demo_wafer() -> Wafer:
+    """特性カーブ用の簡易 MOS ゲート積層（Si/酸化膜/Al）。"""
+    w = Wafer(WaferConfig(nx=20, ny=20, nz=30, pitch_um=0.001, substrate_um=0.0))
+    g = w.grid
+    g[:10, :, :] = materials.get("silicon").id
+    g[10:12, :, :] = materials.get("oxide").id
+    g[12:16, :, :] = materials.get("metal_al").id
+    return w
+
+
+def _save_fig(fig, fname: str) -> None:
+    os.makedirs(IMG_DIR, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(os.path.join(IMG_DIR, fname), dpi=110)
+    plt.close(fig)
+
+
+def _axfmt(ax, xlabel, ylabel, title, *, legend=True, which="major") -> None:
+    """軸ラベル・タイトル・グリッド・凡例をまとめて設定する。"""
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(alpha=0.3, which=which)
+    if legend:
+        ax.legend(fontsize=7)
+
+
+def _curve_inverter(fname: str) -> None:
+    w = _mos_demo_wafer()
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    for wlp, lab, c in [(None, "対称 βp/βn=1", "C0"),
+                        (100.0, "強 pMOS", "C1"), (2.0, "弱 pMOS", "C2")]:
+        r = metrology.cmos_inverter_vtc(w, "metal_al", vdd=1.0, w_over_l_p=wlp)
+        a1.plot(r["vin"], r["vout"], c, label=f"{lab} (VM={r['vm_v']:.3f})")
+        a1.plot(r["vm_v"], r["vm_v"], c + "o")
+    a1.plot([0, 1], [0, 1], "k--", lw=0.6, alpha=0.5)
+    _axfmt(a1, "Vin [V]", "Vout [V]", "CMOS インバータ VTC")
+    r = metrology.cmos_inverter_vtc(w, "metal_al", vdd=1.0)
+    a2.plot(r["vin"], -r["gain"], "C3")
+    a2.axhline(1, color="k", ls="--", lw=0.6)
+    for vx in (r["vil_v"], r["vih_v"]):
+        a2.axvline(vx, color="gray", ls=":", lw=0.8)
+    _axfmt(a2, "Vin [V]", "利得 -dVout/dVin",
+           f"利得とノイズマージン (NMH={r['nmh_v']:.3f})", legend=False)
+    _save_fig(fig, fname)
+
+
+def _curve_mobility(fname: str) -> None:
+    n_arr = np.logspace(13, 21, 200)
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    for c, col in [("electron", "C0"), ("hole", "C1")]:
+        a1.semilogx(n_arr, [metrology.carrier_mobility(n, carrier=c)["mobility_cm2_vs"]
+                            for n in n_arr], col, label=c)
+        a2.loglog(n_arr, [metrology.bulk_resistivity_ohm_cm(n, carrier=c)["resistivity_ohm_cm"]
+                          for n in n_arr], col, label=c)
+    _axfmt(a1, "ドーピング N [cm^-3]", "移動度 [cm2/Vs]",
+           "Caughey-Thomas 移動度 µ(N)", which="both")
+    a2.loglog([1e16], [0.5], "k*", ms=11, label="Irvin n@1e16=0.5")
+    _axfmt(a2, "ドーピング N [cm^-3]", "抵抗率 [Ω·cm]",
+           "体積抵抗率 ρ=1/(qNµ)", which="both")
+    _save_fig(fig, fname)
+
+
+def _curve_intrinsic(fname: str) -> None:
+    t_arr = np.linspace(200, 600, 200)
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    a1.semilogy(t_arr, [metrology.intrinsic_carrier_concentration(t)["ni_cm3"]
+                        for t in t_arr], "C0")
+    a1.semilogy([300], [1e10], "k*", ms=12, label="ni(300)=1e10")
+    _axfmt(a1, "温度 T [K]", "ni [cm^-3]", "真性キャリア濃度 ni(T)", which="both")
+    a2.plot(t_arr, [metrology.bandgap_ev(t) for t in t_arr], "C3")
+    a2.plot([300], [metrology.bandgap_ev(300)], "k*", ms=12,
+            label=f"Eg(300)={metrology.bandgap_ev(300):.3f}")
+    _axfmt(a2, "温度 T [K]", "Eg [eV]", "Varshni バンドギャップ Eg(T)")
+    _save_fig(fig, fname)
+
+
+def _curve_transport(fname: str) -> None:
+    n_arr = np.logspace(13, 19, 150)
+    fig, (a1, a2, a3) = plt.subplots(1, 3, figsize=(12.5, 3.6))
+    for c, col in [("electron", "C0"), ("hole", "C1")]:
+        a1.semilogx(n_arr, [metrology.diffusion_coefficient(n, carrier=c)["diffusion_cm2_s"]
+                            for n in n_arr], col, label=c)
+    _axfmt(a1, "N [cm^-3]", "D [cm2/s]", "アインシュタイン D=µ·kT/q", which="both")
+    a2.loglog(n_arr, [metrology.debye_length(n)["debye_length_nm"] for n in n_arr], "C2")
+    a2.loglog([1e16], [40.9], "k*", ms=11, label="40nm@1e16")
+    _axfmt(a2, "N [cm^-3]", "L_D [nm]", "デバイ長 ~1/√N", which="both")
+    tau = np.logspace(-8, -4, 150)
+    a3.loglog(tau, [metrology.diffusion_length(1e15, t)["diffusion_length_um"]
+                    for t in tau], "C3")
+    _axfmt(a3, "寿命 τ [s]", "L [µm]", "拡散長 L=√(Dτ)", legend=False, which="both")
+    _save_fig(fig, fname)
+
+
+def _curve_diodes(fname: str) -> None:
+    area = 100.0
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    v_arr = np.linspace(-0.3, 0.5, 200)
+    for phi, c in [(0.5, "C0"), (0.6, "C1"), (0.7, "C2")]:
+        a1.plot(v_arr, [metrology.schottky_diode_current(area, v, barrier_ev=phi)
+                        for v in v_arr], c, label=f"Schottky ΦB={phi}")
+    a1.plot(v_arr, [metrology.diode_current(v, i_sat_a=1e-15) for v in v_arr],
+            "k--", label="pn (Shockley)")
+    a1.set_ylim(-1e-3, 5e-2)
+    _axfmt(a1, "V [V]", "I [A]", "ショットキー vs pn ダイオード")
+    bv = 60.0
+    vr = np.linspace(0, 0.99 * bv, 200)
+    for n, c in [(2, "C0"), (4, "C1"), (6, "C2")]:
+        a2.plot(vr / bv, [metrology.avalanche_multiplication(v, bv, miller_exponent=n)["multiplication"]
+                          for v in vr], c, label=f"n={n}")
+    a2.set_yscale("log")
+    a2.axvline(1.0, color="k", ls="--", lw=0.7, label="V=BV")
+    _axfmt(a2, "V/BV", "増倍係数 M", "アバランシェ増倍 M=1/(1-(V/BV)^n)", which="both")
+    _save_fig(fig, fname)
+
+
+def _curve_miller_photodiode(fname: str) -> None:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    av = np.linspace(0, 200, 200)
+    a1.plot(av, [metrology.miller_effect(2.0, g)["cin_ff"] for g in av],
+            "C0", label="Cin=Cf(1+|Av|)")
+    a1.plot(av, [metrology.miller_effect(2.0, g)["cout_ff"] for g in av],
+            "C1", label="Cout→Cf")
+    a1.axhline(2.0, color="k", ls=":", lw=0.7, label="Cf=2fF")
+    _axfmt(a1, "|Av|", "容量 [fF]", "ミラー効果 (入力容量増倍)")
+    lam = np.linspace(0.3, 1.3, 300)
+    for eta, c in [(1.0, "C0"), (0.8, "C1"), (0.5, "C2")]:
+        a2.plot(lam, [metrology.photodiode_responsivity(lam_i, quantum_efficiency=eta)["responsivity_a_w"]
+                      for lam_i in lam], c, label=f"η={eta}")
+    lc = metrology.photodiode_responsivity(0.5)["cutoff_wavelength_um"]
+    a2.axvline(lc, color="k", ls="--", lw=0.8, label=f"Si遮断 {lc:.3f}µm")
+    _axfmt(a2, "波長 λ [µm]", "応答度 R [A/W]", "フォトダイオード応答度 R=η·λ/1.24")
+    _save_fig(fig, fname)
+
+
+# 特性カーブのギャラリー定義: (キー, タイトル, 説明HTML, プロッタ)
+_DEVICE_CURVES = [
+    ("char_inverter", "CMOS インバータ VTC・雑音マージン",
+     "作製したゲート積層の Cox を共有する n/pMOS（EKV 連続電流）の電流釣り合いを"
+     "二分法で解いた直流伝達特性 (VTC) です。対称設計で反転しきい値 VM=Vdd/2 に一致し、"
+     "βp/βn の非対称で VM がスキューします。右図は電圧利得と単位利得点 VIL/VIH（雑音マージン）。",
+     _curve_inverter),
+    ("char_mobility", "ドーピング依存移動度・体積抵抗率（Irvin 曲線）",
+     "Caughey–Thomas 移動度 µ(N)（低ドープで µ_max・高ドープで µ_min）と、そこから導く"
+     "ドープ Si の体積抵抗率 ρ=1/(qNµ) です。n 型 N=1e16 で ρ≈0.5 Ω·cm と Irvin 曲線に一致します。",
+     _curve_mobility),
+    ("char_intrinsic", "真性キャリア濃度 ni(T)・Varshni バンドギャップ",
+     "状態密度とバンドギャップから求める真性キャリア濃度 ni(T)（300K で 1e10 cm⁻³ に規格化、"
+     "約 8K ごとに倍増）と、温度で縮小する Varshni バンドギャップ Eg(T)（Eg(300)≈1.12eV）です。",
+     _curve_intrinsic),
+    ("char_transport", "キャリア輸送（拡散係数・デバイ長・拡散長）",
+     "アインシュタイン関係 D=µ·kT/q（電子≈35 cm²/s）、誘電遮蔽長 L_D=√(εs·kT/q²N)"
+     "（N=1e16 で約 40nm, ∝1/√N）、少数キャリア拡散長 L=√(Dτ)（∝√τ）です。",
+     _curve_transport),
+    ("char_diodes", "ショットキーダイオード・アバランシェ増倍",
+     "熱電子放出（Richardson 式）のショットキーダイオードは pn 接合より飽和電流が桁違いに"
+     "大きく、立ち上がり電圧が低い様子を再現します。右図は降伏前のアバランシェ増倍係数"
+     "M=1/(1−(V/BV)^n)（V→BV で M→∞）。",
+     _curve_diodes),
+    ("char_miller_pd", "ミラー効果・フォトダイオード応答度",
+     "反転増幅段の帰還容量がミラーの定理で入力側に C_in=Cf(1+|Av|) として増倍される様子と、"
+     "光検出器の応答度 R=η·λ/1.24（バンドギャップ遮断波長 λ_c で R=0）です。",
+     _curve_miller_photodiode),
+]
+
+
+def device_curves_section() -> str:
+    """デバイス特性カーブ（計測関数の出力プロット）ギャラリー HTML を返す。"""
+    blocks = []
+    for key, title, desc, fn in _DEVICE_CURVES:
+        fn(f"{key}.png")
+        print(f"  生成: img/{key}.png")
+        blocks.append(
+            f"<h3>{html.escape(title)}</h3><p>{desc}</p>"
+            f"<img src='img/{key}.png' alt='{html.escape(title)}'>"
+        )
+    return (
+        "<p>計測 (metrology) 関数が算出するデバイス特性を、代表的な動作点で"
+        "プロットしたものです。いずれも教科書の解析値・スケーリング則に一致します"
+        "（各特性は <code>tests/</code> 配下で定量検証済み）。</p>"
+        + "\n".join(blocks)
+    )
+
+
 def verification_section() -> str:
     """電気・熱・信頼性の検証メトロロジの一覧 HTML を返す（数値例つき）。"""
     # 2 本の並走配線（Cu/W）+ Al 基準面を酸化膜中に作り、容量等を実測する。
@@ -580,6 +764,8 @@ def verification_section() -> str:
         ("配線総合レポート", "interconnect_report",
          "R/C/L/Z0/遅延/電流密度/EM/IRドロップ/断線を1コールで集計"),
         ("ロジックゲート遅延", "gate_switching_delay_ps", "CV/I モデル τ=C·Vdd/I_drive"),
+        ("CMOS インバータ VTC / 雑音マージン", "cmos_inverter_vtc",
+         "n/pMOS 電流釣り合いで VTC を解き VM・VIL/VIH・NMH/NML・利得を抽出（対称で VM=Vdd/2）"),
         ("CMOS 消費電力", "mos_power_dissipation",
          "動的 P=α·C·Vdd²·f ＋ 静的 P=Ioff·Vdd（周波数で支配項が交代）"),
         ("リングオシレータ周波数", "ring_oscillator_frequency",
@@ -604,6 +790,14 @@ def verification_section() -> str:
          "Q_crit=C·V。SEU（ビット反転）耐性"),
         ("ダイオード I-V", "diode_current / diode_iv_curve",
          "Shockley 式。順方向指数・逆方向 −Is 飽和・直列抵抗で高電流飽和"),
+        ("ショットキーダイオード", "schottky_diode_current / schottky_saturation_current",
+         "熱電子放出 Js=A*·T²·exp(−Φ_B/kT)（Richardson）。pn より低い立ち上がり電圧"),
+        ("アバランシェ増倍係数", "avalanche_multiplication",
+         "Miller 式 M=1/(1−(V/BV)^n)。V→BV で M→∞（APD 利得・SOA）"),
+        ("フォトダイオード応答度", "photodiode_responsivity",
+         "R=η·λ/1.24 [A/W]・遮断波長 λ_c=hc/Eg（Si 1.107µm で R=0）"),
+        ("ミラー効果", "miller_effect",
+         "C_in=Cf(1+|Av|)・入力極 f_in=1/(2π·Rs·C_in)（利得-帯域トレードオフ）"),
         ("MOS 小信号特性", "mos_small_signal",
          "gm=∂Id/∂Vg・gds=∂Id/∂Vd・真性利得 Av=gm/gds（飽和域で高利得）"),
         ("MOS gm/Id 効率", "mos_gm_id_efficiency",
@@ -628,6 +822,12 @@ def verification_section() -> str:
          "Idsat∝(Vg−Vth)²・三極管/飽和・サブスレショルド傾斜 SS≈n·60mV/dec"),
         ("配線抵抗 / シート抵抗", "line_resistance_ohm / sheet_resistance_ohm_sq",
          "断面積を考慮した直列抵抗・薄膜評価"),
+        ("ドーピング依存移動度 / 抵抗率", "carrier_mobility / bulk_resistivity_ohm_cm",
+         "Caughey–Thomas µ(N) と ρ=1/(qNµ)（n@1e16→0.5 Ω·cm, Irvin 曲線）"),
+        ("真性キャリア濃度 / バンドギャップ", "intrinsic_carrier_concentration / bandgap_ev",
+         "ni(T)∝T^1.5·exp(−Eg/2kT)（300K で 1e10）・Varshni Eg(T)"),
+        ("拡散係数 / デバイ長 / 拡散長", "diffusion_coefficient / debye_length / diffusion_length",
+         "Einstein D=µ·kT/q・L_D=√(εs·kT/q²N)・L=√(Dτ)"),
         ("Maxwell 容量行列", "capacitance_matrix_ff",
          "複数導体の自己容量・全結合容量を抽出（標準的 RC 抽出, 遮蔽も再現）"),
         ("対全導体総容量", "total_net_capacitance_ff",
@@ -819,6 +1019,7 @@ PAGE_TMPL = """<!DOCTYPE html>
  <a href="#intro">はじめに / 起動方法</a>
  <a href="#gui">GUI 操作・設定画面</a>
  {nav}
+ <a href="#device-curves">デバイス特性カーブ</a>
  <a href="#defect">不良モード検証</a>
  <a href="#output">出力・レポート</a>
 </nav>
@@ -843,6 +1044,10 @@ PAGE_TMPL = """<!DOCTYPE html>
   {gui}
  </section>
  {sections}
+ <section id="device-curves">
+  <h2>デバイス特性カーブ<span class="cat-badge">検証</span></h2>
+  {device_curves_body}
+ </section>
  <section id="defect">
   <h2>{defect_title}<span class="cat-badge">検証</span></h2>
   {defect_body}
@@ -907,6 +1112,7 @@ def main() -> None:
         nav="\n ".join(nav_parts),
         sections="\n".join(section_parts),
         gui=gui_section(),
+        device_curves_body=device_curves_section(),
         defect_title=html.escape(defect_title),
         defect_body=defect_body,
         verification_body=verification_section(),
