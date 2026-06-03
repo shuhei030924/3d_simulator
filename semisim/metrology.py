@@ -2592,6 +2592,49 @@ def mos_thermal_noise(
     }
 
 
+def mos_flicker_noise(
+    wafer: Wafer, gate_conductor, channel="silicon",
+    *, vg: float, vd: float, freq_hz: float, kf_v2f: float = 1.0e-24,
+    gamma: float = 2.0 / 3.0, temp_k: float = 300.0, **mos_kw,
+) -> dict:
+    """MOS の 1/f フリッカ雑音とノイズコーナー周波数を返す。
+
+    ゲート酸化膜界面の捕獲・放出による低周波雑音は、入力換算電圧雑音
+      S_vg,1/f(f) = Kf / (C_ox·f)            [V²/Hz]
+    で周波数に反比例する（C_ox=ゲート総容量 total_cap_ff, Kf=プロセス係数 V²·F）。
+    白色の熱雑音 S_vg,th=4kTγ/gm（mos_thermal_noise）と等しくなる周波数
+      f_corner = Kf·gm / (C_ox·4kTγ)
+    がノイズコーナーで、これ以下では 1/f 雑音が支配的。返す辞書:
+      svg_flicker_v2_hz / svg_thermal_v2_hz / svg_total_v2_hz /
+      vn_total_nv_sqrthz / corner_freq_hz / cox_ff。
+    C_ox=0（ゲート無し）や gm≤0 ではコーナー周波数 0。
+    """
+    if freq_hz <= 0:
+        raise ValueError("freq_hz は正の値が必要です。")
+    if kf_v2f < 0:
+        raise ValueError("kf_v2f は非負である必要があります。")
+    cox_ff = mos_gate_capacitance(wafer, gate_conductor, channel)["total_cap_ff"]
+    cox_f = cox_ff * 1e-15
+    gm = mos_small_signal(wafer, gate_conductor, channel, vg=vg, vd=vd, **mos_kw)["gm_s"]
+    four_ktg = 4.0 * _K_B * temp_k * gamma
+    if cox_f <= 0:
+        return {"svg_flicker_v2_hz": float("inf"), "svg_thermal_v2_hz": 0.0,
+                "svg_total_v2_hz": float("inf"), "vn_total_nv_sqrthz": float("inf"),
+                "corner_freq_hz": 0.0, "cox_ff": float(cox_ff)}
+    s_flicker = kf_v2f / (cox_f * freq_hz)
+    s_thermal = four_ktg / gm if gm > 0 else float("inf")
+    s_total = s_flicker + s_thermal
+    corner = (kf_v2f * gm / (cox_f * four_ktg)) if gm > 0 else 0.0
+    return {
+        "svg_flicker_v2_hz": float(s_flicker),
+        "svg_thermal_v2_hz": float(s_thermal),
+        "svg_total_v2_hz": float(s_total),
+        "vn_total_nv_sqrthz": float(np.sqrt(s_total) * 1e9),
+        "corner_freq_hz": float(corner),
+        "cox_ff": float(cox_ff),
+    }
+
+
 def mos_mismatch(
     wafer: Wafer, gate_conductor, channel="silicon",
     *, avt_mv_um: float = 3.0, abeta_pct_um: float = 1.0, n_sigma: float = 3.0,
