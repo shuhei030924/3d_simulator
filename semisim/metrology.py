@@ -3112,6 +3112,56 @@ def thermal_mismatch_stress(
     }
 
 
+# 縦方向（チャネル方向）ピエゾ抵抗係数 π_l [1/Pa]（Si, <110>）
+_PI_PIEZO = {"electron": -31.6e-11, "hole": 71.8e-11}
+
+
+def strained_mobility(
+    stress_mpa: float, *, carrier: str = "electron",
+    base_mobility_cm2_vs: float | None = None,
+) -> dict:
+    """応力（歪み）誘起のキャリア移動度変化（歪み Si）を返す。
+
+    機械応力はピエゾ抵抗効果でキャリア移動度を変える。チャネル方向応力 σ に対し
+      Δμ/μ = −π_l·σ        （π_l=縦方向ピエゾ抵抗係数, 引張 σ>0）
+    で、電子（π_l<0）は引張応力で移動度向上、正孔（π_l>0）は圧縮応力で向上する
+    （現代 CMOS は nMOS=引張・pMOS=圧縮ライナで移動度を稼ぐ）。返す辞書:
+      mobility_factor（μ/μ0=1−π_l·σ, 非負にクリップ）/ delta_mu_over_mu /
+      mobility_cm2_vs（base 指定時の実効移動度）/ carrier / stress_mpa。
+    既定 base 移動度は電子 1400 / 正孔 450 cm²/Vs。
+    """
+    if carrier not in _PI_PIEZO:
+        raise ValueError("carrier は 'electron' または 'hole' を指定してください。")
+    pi_l = _PI_PIEZO[carrier]
+    sigma_pa = stress_mpa * 1e6
+    dmu = -pi_l * sigma_pa  # Δμ/μ
+    factor = max(0.0, 1.0 + dmu)
+    base = base_mobility_cm2_vs
+    if base is None:
+        base = 1400.0 if carrier == "electron" else 450.0
+    return {
+        "mobility_factor": float(factor),
+        "delta_mu_over_mu": float(dmu),
+        "mobility_cm2_vs": float(base * factor),
+        "carrier": carrier,
+        "stress_mpa": float(stress_mpa),
+    }
+
+
+def channel_strain_mobility(
+    wafer: Wafer, channel="silicon", *, carrier: str = "electron",
+    base_mobility_cm2_vs: float | None = None,
+) -> dict:
+    """チャネル材料の残留応力（stress_mpa）から実効移動度を返す。
+
+    strained_mobility をチャネル材料の Material.stress_mpa に適用する簡便版。
+    返す辞書は strained_mobility と同じ（stress_mpa はチャネル材料の値）。
+    """
+    mat = materials.get(channel)
+    return strained_mobility(mat.stress_mpa, carrier=carrier,
+                             base_mobility_cm2_vs=base_mobility_cm2_vs)
+
+
 def _column_optical_layers(wafer: Wafer, y: int, x: int):
     """列 (y,x) を上面から下へ走査し (複素屈折率 N, 厚み[m]) の薄膜リストと
     基板（最下層, 半無限）の複素屈折率を返す。空気は入射媒質として除外する。

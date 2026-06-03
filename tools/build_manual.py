@@ -669,6 +669,8 @@ def verification_section() -> str:
          "界面 Δσ×幾何係数でクラック/剥離リスク箇所を検出"),
         ("CTE 不整合熱応力", "thermal_mismatch_stress",
          "σ=E/(1−ν)·Δα·ΔT（冷却で高CTE膜が引張・最弱材料を特定）"),
+        ("歪み Si 移動度", "strained_mobility / channel_strain_mobility",
+         "Δμ/μ=−π_l·σ（電子=引張・正孔=圧縮で移動度向上, 歪み CMOS）"),
         ("ウェハ反り（膜応力）", "wafer_bow_um", "Stoney 則による等価反り"),
         ("薄膜光学反射率（TMM）", "optical_reflectance",
          "垂直入射 R=|r|²（λ/4 反射防止膜で R→0・反射測光/ARC 設計）"),
