@@ -39,8 +39,55 @@
  .intro code { background:#eef2f7; }
  footer { text-align:center; color:var(--muted); padding:24px; font-size:13px; }
 </style>
+<style>
+ html { scroll-behavior:smooth; }
+ section { scroll-margin-top:16px; transition:opacity .15s; }
+ [data-theme="dark"] {
+   --fg:#e6edf3; --muted:#9aa7b4; --line:#2a3340; --accent:#5b9dff;
+   --bg:#0d1117; --card:#161b22;
+ }
+ [data-theme="dark"] body { background:var(--bg); }
+ [data-theme="dark"] section { background:var(--card); }
+ [data-theme="dark"] header { background:linear-gradient(120deg,#10243f,#1c4fb0); }
+ [data-theme="dark"] table.param th { background:#1c2530; }
+ [data-theme="dark"] pre { background:#010409; }
+ [data-theme="dark"] p code, [data-theme="dark"] td code { background:#21262d; color:#9fd0ff; }
+ [data-theme="dark"] img { background:#0d1117; }
+ [data-theme="dark"] .search, [data-theme="dark"] .icon-btn { background:var(--card); color:var(--fg); }
+ #progress { position:fixed; top:0; left:0; height:3px; width:0; background:var(--accent);
+   z-index:1000; transition:width .08s linear; }
+ .toolbar { display:flex; gap:8px; align-items:center; margin:4px 0 12px; }
+ .search { flex:1; min-width:0; padding:7px 10px; border:1px solid var(--line);
+   border-radius:8px; background:#fff; color:var(--fg); font-size:13px; }
+ .search:focus { outline:none; border-color:var(--accent); }
+ .icon-btn { cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--fg);
+   border-radius:8px; padding:6px 10px; font-size:14px; line-height:1; }
+ .icon-btn:hover { border-color:var(--accent); color:var(--accent); }
+ nav a { border-left:3px solid transparent; transition:background .12s,border-color .12s; }
+ nav a.active { background:#e7eef9; color:var(--accent); font-weight:600; border-left-color:var(--accent); }
+ [data-theme="dark"] nav a.active { background:#1f2a3a; }
+ nav a.nav-hidden { display:none !important; }
+ #toTop { position:fixed; right:22px; bottom:22px; opacity:0; pointer-events:none;
+   transition:opacity .2s; z-index:900; box-shadow:0 2px 10px rgba(0,0,0,.18); }
+ #toTop.show { opacity:1; pointer-events:auto; }
+ .pre-wrap { position:relative; }
+ .copy-btn { position:absolute; top:8px; right:8px; font-size:11px; padding:3px 8px; opacity:.85; }
+ .copy-btn:hover { opacity:1; }
+ img.zoomable { cursor:zoom-in; }
+ #lightbox { position:fixed; inset:0; background:rgba(0,0,0,.86); display:none;
+   align-items:center; justify-content:center; z-index:2000; cursor:zoom-out; }
+ #lightbox.show { display:flex; }
+ #lightbox img { max-width:94%; max-height:94%; border:none; border-radius:6px; }
+ .no-result { color:var(--muted); padding:14px; display:none; }
+ @media (max-width:820px) {
+   .layout { flex-direction:column; }
+   nav { width:100%; flex:none; position:static; max-height:none;
+     border-bottom:1px solid var(--line); }
+ }
+</style>
 </head>
 <body>
+<div id="progress"></div>
 <header>
  <h1>semisim — 半導体プロセス 3D シミュレータ 使い方説明書</h1>
  <p>各プロセス操作の断面スクリーンショットと説明・パラメータ・コード例</p>
@@ -48,6 +95,10 @@
 <div class="layout">
 <nav>
  <h2>目次</h2>
+ <div class="toolbar">
+  <input id="search" class="search" type="search" placeholder="&#128269; 検索（章を絞り込み）" aria-label="検索">
+  <button id="themeBtn" class="icon-btn" title="ダーク / ライト切替">&#127769;</button>
+ </div>
  <a href="#intro">はじめに / 起動方法</a>
  <a href="#gui">GUI 操作・設定画面</a>
  <div class="cat">基礎</div>
@@ -81,6 +132,7 @@
  <a href="#output">出力・レポート</a>
 </nav>
 <main>
+ <div class="no-result" id="noResult">該当する章がありません。検索語を変えてください。</div>
  <section id="intro" class="intro">
   <h2>はじめに / 起動方法</h2>
   <p><strong>semisim</strong> は半導体の前工程（成膜・リソグラフィ・エッチング・
@@ -369,5 +421,74 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
  <footer>semisim usage manual — 自動生成 (tools/build_manual.py)</footer>
 </main>
 </div>
+<button id="toTop" class="icon-btn" title="先頭へ戻る">&#8593; 上へ</button>
+<div id="lightbox"><img alt="拡大画像"></div>
+<script>
+(function(){
+  var root=document.documentElement;
+  var saved=localStorage.getItem('semisim-theme');
+  if(saved==='dark') root.setAttribute('data-theme','dark');
+  function updTheme(){var b=document.getElementById('themeBtn');
+    if(b) b.textContent=root.getAttribute('data-theme')==='dark'?'\u2600\ufe0f':'\ud83c\udf19';}
+  var tb=document.getElementById('themeBtn');
+  if(tb) tb.addEventListener('click',function(){
+    if(root.getAttribute('data-theme')==='dark'){root.removeAttribute('data-theme');
+      localStorage.setItem('semisim-theme','light');}
+    else{root.setAttribute('data-theme','dark');localStorage.setItem('semisim-theme','dark');}
+    updTheme();});
+  updTheme();
+  var prog=document.getElementById('progress');
+  var top=document.getElementById('toTop');
+  window.addEventListener('scroll',function(){
+    var h=document.documentElement.scrollHeight-window.innerHeight;
+    if(prog) prog.style.width=(h>0?(window.scrollY/h*100):0)+'%';
+    if(top){ if(window.scrollY>420) top.classList.add('show'); else top.classList.remove('show'); }
+  });
+  if(top) top.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
+  document.querySelectorAll('main pre').forEach(function(pre){
+    var wrap=document.createElement('div'); wrap.className='pre-wrap';
+    pre.parentNode.insertBefore(wrap,pre); wrap.appendChild(pre);
+    var btn=document.createElement('button'); btn.className='icon-btn copy-btn'; btn.textContent='\u30b3\u30d4\u30fc';
+    wrap.appendChild(btn);
+    btn.addEventListener('click',function(){
+      navigator.clipboard.writeText(pre.innerText).then(function(){
+        btn.textContent='\u30b3\u30d4\u30fc\u6e08'; setTimeout(function(){btn.textContent='\u30b3\u30d4\u30fc';},1200);
+      });
+    });
+  });
+  var lb=document.getElementById('lightbox');
+  if(lb){ var lbimg=lb.querySelector('img');
+    document.querySelectorAll('main img').forEach(function(im){
+      im.classList.add('zoomable');
+      im.addEventListener('click',function(){lbimg.src=im.src; lb.classList.add('show');});
+    });
+    lb.addEventListener('click',function(){lb.classList.remove('show');});
+  }
+  var navLinks=Array.prototype.slice.call(document.querySelectorAll('nav a'));
+  var map={};
+  navLinks.forEach(function(a){map[a.getAttribute('href').slice(1)]=a;});
+  if('IntersectionObserver' in window){
+    var obs=new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){
+        navLinks.forEach(function(a){a.classList.remove('active');});
+        var a=map[e.target.id]; if(a) a.classList.add('active');
+      }});
+    },{rootMargin:'-40% 0px -55% 0px'});
+    document.querySelectorAll('main section').forEach(function(s){obs.observe(s);});
+  }
+  var search=document.getElementById('search');
+  var noRes=document.getElementById('noResult');
+  if(search) search.addEventListener('input',function(){
+    var q=search.value.trim().toLowerCase(); var any=false;
+    document.querySelectorAll('main section').forEach(function(s){
+      var hit=!q || s.textContent.toLowerCase().indexOf(q)>=0;
+      s.style.display=hit?'':'none';
+      var a=map[s.id]; if(a) a.classList.toggle('nav-hidden',!hit);
+      if(hit) any=true;
+    });
+    if(noRes) noRes.style.display=any?'none':'block';
+  });
+})();
+</script>
 </body>
 </html>
