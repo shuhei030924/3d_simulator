@@ -2093,6 +2093,44 @@ def schottky_diode_current(
     return float(i)
 
 
+# hc/q = 1.23984 eV·µm（光子エネルギー[eV]=1.23984/λ[µm]）
+_HC_EV_UM = 1.239841984
+
+
+def photodiode_responsivity(
+    wavelength_um: float, *, quantum_efficiency: float = 0.8, eg_ev: float = 1.12,
+) -> dict:
+    """フォトダイオードの応答度 R（A/W）と遮断波長を返す。
+
+    量子効率 η の光検出器は、入射光子 1 個あたり η 個のキャリアを生成する。
+    光子エネルギー hν=hc/λ に対し応答度は
+      R = η·q·λ/(h·c) = η·λ[µm] / 1.23984   [A/W]
+    で、波長が長いほど（光子あたりエネルギーが小さく光子数が多いほど）大きい。
+    ただしバンドギャップより光子エネルギーが小さい（λ>λ_c）と吸収されず R=0。
+    遮断波長は λ_c = hc/Eg = 1.23984/Eg（Si: Eg=1.12eV→λ_c≈1.107µm）。
+    返す辞書: responsivity_a_w / cutoff_wavelength_um / photon_energy_ev /
+    quantum_efficiency / below_bandgap（λ>λ_c で True）。
+    η は 0〜1、波長は正。
+    """
+    if wavelength_um <= 0:
+        raise ValueError("波長は正の値が必要です。")
+    if not 0.0 <= quantum_efficiency <= 1.0:
+        raise ValueError("量子効率は 0〜1 の範囲が必要です。")
+    if eg_ev <= 0:
+        raise ValueError("バンドギャップは正の値が必要です。")
+    cutoff_um = _HC_EV_UM / eg_ev
+    photon_ev = _HC_EV_UM / wavelength_um
+    below = wavelength_um > cutoff_um  # 光子エネルギー < Eg は吸収されない
+    resp = 0.0 if below else quantum_efficiency * wavelength_um / _HC_EV_UM
+    return {
+        "responsivity_a_w": float(resp),
+        "cutoff_wavelength_um": float(cutoff_um),
+        "photon_energy_ev": float(photon_ev),
+        "quantum_efficiency": float(quantum_efficiency),
+        "below_bandgap": bool(below),
+    }
+
+
 def antenna_ratio(
     wafer: Wafer, conductor, gate_dielectric, ratio_limit: float = 400.0
 ) -> dict:
