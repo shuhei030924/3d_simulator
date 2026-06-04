@@ -2739,6 +2739,42 @@ def process_help(proc_type: str) -> str:
     return _PROCESS_HELP.get(proc_type, "")
 
 
+# 工程の分類（GUI の「工程を追加」メニューをカテゴリ分けする, GUI 非依存）
+_CATEGORY_ORDER = [
+    "リソグラフィ", "成膜", "エッチング", "ドーピング・熱処理", "平坦化・仕上げ",
+]
+_PROCESS_CATEGORY = {
+    "PHOTO": "リソグラフィ",
+    "CVD": "成膜", "ALD": "成膜", "PVD": "成膜", "EPI": "成膜",
+    "SPINON": "成膜", "FILL": "成膜", "SALICIDE": "成膜",
+    "DRY": "エッチング", "WET": "エッチング", "ALE": "エッチング", "KOH": "エッチング",
+    "DRIE": "エッチング", "SPUTTER": "エッチング", "LIFTOFF": "エッチング",
+    "DIFFUSION": "ドーピング・熱処理", "IMPLANT": "ドーピング・熱処理",
+    "ANNEAL": "ドーピング・熱処理", "RTP": "ドーピング・熱処理", "OXIDE": "ドーピング・熱処理",
+    "CMP": "平坦化・仕上げ", "BACKGRIND": "平坦化・仕上げ", "REFLOW": "平坦化・仕上げ",
+    "CLEAN": "平坦化・仕上げ", "STRIP": "平坦化・仕上げ",
+}
+
+
+def process_category(proc_type: str) -> str:
+    """工程タイプのカテゴリ名を返す（未登録は 'その他'）。"""
+    return _PROCESS_CATEGORY.get(proc_type, "その他")
+
+
+def categorized_types() -> list[tuple[str, list[tuple[str, str]]]]:
+    """カテゴリ別に (カテゴリ名, [(type, label), ...]) を表示順で返す。
+
+    「工程を追加」メニューをカテゴリのサブメニューに分けるために使う。
+    既知カテゴリを _CATEGORY_ORDER 順に、未知は末尾にまとめる。
+    """
+    groups: dict[str, list[tuple[str, str]]] = {c: [] for c in _CATEGORY_ORDER}
+    for t, label in available_types():
+        groups.setdefault(process_category(t), []).append((t, label))
+    ordered = [(c, groups[c]) for c in _CATEGORY_ORDER if groups.get(c)]
+    extra = [(c, v) for c, v in groups.items() if c not in _CATEGORY_ORDER and v]
+    return ordered + extra
+
+
 def available_types() -> list[tuple[str, str]]:
     """(type, label) のリストを表示順で返す。"""
     order = [

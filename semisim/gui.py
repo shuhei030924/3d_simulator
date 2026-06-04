@@ -1308,14 +1308,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.list.keyPressEvent = self._list_key_press
         left.addWidget(self.list, 1)
 
-        # 追加メニュー
+        # 追加メニュー（カテゴリ別サブメニューで選びやすく）
         add_btn = QtWidgets.QToolButton()
         add_btn.setText("工程を追加 ▾")
         add_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         menu = QtWidgets.QMenu(add_btn)
-        for t, label in processes.available_types():
-            act = menu.addAction(f"{t} — {label}")
-            act.triggered.connect(lambda _=False, tt=t: self.add_step(tt))
+        for category, types in processes.categorized_types():
+            submenu = menu.addMenu(category)
+            submenu.setToolTipsVisible(True)
+            for t, label in types:
+                act = submenu.addAction(f"{t} — {label}")
+                act.setToolTip(processes.process_help(t))
+                act.triggered.connect(lambda _=False, tt=t: self.add_step(tt))
         add_btn.setMenu(menu)
         left.addWidget(add_btn)
 
