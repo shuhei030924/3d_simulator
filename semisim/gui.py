@@ -1097,6 +1097,7 @@ class CrossSection2D(QtWidgets.QWidget):
         # 直近に描画した断面（材料 ID 2D 配列）とその実寸。カーソル下の材料判定に使う。
         self._plane = None
         self._plane_wh = (0.0, 0.0)
+        self._show_grid = False  # 寸法読み取り用グリッド線の表示
 
         lay = QtWidgets.QVBoxLayout(self)
         bar = QtWidgets.QHBoxLayout()
@@ -1121,6 +1122,10 @@ class CrossSection2D(QtWidgets.QWidget):
         clr = QtWidgets.QPushButton("測定クリア")
         clr.clicked.connect(self._clear_measure)
         bar.addWidget(clr)
+        self.grid_cb = QtWidgets.QCheckBox("グリッド")
+        self.grid_cb.setToolTip("寸法読み取り用の補助グリッド線を表示")
+        self.grid_cb.toggled.connect(self._on_grid_toggle)
+        bar.addWidget(self.grid_cb)
         self.save_btn = QtWidgets.QPushButton("画像保存")
         self.save_btn.setToolTip("現在の断面を PNG 画像として保存")
         self.save_btn.clicked.connect(self.save_image)
@@ -1186,6 +1191,10 @@ class CrossSection2D(QtWidgets.QWidget):
     def _clear_measure(self):
         self._measure_pts = []
         self.info_lbl.setText("断面上の2点をクリックすると距離を表示します。")
+        self.redraw()
+
+    def _on_grid_toggle(self, on):
+        self._show_grid = bool(on)
         self.redraw()
 
     def _on_click(self, event):
@@ -1255,6 +1264,10 @@ class CrossSection2D(QtWidgets.QWidget):
         self.ax.set_ylabel(labels[1])
         p = self.wafer.config.pitch_um
         self.pos_lbl.setText(f"{self.axis} = {self.index * p:.2f} µm")
+
+        # 寸法読み取り用の補助グリッド線
+        if self._show_grid:
+            self.ax.grid(True, color="#888", lw=0.4, alpha=0.5)
 
         # 測定マーカー
         if self._measure_pts:
