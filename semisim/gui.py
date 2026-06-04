@@ -81,13 +81,16 @@ class MaskEditor(QtWidgets.QGroupBox):
         b_circ = QtWidgets.QPushButton("円")
         b_stripe = QtWidgets.QPushButton("帯")
         b_grating = QtWidgets.QPushButton("周期ライン")
+        b_dup = QtWidgets.QPushButton("複製")
+        b_dup.setToolTip("選択中の図形を複製する")
         b_del = QtWidgets.QPushButton("削除")
         b_rect.clicked.connect(self._add_rect)
         b_circ.clicked.connect(self._add_circle)
         b_stripe.clicked.connect(self._add_stripe)
         b_grating.clicked.connect(self._add_grating)
+        b_dup.clicked.connect(self._duplicate)
         b_del.clicked.connect(self._delete)
-        for b in (b_rect, b_circ, b_stripe, b_grating, b_del):
+        for b in (b_rect, b_circ, b_stripe, b_grating, b_dup, b_del):
             btns.addWidget(b)
         lay.addLayout(btns)
 
@@ -142,6 +145,15 @@ class MaskEditor(QtWidgets.QGroupBox):
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             self.mask.shapes.append(Shape("grating", dlg.values()))
             self._refresh_list()
+
+    def _duplicate(self):
+        """選択中の図形を複製し、直後に挿入して選択する。"""
+        row = self.list.currentRow()
+        if 0 <= row < len(self.mask.shapes):
+            s = self.mask.shapes[row]
+            self.mask.shapes.insert(row + 1, Shape(s.kind, dict(s.params)))
+            self._refresh_list()
+            self.list.setCurrentRow(row + 1)
 
     def _delete(self):
         row = self.list.currentRow()
