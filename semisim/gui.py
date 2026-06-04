@@ -62,9 +62,18 @@ class MaskEditor(QtWidgets.QGroupBox):
         self.invert_cb.setChecked(self.mask.invert)
         lay.addWidget(self.invert_cb)
 
+        # 図形リスト＋プレビューを横並びに
+        mid = QtWidgets.QHBoxLayout()
         self.list = QtWidgets.QListWidget()
         self.list.setMaximumHeight(120)
-        lay.addWidget(self.list)
+        mid.addWidget(self.list, 1)
+        self.preview = QtWidgets.QLabel()
+        self.preview.setFixedSize(76, 76)
+        self.preview.setToolTip("マスクのプレビュー（青=選択領域）")
+        self.preview.setStyleSheet("border:1px solid #d4dce6; border-radius:6px;")
+        mid.addWidget(self.preview, 0)
+        lay.addLayout(mid)
+        self.invert_cb.stateChanged.connect(self._refresh_list)
         self._refresh_list()
 
         btns = QtWidgets.QHBoxLayout()
@@ -96,6 +105,19 @@ class MaskEditor(QtWidgets.QGroupBox):
             self.list.addItem(placeholder)
         for s in self.mask.shapes:
             self.list.addItem(s.label())
+        self._refresh_preview()
+
+    def _refresh_preview(self):
+        """現在のマスク（反転状態込み）の即時プレビューを更新する。"""
+        if not hasattr(self, "preview"):
+            return
+        self.mask.invert = self.invert_cb.isChecked()
+        size = 72
+        rgb = self.mask.preview_rgb(size)
+        rgb = np.ascontiguousarray(rgb)
+        img = QtGui.QImage(rgb.data, size, size, 3 * size,
+                           QtGui.QImage.Format_RGB888)
+        self.preview.setPixmap(QtGui.QPixmap.fromImage(img.copy()))
 
     def _add_rect(self):
         dlg = _RectDialog(self)
