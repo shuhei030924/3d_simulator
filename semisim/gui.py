@@ -1048,6 +1048,9 @@ class CrossSection2D(QtWidgets.QWidget):
         self.index = 0
         self.include_resist = True
         self._measure_pts: list[tuple[float, float]] = []
+        # 直近に描画した断面（材料 ID 2D 配列）とその実寸。カーソル下の材料判定に使う。
+        self._plane = None
+        self._plane_wh = (0.0, 0.0)
 
         lay = QtWidgets.QVBoxLayout(self)
         bar = QtWidgets.QHBoxLayout()
@@ -1082,11 +1085,18 @@ class CrossSection2D(QtWidgets.QWidget):
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.ax = self.fig.add_subplot(111)
         self.canvas.mpl_connect("button_press_event", self._on_click)
+        self.canvas.mpl_connect("motion_notify_event", self._on_motion)
         lay.addWidget(self.canvas, 1)
 
+        info_row = QtWidgets.QHBoxLayout()
         self.info_lbl = QtWidgets.QLabel("断面上の2点をクリックすると距離を表示します。")
         self.info_lbl.setStyleSheet("color: #225;")
-        lay.addWidget(self.info_lbl)
+        info_row.addWidget(self.info_lbl, 1)
+        # カーソル下の材料名リードアウト（層の識別用）
+        self.mat_lbl = QtWidgets.QLabel("")
+        self.mat_lbl.setStyleSheet("color: #225; font-weight: 600;")
+        info_row.addWidget(self.mat_lbl)
+        lay.addLayout(info_row)
 
     # -- 設定 --------------------------------------------------------------
     def set_wafer(self, wafer, include_resist: bool):
@@ -1151,6 +1161,28 @@ class CrossSection2D(QtWidgets.QWidget):
             self.info_lbl.setText("2点目をクリックしてください。")
         self.redraw()
 
+    def _material_at(self, xdata, ydata) -> str | None:
+        """断面上の実寸座標 (µm) にある材料の表示名を返す（範囲外は None）。"""
+        if self._plane is None or xdata is None or ydata is None:
+            return None
+        w_um, h_um = self._plane_wh
+        if not (0.0 <= xdata < w_um and 0.0 <= ydata < h_um):
+            return None
+        p = self.wafer.config.pitch_um
+        rows, cols = self._plane.shape
+        col = min(cols - 1, max(0, int(xdata / p)))
+        row = min(rows - 1, max(0, int(ydata / p)))
+        mid = int(self._plane[row, col])
+        return materials.get(mid).label
+
+    def _on_motion(self, event):
+        """カーソル下の材料名をリードアウトに表示する。"""
+        if event.inaxes != self.ax:
+            self.mat_lbl.setText("")
+            return
+        label = self._material_at(event.xdata, event.ydata)
+        self.mat_lbl.setText(f"材料: {label}" if label else "")
+
     # -- 描画 --------------------------------------------------------------
     def redraw(self):
         self.ax.clear()
@@ -1160,6 +1192,8 @@ class CrossSection2D(QtWidgets.QWidget):
         plane, w_um, h_um = visualize.slice_2d(
             self.wafer, self.axis, self.index, self.include_resist
         )
+        self._plane = plane
+        self._plane_wh = (w_um, h_um)
         cmap, norm = visualize.material_listed_cmap()
         # Z 断面は縦軸が Y、それ以外は縦軸が Z（下=基板）。origin=lower で下が原点。
         self.ax.imshow(
