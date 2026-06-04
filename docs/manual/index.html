@@ -77,7 +77,16 @@
  #lightbox { position:fixed; inset:0; background:rgba(0,0,0,.86); display:none;
    align-items:center; justify-content:center; z-index:2000; cursor:zoom-out; }
  #lightbox.show { display:flex; }
- #lightbox img { max-width:94%; max-height:94%; border:none; border-radius:6px; }
+ #lightbox figure { margin:0; max-width:92%; max-height:92%; text-align:center; }
+ #lightbox img { max-width:100%; max-height:84vh; border:none; border-radius:6px; }
+ #lbCap { color:#cdd6e0; font-size:13px; margin-top:10px; }
+ #lbCount { position:absolute; top:16px; right:20px; color:#cdd6e0; font-size:13px;
+   background:rgba(0,0,0,.35); padding:3px 9px; border-radius:999px; }
+ .lb-nav { position:absolute; top:50%; transform:translateY(-50%); font-size:32px;
+   color:#fff; background:rgba(255,255,255,.10); border:none; cursor:pointer;
+   width:50px; height:72px; border-radius:8px; line-height:1; }
+ .lb-nav:hover { background:rgba(255,255,255,.22); }
+ #lbPrev { left:18px; } #lbNext { right:18px; }
  .no-result { color:var(--muted); padding:14px; display:none; }
  @media (max-width:820px) {
    .layout { flex-direction:column; }
@@ -425,7 +434,12 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
 </main>
 </div>
 <button id="toTop" class="icon-btn" title="先頭へ戻る">&#8593; 上へ</button>
-<div id="lightbox"><img alt="拡大画像"></div>
+<div id="lightbox">
+ <button class="lb-nav" id="lbPrev" title="前の画像 (←)">&#8249;</button>
+ <figure><img alt="拡大画像"><figcaption id="lbCap"></figcaption></figure>
+ <button class="lb-nav" id="lbNext" title="次の画像 (→)">&#8250;</button>
+ <span id="lbCount"></span>
+</div>
 <script>
 (function(){
   var root=document.documentElement;
@@ -460,13 +474,38 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
     });
   });
   var lb=document.getElementById('lightbox');
-  if(lb){ var lbimg=lb.querySelector('img');
-    document.querySelectorAll('main img').forEach(function(im){
-      im.classList.add('zoomable');
-      im.addEventListener('click',function(){lbimg.src=im.src; lb.classList.add('show');});
-    });
+  if(lb){
+    var lbimg=lb.querySelector('img');
+    var lbcap=document.getElementById('lbCap');
+    var lbcount=document.getElementById('lbCount');
+    var imgs=Array.prototype.slice.call(document.querySelectorAll('main img'));
+    var idx=0;
+    function lbShow(i){ idx=(i+imgs.length)%imgs.length; var im=imgs[idx];
+      lbimg.src=im.src; if(lbcap) lbcap.textContent=im.alt||'';
+      if(lbcount) lbcount.textContent=(idx+1)+' / '+imgs.length;
+      lb.classList.add('show'); }
+    imgs.forEach(function(im,i){ im.classList.add('zoomable');
+      im.addEventListener('click',function(){lbShow(i);}); });
     lb.addEventListener('click',function(){lb.classList.remove('show');});
+    var fig=lb.querySelector('figure');
+    if(fig) fig.addEventListener('click',function(e){e.stopPropagation();});
+    var pv=document.getElementById('lbPrev'), nx=document.getElementById('lbNext');
+    if(pv) pv.addEventListener('click',function(e){e.stopPropagation(); lbShow(idx-1);});
+    if(nx) nx.addEventListener('click',function(e){e.stopPropagation(); lbShow(idx+1);});
+    document.addEventListener('keydown',function(e){
+      if(!lb.classList.contains('show')) return;
+      if(e.key==='ArrowRight') lbShow(idx+1);
+      else if(e.key==='ArrowLeft') lbShow(idx-1);
+      else if(e.key==='Escape') lb.classList.remove('show');
+    });
   }
+  document.addEventListener('keydown',function(e){
+    var s=document.getElementById('search');
+    var inField=/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement||{}).tagName||'');
+    if(e.key==='/' && !inField){ e.preventDefault(); if(s) s.focus(); }
+    else if(e.key==='Escape' && document.activeElement===s){
+      s.value=''; s.dispatchEvent(new Event('input')); s.blur(); }
+  });
   var navLinks=Array.prototype.slice.call(document.querySelectorAll('nav a'));
   var map={};
   navLinks.forEach(function(a){map[a.getAttribute('href').slice(1)]=a;});

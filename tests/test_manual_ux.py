@@ -60,6 +60,21 @@ def test_has_lightbox(page):
     assert "zoomable" in page
 
 
+def test_lightbox_navigation(page):
+    """ライトボックスに前後ナビ・キャプション・カウンタがある。"""
+    assert 'id="lbPrev"' in page
+    assert 'id="lbNext"' in page
+    assert 'id="lbCount"' in page
+    assert 'id="lbCap"' in page
+    assert "ArrowRight" in page and "ArrowLeft" in page
+
+
+def test_keyboard_shortcuts(page):
+    """'/' で検索フォーカス・Esc 対応のキーボードショートカットがある。"""
+    assert "keydown" in page
+    assert "Escape" in page
+
+
 def test_has_copy_buttons(page):
     assert "navigator.clipboard" in page
     assert "copy-btn" in page
