@@ -60,3 +60,15 @@ def test_mat_lbl_exists():
     _qt_or_skip()
     view = _make_view()
     assert hasattr(view, "mat_lbl")
+
+
+def test_grid_toggle():
+    """グリッドトグルで状態が変わり、再描画が例外を出さない。"""
+    _qt_or_skip()
+    view = _make_view()
+    assert view._show_grid is False
+    view.grid_cb.setChecked(True)
+    assert view._show_grid is True
+    view.redraw()  # グリッド有りでも例外なく描画
+    view.grid_cb.setChecked(False)
+    assert view._show_grid is False
