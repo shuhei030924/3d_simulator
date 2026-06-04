@@ -128,6 +128,12 @@ def test_section_collapse(page):
     assert 'id="collapseAllBtn"' in page
 
 
+def test_collapse_persistence(page):
+    """折りたたみ状態が localStorage に永続化される。"""
+    assert "semisim-collapsed" in page
+    assert "persistCollapsed" in page
+
+
 def test_card_var_defined_in_light(page):
     """--card 変数がライト（:root）でも定義されている（不透明背景の保証）。
 
