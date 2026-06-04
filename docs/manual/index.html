@@ -555,6 +555,12 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
       else if(e.key==='Escape') lb.classList.remove('show');
     });
   }
+  var COLLAPSE_KEY='semisim-collapsed';
+  function persistCollapsed(){ try{
+    var ids=Array.prototype.slice.call(document.querySelectorAll('main section.collapsed'))
+      .map(function(s){return s.id;});
+    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(ids));
+  }catch(err){} }
   var collapseAllBtn=document.getElementById('collapseAllBtn');
   if(collapseAllBtn) collapseAllBtn.addEventListener('click',function(){
     var secs=Array.prototype.slice.call(document.querySelectorAll('main section[id]'));
@@ -562,6 +568,7 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
     secs.forEach(function(s){ s.classList.toggle('collapsed',anyOpen); });
     collapseAllBtn.innerHTML=anyOpen?'\u229e':'\u229f';
     collapseAllBtn.title=anyOpen?'全ての章を展開':'全ての章を折りたたむ';
+    persistCollapsed();
   });
   var helpOv=document.getElementById('help-overlay');
   var helpBtn=document.getElementById('helpBtn');
@@ -590,6 +597,7 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
     h.addEventListener('click',function(e){
       if(e.target.closest('.anchor-link')) return;
       s.classList.toggle('collapsed');
+      persistCollapsed();
     });
     var a=document.createElement('button');
     a.className='anchor-link'; a.type='button';
@@ -603,6 +611,9 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
     });
     h.appendChild(a);
   });
+  try{ JSON.parse(localStorage.getItem(COLLAPSE_KEY)||'[]').forEach(function(id){
+    var s=document.getElementById(id); if(s) s.classList.add('collapsed');
+  }); }catch(err){}
   var navLinks=Array.prototype.slice.call(document.querySelectorAll('nav a'));
   var map={};
   navLinks.forEach(function(a){map[a.getAttribute('href').slice(1)]=a;});
