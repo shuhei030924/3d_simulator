@@ -60,6 +60,14 @@ def test_has_lightbox(page):
     assert "zoomable" in page
 
 
+def test_print_button(page):
+    """印刷 / PDF ボタンがあり、印刷時は折りたたみ章も展開される。"""
+    assert 'id="printBtn"' in page
+    assert "window.print()" in page
+    # 印刷スタイルで collapsed の本文を復活させる
+    assert "section.collapsed > :not(h2) { display:revert" in page
+
+
 def test_search_hit_count(page):
     """検索ヒット件数のリードアウト（searchCount）がある。"""
     assert 'id="searchCount"' in page
