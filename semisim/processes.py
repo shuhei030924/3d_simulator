@@ -1586,7 +1586,10 @@ class Oxidation(Process):
         grid[deposit] = ox_id
 
         # 3) バーズビーク: マスク端の下へ Si 表面酸化を横方向にテーパ侵入させる。
-        if self.beak_fraction > 0 and consume > 0:
+        # 露出 Si が全く無い場合（表面が全てマスク/他材料）はバーズビークも
+        # 生じない。この場合 ~eligible が全 True になり距離変換が退化して
+        # 端部に非対称な偽の酸化を生むため、eligible.any() でガードする。
+        if self.beak_fraction > 0 and consume > 0 and eligible.any():
             beak_len = max(1, int(round(self.beak_fraction * total)))
             # 非露出（マスク下）列について露出領域からの距離を測る。
             dist = ndimage.distance_transform_edt(~eligible)
@@ -2709,6 +2712,16 @@ class Reflow(Process):
         gained = smoothed & (grid == materials.AIR)
         # 減った分（凸の出っ張り）は空気へ戻す
         lost = mask & ~smoothed
+        # 宙吊り防止: リフローで取り除けるのは自由表面側の出っ張りのみ。
+        # 上に他の固体が載っている（=荷重を支える）target voxel を消すと、
+        # 上層が宙に浮く偽像になる。列内で上方(z+1..)に残存固体がある
+        # voxel は除去しないことで連結性を保つ。
+        blocker = (grid != materials.AIR) & ~lost  # リフロー後も残る固体
+        flip = blocker[::-1]
+        cum_above = np.maximum.accumulate(flip, axis=0)  # 上から下への累積 OR
+        blocked_above = np.zeros_like(blocker)
+        blocked_above[:-1] = cum_above[::-1][1:]  # 各 voxel の真上に残存固体があるか
+        lost &= ~blocked_above
         grid[gained] = target_id
         grid[lost] = materials.AIR
 
