@@ -1133,6 +1133,7 @@ MANUAL_CSS = """
  .search { flex:1; min-width:0; padding:7px 10px; border:1px solid var(--line);
    border-radius:8px; background:#fff; color:var(--fg); font-size:13px; }
  .search:focus { outline:none; border-color:var(--accent); }
+ .search-count { font-size:12px; color:var(--muted); white-space:nowrap; min-width:0; }
  .icon-btn { cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--fg);
    border-radius:8px; padding:6px 10px; font-size:14px; line-height:1; }
  .icon-btn:hover { border-color:var(--accent); color:var(--accent); }
@@ -1366,17 +1367,19 @@ MANUAL_JS = """
     c.cat.classList.remove('collapsed'); c.group.forEach(function(g){ g.style.display=''; }); }); }
   var search=document.getElementById('search');
   var noRes=document.getElementById('noResult');
+  var searchCount=document.getElementById('searchCount');
   if(search) search.addEventListener('input',function(){
-    var q=search.value.trim().toLowerCase(); var any=false;
+    var q=search.value.trim().toLowerCase(); var any=false; var hits=0;
     if(q) expandAllCats();
     document.querySelectorAll('main section').forEach(function(s){
       var hit=!q || s.textContent.toLowerCase().indexOf(q)>=0;
       s.style.display=hit?'':'none';
       if(hit && q) s.classList.remove('collapsed');  // 検索ヒットは本文を展開
       var a=map[s.id]; if(a) a.classList.toggle('nav-hidden',!hit);
-      if(hit) any=true;
+      if(hit){ any=true; hits++; }
     });
     if(noRes) noRes.style.display=any?'none':'block';
+    if(searchCount) searchCount.textContent=q?(hits+' 件'):'';
   });
 })();
 """
@@ -1436,6 +1439,7 @@ PAGE_TMPL = """<!DOCTYPE html>
  <h2>目次</h2>
  <div class="toolbar">
   <input id="search" class="search" type="search" placeholder="&#128269; 検索（章を絞り込み）" aria-label="検索">
+  <span id="searchCount" class="search-count" aria-live="polite"></span>
   <button id="fontDecBtn" class="icon-btn" title="文字を小さく">A&#8722;</button>
   <button id="fontIncBtn" class="icon-btn" title="文字を大きく">A&#43;</button>
   <button id="collapseAllBtn" class="icon-btn" title="全ての章を折りたたむ / 展開">&#8862;</button>
