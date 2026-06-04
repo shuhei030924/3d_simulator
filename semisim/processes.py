@@ -2761,6 +2761,27 @@ def process_category(proc_type: str) -> str:
     return _PROCESS_CATEGORY.get(proc_type, "その他")
 
 
+# カテゴリの識別色（GUI のレシピ一覧で工程種別を色分けする, GUI 非依存）
+_CATEGORY_COLOR = {
+    "リソグラフィ": "#8e44ad",
+    "成膜": "#2d6cdf",
+    "エッチング": "#e67e22",
+    "ドーピング・熱処理": "#c0392b",
+    "平坦化・仕上げ": "#16a085",
+    "その他": "#7f8c8d",
+}
+
+
+def category_color(category: str) -> str:
+    """カテゴリ名の識別色（#rrggbb）を返す（未登録はグレー）。"""
+    return _CATEGORY_COLOR.get(category, "#7f8c8d")
+
+
+def process_color(proc_type: str) -> str:
+    """工程タイプの識別色（カテゴリ色）を返す。"""
+    return category_color(process_category(proc_type))
+
+
 def categorized_types() -> list[tuple[str, list[tuple[str, str]]]]:
     """カテゴリ別に (カテゴリ名, [(type, label), ...]) を表示順で返す。
 
