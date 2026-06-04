@@ -21,8 +21,8 @@ def page() -> str:
     return build_manual.PAGE_TMPL.format(
         nav="<a href='#x'>x</a>", sections="<section id='x'></section>",
         gui="", device_curves_body="", defect_title="d", defect_body="",
-        verification_body="", extra_style=build_manual.MANUAL_CSS,
-        scripts=build_manual.MANUAL_JS,
+        verification_body="", stats=build_manual._stats_html(19, 13),
+        extra_style=build_manual.MANUAL_CSS, scripts=build_manual.MANUAL_JS,
     )
 
 
@@ -86,3 +86,24 @@ def test_responsive_media_query(page):
 
 def test_smooth_scroll(page):
     assert "scroll-behavior:smooth" in page
+
+
+def test_has_stats_dashboard(page):
+    """概要ダッシュボード（統計カード）が含まれる。"""
+    assert "class='stats'" in page or 'class="stats"' in page
+    assert "検証関数" in page
+
+
+def test_print_stylesheet(page):
+    """印刷用スタイル（@media print）でナビ等を隠す。"""
+    assert "@media print" in page
+
+
+def test_stats_html_counts():
+    """_stats_html は指定した工程数・カーブ数と metrology 関数数を埋め込む。"""
+    s = build_manual._stats_html(19, 13)
+    assert ">19<" in s and ">13<" in s
+    # metrology の検証関数が多数カウントされる
+    import re
+    nums = [int(x) for x in re.findall(r">(\d+)<", s)]
+    assert max(nums) > 50

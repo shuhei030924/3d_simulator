@@ -1160,6 +1160,19 @@ MANUAL_CSS = """
  .lb-nav:hover { background:rgba(255,255,255,.22); }
  #lbPrev { left:18px; } #lbNext { right:18px; }
  .no-result { color:var(--muted); padding:14px; display:none; }
+ .stats { display:flex; gap:14px; flex-wrap:wrap; margin:18px 0 4px; }
+ .stat { flex:1; min-width:130px; background:var(--bg); border:1px solid var(--line);
+   border-radius:10px; padding:14px 16px; text-align:center; }
+ .stat .num { font-size:27px; font-weight:700; color:var(--accent); line-height:1.1; }
+ .stat .lbl { font-size:12px; color:var(--muted); margin-top:3px; }
+ [data-theme="dark"] .stat { background:#0d1117; }
+ @media print {
+   nav, #toTop, #progress, .copy-btn, #lightbox, .toolbar { display:none !important; }
+   .layout { display:block; max-width:none; } main { padding:0; }
+   section { break-inside:avoid; page-break-inside:avoid; border:none; }
+   header { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+   body { background:#fff; }
+ }
  @media (max-width:820px) {
    .layout { flex-direction:column; }
    nav { width:100%; flex:none; position:static; max-height:none;
@@ -1332,6 +1345,7 @@ PAGE_TMPL = """<!DOCTYPE html>
   <p><strong>semisim</strong> は半導体の前工程（成膜・リソグラフィ・エッチング・
   ドーピング・平坦化など）を 3D ボクセル格子上で再現し、断面や 3D 形状を可視化、
   さらに各種メトロロジで不良モードを定量検証できるシミュレータです。</p>
+  {stats}
   <table class="param">
    <tr><th>用途</th><th>コマンド</th></tr>
    <tr><td>GUI 起動（対話的にレシピ作成・3D 表示）</td><td><code>py main.py</code></td></tr>
@@ -1388,6 +1402,26 @@ PAGE_TMPL = """<!DOCTYPE html>
 """
 
 
+def _stats_html(n_process: int, n_curve: int) -> str:
+    """概要ダッシュボード（プロセス工程数・特性カーブ数・検証関数数）の HTML。"""
+    import inspect
+    n_func = len([
+        n for n, o in inspect.getmembers(metrology, inspect.isfunction)
+        if getattr(o, "__module__", "") == "semisim.metrology" and not n.startswith("_")
+    ])
+    cards = [
+        (n_process, "プロセス工程"),
+        (n_curve, "デバイス特性カーブ"),
+        (n_func, "検証関数 (metrology)"),
+    ]
+    body = "".join(
+        f"<div class='stat'><div class='num'>{n}</div>"
+        f"<div class='lbl'>{html.escape(lbl)}</div></div>"
+        for n, lbl in cards
+    )
+    return f"<div class='stats'>{body}</div>"
+
+
 def main() -> None:
     print(f"出力先: {OUT_DIR}")
     os.makedirs(IMG_DIR, exist_ok=True)
@@ -1427,6 +1461,7 @@ def main() -> None:
         defect_title=html.escape(defect_title),
         defect_body=defect_body,
         verification_body=verification_section(),
+        stats=_stats_html(len(items), len(_DEVICE_CURVES)),
         extra_style=MANUAL_CSS,
         scripts=MANUAL_JS,
     )
