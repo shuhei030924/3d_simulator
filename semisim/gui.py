@@ -290,6 +290,20 @@ class ProcessDialog(QtWidgets.QDialog):
 
         self.form = QtWidgets.QFormLayout(self)
         self.mask_editor: MaskEditor | None = None
+
+        # 工程の 1 行説明をダイアログ上部にバナー表示（操作のヒント）
+        help_text = processes.process_help(proc_type)
+        if help_text:
+            banner = QtWidgets.QLabel(help_text)
+            banner.setWordWrap(True)
+            banner.setObjectName("helpBanner")
+            banner.setStyleSheet(
+                "#helpBanner { background:rgba(45,108,223,0.10);"
+                " border:1px solid rgba(45,108,223,0.28); border-radius:7px;"
+                " padding:8px 10px; }"
+            )
+            self.form.addRow(banner)
+
         self._build_fields()
 
         bb = QtWidgets.QDialogButtonBox(
