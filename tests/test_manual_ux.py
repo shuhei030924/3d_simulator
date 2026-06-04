@@ -121,6 +121,13 @@ def test_help_overlay(page):
     assert "キーボードショートカット" in page
 
 
+def test_section_collapse(page):
+    """セクション本文の折りたたみ（見出しクリック）と全展開/折りたたみがある。"""
+    assert "sec-caret" in page
+    assert "section.collapsed" in page
+    assert 'id="collapseAllBtn"' in page
+
+
 def test_card_var_defined_in_light(page):
     """--card 変数がライト（:root）でも定義されている（不透明背景の保証）。
 
