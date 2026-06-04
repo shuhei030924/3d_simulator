@@ -62,3 +62,40 @@ def test_add_menu_has_category_submenus():
     submenus = [a.menu() for a in menu.actions() if a.menu() is not None]
     assert len(submenus) == len(processes.categorized_types())
     assert len(submenus) >= 5
+
+
+def test_category_colors_valid_hex():
+    """全カテゴリに有効な #rrggbb 識別色がある。"""
+    import re
+    for cat, _ in processes.categorized_types():
+        c = processes.category_color(cat)
+        assert re.fullmatch(r"#[0-9a-fA-F]{6}", c), f"{cat}: {c}"
+
+
+def test_category_colors_distinct():
+    """主要カテゴリの色は互いに異なる。"""
+    cats = [c for c, _ in processes.categorized_types()]
+    colors = [processes.category_color(c) for c in cats]
+    assert len(set(colors)) == len(colors)
+
+
+def test_process_color_matches_category():
+    """process_color は工程のカテゴリ色と一致する。"""
+    for t, _ in processes.available_types():
+        assert processes.process_color(t) == \
+            processes.category_color(processes.process_category(t))
+
+
+def test_pixmap_icon_from_color():
+    """カテゴリ色から実際にアイコン（QPixmap）が作れる（offscreen）。"""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PyQt5 import QtGui, QtWidgets
+    except Exception:  # noqa: BLE001
+        import pytest
+        pytest.skip("PyQt5 が無い")
+    _ = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    pm = QtGui.QPixmap(11, 11)
+    pm.fill(QtGui.QColor(processes.process_color("CVD")))
+    assert pm.width() == 11 and not pm.isNull()

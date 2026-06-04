@@ -1538,7 +1538,14 @@ class MainWindow(QtWidgets.QMainWindow):
         cur = self.list.currentRow()
         self.list.clear()
         for i, s in enumerate(self.recipe.steps):
-            self.list.addItem(f"{i+1:>2}. {s.summary()}")
+            item = QtWidgets.QListWidgetItem(f"{i + 1:>2}. {s.summary()}")
+            # 工程カテゴリの識別色を小さなドットアイコンで表示（視認性向上）
+            pm = QtGui.QPixmap(11, 11)
+            pm.fill(QtGui.QColor(processes.process_color(s.type)))
+            item.setIcon(QtGui.QIcon(pm))
+            cat = processes.process_category(s.type)
+            item.setToolTip(f"{cat}：{processes.process_help(s.type)}")
+            self.list.addItem(item)
         if 0 <= cur < self.list.count():
             self.list.setCurrentRow(cur)
 
