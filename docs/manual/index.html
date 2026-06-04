@@ -145,6 +145,8 @@
  <h2>目次</h2>
  <div class="toolbar">
   <input id="search" class="search" type="search" placeholder="&#128269; 検索（章を絞り込み）" aria-label="検索">
+  <button id="fontDecBtn" class="icon-btn" title="文字を小さく">A&#8722;</button>
+  <button id="fontIncBtn" class="icon-btn" title="文字を大きく">A&#43;</button>
   <button id="collapseAllBtn" class="icon-btn" title="全ての章を折りたたむ / 展開">&#8862;</button>
   <button id="themeBtn" class="icon-btn" title="ダーク / ライト切替">&#127769;</button>
   <button id="helpBtn" class="icon-btn" title="キーボードショートカット (?)">?</button>
@@ -510,6 +512,18 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
     else{root.setAttribute('data-theme','dark');localStorage.setItem('semisim-theme','dark');}
     updTheme();});
   updTheme();
+  // 文字サイズ調整（本文を 80〜160% でズーム, localStorage 永続化）
+  var FS_KEY='semisim-fontscale';
+  var mainEl=document.querySelector('main');
+  var fs=parseInt(localStorage.getItem(FS_KEY)||'100',10); if(isNaN(fs)) fs=100;
+  function applyFs(){ fs=Math.max(80,Math.min(160,fs));
+    if(mainEl) mainEl.style.zoom=(fs/100);
+    localStorage.setItem(FS_KEY,String(fs)); }
+  applyFs();
+  var fdb=document.getElementById('fontDecBtn');
+  var fib=document.getElementById('fontIncBtn');
+  if(fdb) fdb.addEventListener('click',function(){fs-=10;applyFs();});
+  if(fib) fib.addEventListener('click',function(){fs+=10;applyFs();});
   var prog=document.getElementById('progress');
   var top=document.getElementById('toTop');
   window.addEventListener('scroll',function(){

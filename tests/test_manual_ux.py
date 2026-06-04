@@ -134,6 +134,13 @@ def test_collapse_persistence(page):
     assert "persistCollapsed" in page
 
 
+def test_font_size_adjuster(page):
+    """文字サイズ調整（A− / A＋）ボタンと localStorage 永続化がある。"""
+    assert 'id="fontDecBtn"' in page
+    assert 'id="fontIncBtn"' in page
+    assert "semisim-fontscale" in page
+
+
 def test_card_var_defined_in_light(page):
     """--card 変数がライト（:root）でも定義されている（不透明背景の保証）。
 
