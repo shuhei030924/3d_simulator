@@ -1072,6 +1072,10 @@ class CrossSection2D(QtWidgets.QWidget):
         clr = QtWidgets.QPushButton("測定クリア")
         clr.clicked.connect(self._clear_measure)
         bar.addWidget(clr)
+        self.save_btn = QtWidgets.QPushButton("画像保存")
+        self.save_btn.setToolTip("現在の断面を PNG 画像として保存")
+        self.save_btn.clicked.connect(self.save_image)
+        bar.addWidget(self.save_btn)
         lay.addLayout(bar)
 
         self.fig = Figure(figsize=(5, 4), tight_layout=True)
@@ -1178,6 +1182,26 @@ class CrossSection2D(QtWidgets.QWidget):
             ys = [pt[1] for pt in self._measure_pts]
             self.ax.plot(xs, ys, "o-", color="red", lw=1.5, ms=6)
         self.canvas.draw_idle()
+
+    def save_image(self, path: str | None = None) -> str | None:
+        """現在の断面を PNG 画像として保存する。
+
+        path 省略時はファイルダイアログで保存先を尋ねる。測定線も含めた
+        現在の表示をそのまま書き出す。保存したパス（未保存なら None）を返す。
+        """
+        if self.wafer is None:
+            self.info_lbl.setText("保存する断面がありません。")
+            return None
+        if path is None:
+            default = f"断面_{self.axis}_{self.index}.png"
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, "断面画像を保存", default, "PNG 画像 (*.png)"
+            )
+            if not path:
+                return None
+        self.fig.savefig(path, dpi=150)
+        self.info_lbl.setText(f"画像を保存しました: {os.path.basename(path)}")
+        return path
 
 
 # =============================================================================
