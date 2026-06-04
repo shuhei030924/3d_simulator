@@ -30,6 +30,23 @@ class Shape:
     def from_dict(cls, d: dict) -> Shape:
         return cls(kind=d["kind"], params=dict(d.get("params", {})))
 
+    def label(self) -> str:
+        """図形の人間可読ラベル（種別アイコン＋主要パラメータ）。GUI 一覧用。"""
+        p = self.params
+        if self.kind == "rect":
+            ang = p.get("angle", 0.0)
+            ang_txt = f" ∠{ang:.0f}°" if ang else ""
+            return (f"▭ 矩形 ({p.get('x0', 0):.2f},{p.get('y0', 0):.2f})-"
+                    f"({p.get('x1', 1):.2f},{p.get('y1', 1):.2f}){ang_txt}")
+        if self.kind == "stripe":
+            return (f"▬ 帯 中心({p.get('cx', 0.5):.2f},{p.get('cy', 0.5):.2f})"
+                    f" 角{p.get('angle', 0):.0f}° 幅{p.get('width', 0.2):.2f}")
+        if self.kind == "grating":
+            return (f"☰ 周期ライン 角{p.get('angle', 0):.0f}°"
+                    f" 周期{p.get('period', 0.2):.2f} 幅{p.get('width', 0.1):.2f}")
+        return (f"● 円 中心({p.get('cx', 0.5):.2f},{p.get('cy', 0.5):.2f})"
+                f" r={p.get('r', 0.25):.2f}")
+
     def rasterize(self, nx: int, ny: int) -> np.ndarray:
         """(ny, nx) の bool 配列にラスタライズする。"""
         ys = (np.arange(ny) + 0.5) / ny

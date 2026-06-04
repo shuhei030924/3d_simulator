@@ -88,22 +88,14 @@ class MaskEditor(QtWidgets.QGroupBox):
 
     def _refresh_list(self):
         self.list.clear()
+        if not self.mask.shapes:
+            # 空状態: 全面が対象になることをプレースホルダで明示
+            placeholder = QtWidgets.QListWidgetItem("（図形なし — 全面が対象）")
+            placeholder.setFlags(QtCore.Qt.NoItemFlags)
+            placeholder.setForeground(QtGui.QColor("#9aa7b4"))
+            self.list.addItem(placeholder)
         for s in self.mask.shapes:
-            if s.kind == "rect":
-                p = s.params
-                ang = p.get("angle", 0.0)
-                ang_txt = f" ∠{ang:.0f}°" if ang else ""
-                txt = f"矩形 ({p.get('x0',0):.2f},{p.get('y0',0):.2f})-({p.get('x1',1):.2f},{p.get('y1',1):.2f}){ang_txt}"
-            elif s.kind == "stripe":
-                p = s.params
-                txt = f"帯 中心({p.get('cx',0.5):.2f},{p.get('cy',0.5):.2f}) 角{p.get('angle',0):.0f}° 幅{p.get('width',0.2):.2f}"
-            elif s.kind == "grating":
-                p = s.params
-                txt = f"周期ライン 角{p.get('angle',0):.0f}° 周期{p.get('period',0.2):.2f} 幅{p.get('width',0.1):.2f}"
-            else:
-                p = s.params
-                txt = f"円 中心({p.get('cx',0.5):.2f},{p.get('cy',0.5):.2f}) r={p.get('r',0.25):.2f}"
-            self.list.addItem(txt)
+            self.list.addItem(s.label())
 
     def _add_rect(self):
         dlg = _RectDialog(self)
