@@ -113,6 +113,24 @@ def test_collapsible_nav_categories(page):
     assert "collapsed" in page
 
 
+def test_help_overlay(page):
+    """? キーで開くショートカットヘルプオーバーレイがある。"""
+    assert 'id="help-overlay"' in page
+    assert 'id="helpBtn"' in page
+    assert "toggleHelp" in page
+    assert "キーボードショートカット" in page
+
+
+def test_card_var_defined_in_light(page):
+    """--card 変数がライト（:root）でも定義されている（不透明背景の保証）。
+
+    var(--card) を使う help-card 等がライトで透明背景にならないことを保証する。
+    """
+    i = page.index(":root")
+    root_block = page[i:i + 220]
+    assert "--card" in root_block
+
+
 def test_stats_html_counts():
     """_stats_html は指定した工程数・カーブ数と metrology 関数数を埋め込む。"""
     s = build_manual._stats_html(19, 13)
