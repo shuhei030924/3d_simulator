@@ -1164,6 +1164,17 @@ MANUAL_CSS = """
    width:50px; height:72px; border-radius:8px; line-height:1; }
  .lb-nav:hover { background:rgba(255,255,255,.22); }
  #lbPrev { left:18px; } #lbNext { right:18px; }
+ #help-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
+   align-items:center; justify-content:center; z-index:2100; }
+ #help-overlay.show { display:flex; }
+ .help-card { background:var(--card); color:var(--fg); border:1px solid var(--line);
+   border-radius:12px; padding:22px 26px; max-width:460px; box-shadow:0 12px 44px rgba(0,0,0,.32); }
+ .help-card h3 { margin:0 0 12px; font-size:17px; }
+ .help-card table { width:100%; border-collapse:collapse; }
+ .help-card td { padding:5px 8px; font-size:14px; vertical-align:top; }
+ .help-card td:first-child { white-space:nowrap; }
+ .help-card kbd { background:var(--bg); border:1px solid var(--line); border-bottom-width:2px;
+   border-radius:5px; padding:2px 7px; font-family:monospace; font-size:12px; }
  .no-result { color:var(--muted); padding:14px; display:none; }
  .anchor-link { opacity:0; margin-left:8px; font-size:14px; background:none;
    border:none; cursor:pointer; color:var(--muted); transition:opacity .15s; padding:0; }
@@ -1251,12 +1262,24 @@ MANUAL_JS = """
       else if(e.key==='Escape') lb.classList.remove('show');
     });
   }
+  var helpOv=document.getElementById('help-overlay');
+  var helpBtn=document.getElementById('helpBtn');
+  function toggleHelp(show){ if(helpOv) helpOv.classList[show?'add':'remove']('show'); }
+  if(helpBtn) helpBtn.addEventListener('click',function(){toggleHelp(true);});
+  if(helpOv){ helpOv.addEventListener('click',function(){toggleHelp(false);});
+    var card=helpOv.querySelector('.help-card');
+    if(card) card.addEventListener('click',function(e){e.stopPropagation();}); }
   document.addEventListener('keydown',function(e){
     var s=document.getElementById('search');
     var inField=/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement||{}).tagName||'');
     if(e.key==='/' && !inField){ e.preventDefault(); if(s) s.focus(); }
-    else if(e.key==='Escape' && document.activeElement===s){
-      s.value=''; s.dispatchEvent(new Event('input')); s.blur(); }
+    else if(e.key==='?' && !inField){ e.preventDefault();
+      toggleHelp(!(helpOv && helpOv.classList.contains('show'))); }
+    else if(e.key==='Escape'){
+      if(helpOv && helpOv.classList.contains('show')){ toggleHelp(false); }
+      else if(document.activeElement===s){
+        s.value=''; s.dispatchEvent(new Event('input')); s.blur(); }
+    }
   });
   document.querySelectorAll('main section[id]').forEach(function(s){
     var h=s.querySelector('h2'); if(!h) return;
@@ -1322,7 +1345,7 @@ PAGE_TMPL = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>semisim 半導体プロセス 3D シミュレータ 使い方説明書</title>
 <style>
- :root {{ --fg:#1c2530; --muted:#5a6b7b; --line:#dce3ea; --accent:#2d6cdf; --bg:#f6f8fb; }}
+ :root {{ --fg:#1c2530; --muted:#5a6b7b; --line:#dce3ea; --accent:#2d6cdf; --bg:#f6f8fb; --card:#ffffff; }}
  * {{ box-sizing:border-box; }}
  body {{ font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;
    margin:0; color:var(--fg); background:var(--bg); line-height:1.7; }}
@@ -1370,6 +1393,7 @@ PAGE_TMPL = """<!DOCTYPE html>
  <div class="toolbar">
   <input id="search" class="search" type="search" placeholder="&#128269; 検索（章を絞り込み）" aria-label="検索">
   <button id="themeBtn" class="icon-btn" title="ダーク / ライト切替">&#127769;</button>
+  <button id="helpBtn" class="icon-btn" title="キーボードショートカット (?)">?</button>
  </div>
  <a href="#intro">はじめに / 起動方法</a>
  <a href="#gui">GUI 操作・設定画面</a>
@@ -1430,6 +1454,19 @@ PAGE_TMPL = """<!DOCTYPE html>
 </main>
 </div>
 <button id="toTop" class="icon-btn" title="先頭へ戻る">&#8593; 上へ</button>
+<div id="help-overlay"><div class="help-card">
+ <h3>キーボードショートカット &amp; 操作</h3>
+ <table>
+  <tr><td><kbd>/</kbd></td><td>検索ボックスにフォーカス</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>検索クリア／拡大画像・このヘルプを閉じる</td></tr>
+  <tr><td><kbd>&#8592;</kbd> <kbd>&#8594;</kbd></td><td>拡大画像を前後に送る</td></tr>
+  <tr><td><kbd>?</kbd></td><td>このヘルプの表示／非表示</td></tr>
+  <tr><td>&#128279;</td><td>見出しにホバー→クリックで章リンクをコピー</td></tr>
+  <tr><td>&#127769;</td><td>ダーク／ライトテーマ切替（保存されます）</td></tr>
+  <tr><td>&#9656;/&#9662;</td><td>目次カテゴリの折りたたみ／展開</td></tr>
+ </table>
+ <p style="text-align:right;margin:14px 0 0;color:var(--muted);font-size:12px;">Esc または背景クリックで閉じる</p>
+</div></div>
 <div id="lightbox">
  <button class="lb-nav" id="lbPrev" title="前の画像 (←)">&#8249;</button>
  <figure><img alt="拡大画像"><figcaption id="lbCap"></figcaption></figure>
