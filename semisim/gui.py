@@ -1040,6 +1040,13 @@ class ProcessDialog(QtWidgets.QDialog):
 # =============================================================================
 # 新規ウェハ設定ダイアログ
 # =============================================================================
+def _grid_size_hint(nx: int, ny: int, nz: int) -> str:
+    """格子点数と基本グリッドの概算メモリ（uint8）のヒント文字列。"""
+    cells = int(nx) * int(ny) * int(nz)
+    mb = cells / (1024.0 * 1024.0)  # uint8 = 1 byte/cell
+    return f"格子点数: {cells:,}　基本グリッド ≈ {mb:.1f} MB"
+
+
 class WaferDialog(QtWidgets.QDialog):
     def __init__(self, config: WaferConfig, parent=None):
         super().__init__(parent)
@@ -1061,6 +1068,13 @@ class WaferDialog(QtWidgets.QDialog):
         form.addRow("Z ボクセル数", self.nz)
         form.addRow("ピッチ (µm/vox)", self.pitch)
         form.addRow("基板厚 (µm)", self.sub)
+        # 格子点数・概算メモリのライブリードアウト（重さの目安）
+        self.size_lbl = QtWidgets.QLabel()
+        self.size_lbl.setStyleSheet("color: #2d6cdf; font-weight: 600;")
+        form.addRow("規模", self.size_lbl)
+        for sp in (self.nx, self.ny, self.nz):
+            sp.valueChanged.connect(self._update_size_hint)
+        self._update_size_hint()
         note = QtWidgets.QLabel("解像度を上げると拡大時のジャギーが減りますが\n計算は重くなります。")
         note.setStyleSheet("color: gray;")
         form.addRow(note)
@@ -1070,6 +1084,11 @@ class WaferDialog(QtWidgets.QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         form.addRow(bb)
+
+    def _update_size_hint(self, *args):
+        self.size_lbl.setText(
+            _grid_size_hint(self.nx.value(), self.ny.value(), self.nz.value())
+        )
 
     def get_config(self) -> WaferConfig:
         return WaferConfig(
