@@ -666,6 +666,12 @@ class PVD(Process):
         sc = float(np.clip(self.step_coverage, 0.0, 1.0))
         oh = float(self.overhang)
 
+        # 成膜前から存在する閉空気（上面に連結しない空洞）。庇なし成膜では
+        # 新たに空洞を封止しないことを保証するため、後段で「成膜後に新たに
+        # 封じた空気」だけを偽像として除く際の基準に使う。
+        pre_air = grid == materials.AIR
+        pre_sealed = pre_air & ~self._open_to_top(pre_air)
+
         # 斜め蒸着シャドーイング: +x からの斜め入射で風下(-x)側の列が背の高い
         # 構造に隠れて膜が付かない列を求める。鉛直から角 θ の入射は水平距離 d
         # 進むのに高さ d/tan(θ) を要するので、x+d 列が z_top[x]+d/tan(θ) 以上で遮蔽。
@@ -852,6 +858,19 @@ class PVD(Process):
                         for z in range(lo, cz + 1):
                             if air_now[z, yy, xc] and open_now[z, yy, xc]:
                                 grid[z, yy, xc] = mat_id
+
+        # === 封止偽像の除去 ===
+        # 庇(overhang)を指定しない指向性 PVD は、内部に空気を封じ込めない
+        # （開口を塞ぐのは庇/ブレッドローフィングの効果）。側壁被覆や肩の
+        # カスプ処理の結果、肩部に閉じた空気クラック（中空の庇状偽像）が残る
+        # ことがあるため、成膜後に新たに封止された空気を金属で充填して連続膜
+        # にする。overhang>0 の場合は意図したキーホールボイドなので保持する。
+        if oh <= 0:
+            air_final = grid == materials.AIR
+            sealed = air_final & ~self._open_to_top(air_final)
+            new_sealed = sealed & ~pre_sealed
+            if new_sealed.any():
+                grid[new_sealed] = mat_id
 
     def params_dict(self) -> dict:
         return {
