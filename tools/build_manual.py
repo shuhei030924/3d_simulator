@@ -1180,6 +1180,11 @@ MANUAL_CSS = """
    border:none; cursor:pointer; color:var(--muted); transition:opacity .15s; padding:0; }
  section h2:hover .anchor-link { opacity:.8; }
  .anchor-link:hover { color:var(--accent); }
+ section > h2 { cursor:pointer; user-select:none; }
+ section.collapsed > :not(h2) { display:none !important; }
+ .sec-caret { display:inline-block; font-size:11px; color:var(--muted);
+   margin-right:7px; transition:transform .15s; }
+ section.collapsed .sec-caret { transform:rotate(-90deg); }
  section:target { animation:flashTarget 1.4s ease; }
  @keyframes flashTarget { 0% { background:rgba(45,108,223,.14); } 100% { background:transparent; } }
  .stats { display:flex; gap:14px; flex-wrap:wrap; margin:18px 0 4px; }
@@ -1262,6 +1267,14 @@ MANUAL_JS = """
       else if(e.key==='Escape') lb.classList.remove('show');
     });
   }
+  var collapseAllBtn=document.getElementById('collapseAllBtn');
+  if(collapseAllBtn) collapseAllBtn.addEventListener('click',function(){
+    var secs=Array.prototype.slice.call(document.querySelectorAll('main section[id]'));
+    var anyOpen=secs.some(function(s){return !s.classList.contains('collapsed');});
+    secs.forEach(function(s){ s.classList.toggle('collapsed',anyOpen); });
+    collapseAllBtn.innerHTML=anyOpen?'\\u229e':'\\u229f';
+    collapseAllBtn.title=anyOpen?'全ての章を展開':'全ての章を折りたたむ';
+  });
   var helpOv=document.getElementById('help-overlay');
   var helpBtn=document.getElementById('helpBtn');
   function toggleHelp(show){ if(helpOv) helpOv.classList[show?'add':'remove']('show'); }
@@ -1283,6 +1296,13 @@ MANUAL_JS = """
   });
   document.querySelectorAll('main section[id]').forEach(function(s){
     var h=s.querySelector('h2'); if(!h) return;
+    var caret=document.createElement('span');
+    caret.className='sec-caret'; caret.textContent='\\u25be';
+    h.insertBefore(caret,h.firstChild);
+    h.addEventListener('click',function(e){
+      if(e.target.closest('.anchor-link')) return;
+      s.classList.toggle('collapsed');
+    });
     var a=document.createElement('button');
     a.className='anchor-link'; a.type='button';
     a.title='この章へのリンクをコピー'; a.textContent='\\ud83d\\udd17';
@@ -1329,6 +1349,7 @@ MANUAL_JS = """
     document.querySelectorAll('main section').forEach(function(s){
       var hit=!q || s.textContent.toLowerCase().indexOf(q)>=0;
       s.style.display=hit?'':'none';
+      if(hit && q) s.classList.remove('collapsed');  // 検索ヒットは本文を展開
       var a=map[s.id]; if(a) a.classList.toggle('nav-hidden',!hit);
       if(hit) any=true;
     });
@@ -1392,6 +1413,7 @@ PAGE_TMPL = """<!DOCTYPE html>
  <h2>目次</h2>
  <div class="toolbar">
   <input id="search" class="search" type="search" placeholder="&#128269; 検索（章を絞り込み）" aria-label="検索">
+  <button id="collapseAllBtn" class="icon-btn" title="全ての章を折りたたむ / 展開">&#8862;</button>
   <button id="themeBtn" class="icon-btn" title="ダーク / ライト切替">&#127769;</button>
   <button id="helpBtn" class="icon-btn" title="キーボードショートカット (?)">?</button>
  </div>
