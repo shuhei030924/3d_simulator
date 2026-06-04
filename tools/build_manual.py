@@ -1198,6 +1198,8 @@ MANUAL_CSS = """
    nav, #toTop, #progress, .copy-btn, #lightbox, .toolbar { display:none !important; }
    .layout { display:block; max-width:none; } main { padding:0; }
    section { break-inside:avoid; page-break-inside:avoid; border:none; }
+   /* 折りたたみ中の章も印刷時は全文を展開する */
+   section.collapsed > :not(h2) { display:revert !important; }
    header { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
    body { background:#fff; }
  }
@@ -1235,6 +1237,9 @@ MANUAL_JS = """
   var fib=document.getElementById('fontIncBtn');
   if(fdb) fdb.addEventListener('click',function(){fs-=10;applyFs();});
   if(fib) fib.addEventListener('click',function(){fs+=10;applyFs();});
+  // 印刷 / PDF 保存（折りたたみ中の章も印刷時は展開される）
+  var printBtn=document.getElementById('printBtn');
+  if(printBtn) printBtn.addEventListener('click',function(){window.print();});
   var prog=document.getElementById('progress');
   var top=document.getElementById('toTop');
   window.addEventListener('scroll',function(){
@@ -1443,6 +1448,7 @@ PAGE_TMPL = """<!DOCTYPE html>
   <button id="fontDecBtn" class="icon-btn" title="文字を小さく">A&#8722;</button>
   <button id="fontIncBtn" class="icon-btn" title="文字を大きく">A&#43;</button>
   <button id="collapseAllBtn" class="icon-btn" title="全ての章を折りたたむ / 展開">&#8862;</button>
+  <button id="printBtn" class="icon-btn" title="印刷 / PDF 保存">&#128424;</button>
   <button id="themeBtn" class="icon-btn" title="ダーク / ライト切替">&#127769;</button>
   <button id="helpBtn" class="icon-btn" title="キーボードショートカット (?)">?</button>
  </div>

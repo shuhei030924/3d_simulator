@@ -125,6 +125,8 @@
    nav, #toTop, #progress, .copy-btn, #lightbox, .toolbar { display:none !important; }
    .layout { display:block; max-width:none; } main { padding:0; }
    section { break-inside:avoid; page-break-inside:avoid; border:none; }
+   /* 折りたたみ中の章も印刷時は全文を展開する */
+   section.collapsed > :not(h2) { display:revert !important; }
    header { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
    body { background:#fff; }
  }
@@ -150,6 +152,7 @@
   <button id="fontDecBtn" class="icon-btn" title="文字を小さく">A&#8722;</button>
   <button id="fontIncBtn" class="icon-btn" title="文字を大きく">A&#43;</button>
   <button id="collapseAllBtn" class="icon-btn" title="全ての章を折りたたむ / 展開">&#8862;</button>
+  <button id="printBtn" class="icon-btn" title="印刷 / PDF 保存">&#128424;</button>
   <button id="themeBtn" class="icon-btn" title="ダーク / ライト切替">&#127769;</button>
   <button id="helpBtn" class="icon-btn" title="キーボードショートカット (?)">?</button>
  </div>
@@ -192,7 +195,7 @@
   <p><strong>semisim</strong> は半導体の前工程（成膜・リソグラフィ・エッチング・
   ドーピング・平坦化など）を 3D ボクセル格子上で再現し、断面や 3D 形状を可視化、
   さらに各種メトロロジで不良モードを定量検証できるシミュレータです。</p>
-  <div class='stats'><div class='stat'><div class='num'>18</div><div class='lbl'>プロセス工程</div></div><div class='stat'><div class='num'>12</div><div class='lbl'>デバイス特性カーブ</div></div><div class='stat'><div class='num'>148</div><div class='lbl'>検証関数 (metrology)</div></div></div>
+  <div class='stats'><div class='stat'><div class='num'>18</div><div class='lbl'>プロセス工程</div></div><div class='stat'><div class='num'>12</div><div class='lbl'>デバイス特性カーブ</div></div><div class='stat'><div class='num'>149</div><div class='lbl'>検証関数 (metrology)</div></div></div>
   <table class="param">
    <tr><th>用途</th><th>コマンド</th></tr>
    <tr><td>GUI 起動（対話的にレシピ作成・3D 表示）</td><td><code>py main.py</code></td></tr>
@@ -526,6 +529,9 @@ cd = litho.printed_cd_um(litho.isolated_space_mask(0.1, 0.005), 0.005)</code></p
   var fib=document.getElementById('fontIncBtn');
   if(fdb) fdb.addEventListener('click',function(){fs-=10;applyFs();});
   if(fib) fib.addEventListener('click',function(){fs+=10;applyFs();});
+  // 印刷 / PDF 保存（折りたたみ中の章も印刷時は展開される）
+  var printBtn=document.getElementById('printBtn');
+  if(printBtn) printBtn.addEventListener('click',function(){window.print();});
   var prog=document.getElementById('progress');
   var top=document.getElementById('toTop');
   window.addEventListener('scroll',function(){
