@@ -60,6 +60,13 @@ def test_has_lightbox(page):
     assert "zoomable" in page
 
 
+def test_search_hit_count(page):
+    """検索ヒット件数のリードアウト（searchCount）がある。"""
+    assert 'id="searchCount"' in page
+    assert "hits++" in page
+    assert "' 件'" in page
+
+
 def test_lightbox_navigation(page):
     """ライトボックスに前後ナビ・キャプション・カウンタがある。"""
     assert 'id="lbPrev"' in page
