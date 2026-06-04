@@ -3819,6 +3819,13 @@ _CT_MOBILITY = {
     "hole": {"mu_min": 47.7, "mu_max": 495.0, "n_ref": 6.3e16, "alpha": 0.76},
 }
 
+# 高電界ドリフト速度飽和（Caughey–Thomas / Canali モデル）の Si パラメータ。
+# 飽和速度 v_sat[cm/s] と遷移の鋭さ β（電子は β=2, 正孔は β=1 で実測に整合）。
+_VSAT = {
+    "electron": {"v_sat_cm_s": 1.07e7, "beta": 2.0},
+    "hole": {"v_sat_cm_s": 8.34e6, "beta": 1.0},
+}
+
 
 def carrier_mobility(doping_cm3: float, *, carrier: str = "electron") -> dict:
     """ドーピング依存キャリア移動度 µ(N)（Caughey–Thomas モデル, cm²/Vs）を返す。
@@ -3845,6 +3852,50 @@ def carrier_mobility(doping_cm3: float, *, carrier: str = "electron") -> dict:
         "doping_cm3": float(doping_cm3),
         "mu_min": p["mu_min"], "mu_max": p["mu_max"],
         "n_ref": p["n_ref"], "alpha": p["alpha"],
+    }
+
+
+def drift_velocity(
+    field_v_cm: float, *, carrier: str = "electron", doping_cm3: float = 0.0
+) -> dict:
+    """高電界ドリフト速度 v(E)（cm/s, 速度飽和込み）を返す。
+
+    キャリアのドリフト速度は低電界で v≈µ₀·E と電界に比例するが、高電界では
+    光学フォノン散乱により飽和速度 v_sat に漸近する。Caughey–Thomas/Canali の
+    速度-電界モデル
+      v(E) = µ₀·E / [1 + (µ₀·E / v_sat)^β]^(1/β)
+    で表す。µ₀ はドーピング依存低電界移動度（carrier_mobility）、β は遷移の
+    鋭さ（電子 β=2 / 正孔 β=1）。低電界で v→µ₀E（実効移動度 µ_eff→µ₀）、
+    高電界で v→v_sat（µ_eff→0）となる。返す辞書:
+      drift_velocity_cm_s / low_field_velocity_cm_s / effective_mobility_cm2_vs /
+      saturation_velocity_cm_s / low_field_mobility_cm2_vs / field_v_cm /
+      beta / carrier。E≤0 では v=0。
+    """
+    if carrier not in _VSAT:
+        raise ValueError("carrier は 'electron' または 'hole' を指定してください。")
+    mu0 = carrier_mobility(doping_cm3, carrier=carrier)["mobility_cm2_vs"]
+    vsat = _VSAT[carrier]["v_sat_cm_s"]
+    beta = _VSAT[carrier]["beta"]
+    e = float(field_v_cm)
+    if e <= 0:
+        return {
+            "drift_velocity_cm_s": 0.0, "low_field_velocity_cm_s": 0.0,
+            "effective_mobility_cm2_vs": float(mu0),
+            "saturation_velocity_cm_s": float(vsat),
+            "low_field_mobility_cm2_vs": float(mu0),
+            "field_v_cm": e, "beta": float(beta), "carrier": carrier,
+        }
+    v_low = mu0 * e  # 低電界外挿速度 µ₀·E [cm/s]
+    v = v_low / (1.0 + (v_low / vsat) ** beta) ** (1.0 / beta)
+    return {
+        "drift_velocity_cm_s": float(v),
+        "low_field_velocity_cm_s": float(v_low),
+        "effective_mobility_cm2_vs": float(v / e),
+        "saturation_velocity_cm_s": float(vsat),
+        "low_field_mobility_cm2_vs": float(mu0),
+        "field_v_cm": e,
+        "beta": float(beta),
+        "carrier": carrier,
     }
 
 
