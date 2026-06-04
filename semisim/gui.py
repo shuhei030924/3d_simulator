@@ -339,12 +339,46 @@ class ProcessDialog(QtWidgets.QDialog):
 
         self._build_fields()
 
+        # 現在の入力値から生成される工程サマリのライブプレビュー
+        self.preview_lbl = QtWidgets.QLabel()
+        self.preview_lbl.setObjectName("procPreview")
+        self.preview_lbl.setWordWrap(True)
+        self.preview_lbl.setStyleSheet(
+            "#procPreview { color:#2d6cdf; font-weight:600; padding:4px 2px; }"
+        )
+        self.form.addRow("プレビュー", self.preview_lbl)
+        self._wire_preview_signals()
+        self._update_preview()
+
         bb = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         )
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         self.form.addRow(bb)
+
+    def _wire_preview_signals(self):
+        """全入力ウィジェットの変更をプレビュー更新に接続する。"""
+        for w in self.findChildren(QtWidgets.QDoubleSpinBox):
+            w.valueChanged.connect(self._update_preview)
+        for w in self.findChildren(QtWidgets.QSpinBox):
+            w.valueChanged.connect(self._update_preview)
+        for w in self.findChildren(QtWidgets.QComboBox):
+            w.currentIndexChanged.connect(self._update_preview)
+        for w in self.findChildren(QtWidgets.QLineEdit):
+            w.textChanged.connect(self._update_preview)
+        for w in self.findChildren(QtWidgets.QCheckBox):
+            w.stateChanged.connect(self._update_preview)
+        for w in self.findChildren(QtWidgets.QListWidget):
+            w.itemSelectionChanged.connect(self._update_preview)
+
+    def _update_preview(self, *args):
+        """現在の設定から工程サマリを生成してプレビューに表示する。"""
+        try:
+            text = self.build_process().summary()
+        except Exception:  # noqa: BLE001 - 編集途中の不正値はプレビュー対象外
+            text = "—"
+        self.preview_lbl.setText(text)
 
     # -- フィールド構築 ----------------------------------------------------
     def _build_fields(self):
