@@ -1161,6 +1161,12 @@ MANUAL_CSS = """
  .lb-nav:hover { background:rgba(255,255,255,.22); }
  #lbPrev { left:18px; } #lbNext { right:18px; }
  .no-result { color:var(--muted); padding:14px; display:none; }
+ .anchor-link { opacity:0; margin-left:8px; font-size:14px; background:none;
+   border:none; cursor:pointer; color:var(--muted); transition:opacity .15s; padding:0; }
+ section h2:hover .anchor-link { opacity:.8; }
+ .anchor-link:hover { color:var(--accent); }
+ section:target { animation:flashTarget 1.4s ease; }
+ @keyframes flashTarget { 0% { background:rgba(45,108,223,.14); } 100% { background:transparent; } }
  .stats { display:flex; gap:14px; flex-wrap:wrap; margin:18px 0 4px; }
  .stat { flex:1; min-width:130px; background:var(--bg); border:1px solid var(--line);
    border-radius:10px; padding:14px 16px; text-align:center; }
@@ -1247,6 +1253,20 @@ MANUAL_JS = """
     if(e.key==='/' && !inField){ e.preventDefault(); if(s) s.focus(); }
     else if(e.key==='Escape' && document.activeElement===s){
       s.value=''; s.dispatchEvent(new Event('input')); s.blur(); }
+  });
+  document.querySelectorAll('main section[id]').forEach(function(s){
+    var h=s.querySelector('h2'); if(!h) return;
+    var a=document.createElement('button');
+    a.className='anchor-link'; a.type='button';
+    a.title='この章へのリンクをコピー'; a.textContent='\\ud83d\\udd17';
+    a.addEventListener('click',function(e){ e.stopPropagation();
+      var url=location.origin+location.pathname+'#'+s.id;
+      history.replaceState(null,'','#'+s.id);
+      if(navigator.clipboard) navigator.clipboard.writeText(url).then(function(){
+        a.textContent='\\u2713'; setTimeout(function(){a.textContent='\\ud83d\\udd17';},1000);
+      });
+    });
+    h.appendChild(a);
   });
   var navLinks=Array.prototype.slice.call(document.querySelectorAll('nav a'));
   var map={};
