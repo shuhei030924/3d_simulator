@@ -3899,6 +3899,44 @@ def drift_velocity(
     }
 
 
+def johnson_nyquist_noise(
+    resistance_ohm: float, *, bandwidth_hz: float = 1.0, temp_k: float = 300.0
+) -> dict:
+    """抵抗の熱雑音（Johnson–Nyquist 雑音）を返す。
+
+    抵抗体内のキャリアの熱運動による白色雑音。電圧雑音の片側パワースペクトル
+    密度は
+      S_v = 4·k·T·R           [V²/Hz]
+    で、帯域 B での RMS 電圧雑音は v_rms=√(4kTRB)。等価な電流雑音は
+    S_i=4kT/R・i_rms=√(4kTB/R)、整合負荷へ供給できる利用可能雑音電力は
+    P=kTB（抵抗値に依らない）。例として T=300K・R=1kΩ で電圧雑音密度
+    √S_v≈4.07 nV/√Hz と教科書値に一致する。返す辞書:
+      voltage_psd_v2_hz / voltage_noise_density_nv_sqrthz / voltage_rms_v /
+      current_psd_a2_hz / current_rms_a / available_power_w /
+      resistance_ohm / bandwidth_hz / temp_k。R≤0 や T≤0 では 0 を返す。
+    """
+    if resistance_ohm <= 0 or temp_k <= 0 or bandwidth_hz < 0:
+        return {
+            "voltage_psd_v2_hz": 0.0, "voltage_noise_density_nv_sqrthz": 0.0,
+            "voltage_rms_v": 0.0, "current_psd_a2_hz": 0.0, "current_rms_a": 0.0,
+            "available_power_w": 0.0, "resistance_ohm": float(resistance_ohm),
+            "bandwidth_hz": float(bandwidth_hz), "temp_k": float(temp_k),
+        }
+    s_v = 4.0 * _K_B * temp_k * resistance_ohm  # 電圧雑音 PSD [V²/Hz]
+    s_i = 4.0 * _K_B * temp_k / resistance_ohm  # 電流雑音 PSD [A²/Hz]
+    return {
+        "voltage_psd_v2_hz": float(s_v),
+        "voltage_noise_density_nv_sqrthz": float(s_v ** 0.5 * 1e9),
+        "voltage_rms_v": float((s_v * bandwidth_hz) ** 0.5),
+        "current_psd_a2_hz": float(s_i),
+        "current_rms_a": float((s_i * bandwidth_hz) ** 0.5),
+        "available_power_w": float(_K_B * temp_k * bandwidth_hz),
+        "resistance_ohm": float(resistance_ohm),
+        "bandwidth_hz": float(bandwidth_hz),
+        "temp_k": float(temp_k),
+    }
+
+
 def bulk_resistivity_ohm_cm(doping_cm3: float, *, carrier: str = "electron") -> dict:
     """ドープ Si の体積抵抗率 ρ（Ω·cm, Irvin 曲線）を返す。
 
