@@ -140,12 +140,19 @@ class MaskEditor(QtWidgets.QGroupBox):
         return Mask(shapes=list(self.mask.shapes), invert=self.mask.invert)
 
 
+def _range_hint(mn: float, mx: float, dec: int = 2) -> str:
+    """入力可能範囲のヒント文字列（ツールチップ用）。"""
+    return f"入力範囲: {mn:.{dec}f} 〜 {mx:.{dec}f}"
+
+
 def _spin(value: float, mn=0.0, mx=1.0, step=0.05, dec=2) -> QtWidgets.QDoubleSpinBox:
     s = QtWidgets.QDoubleSpinBox()
     s.setRange(mn, mx)
     s.setSingleStep(step)
     s.setDecimals(dec)
     s.setValue(value)
+    # 有効範囲をツールチップで明示（操作のガイド）
+    s.setToolTip(_range_hint(mn, mx, dec))
     return s
 
 
