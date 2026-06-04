@@ -106,6 +106,13 @@ def test_anchor_link_copy(page):
     assert "replaceState" in page
 
 
+def test_collapsible_nav_categories(page):
+    """目次カテゴリの折りたたみ機能がある（検索時は自動展開）。"""
+    assert "cat-toggle" in page
+    assert "expandAllCats" in page
+    assert "collapsed" in page
+
+
 def test_stats_html_counts():
     """_stats_html は指定した工程数・カーブ数と metrology 関数数を埋め込む。"""
     s = build_manual._stats_html(19, 13)
