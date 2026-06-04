@@ -144,3 +144,16 @@ class Mask:
         if self.invert:
             out = ~out
         return out
+
+    def preview_rgb(self, size: int = 72) -> np.ndarray:
+        """マスクのプレビュー画像（size×size×3, uint8, 上が y=0）を返す。
+
+        選択領域をアクセント色、非選択を淡色で塗り分けた RGB 画像。GUI の
+        マスクエディタでの即時プレビューや、テストでの検証に使う（Qt 非依存）。
+        """
+        sel = self.rasterize(size, size)  # (size, size) bool, 行=y
+        sel = sel[::-1]  # 画像座標（上が y=0）に合わせて上下反転
+        rgb = np.empty((size, size, 3), dtype=np.uint8)
+        rgb[~sel] = (238, 242, 247)   # 非選択（淡いグレー）
+        rgb[sel] = (45, 108, 223)     # 選択領域（アクセント青）
+        return rgb
