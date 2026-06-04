@@ -99,6 +99,13 @@ def test_print_stylesheet(page):
     assert "@media print" in page
 
 
+def test_anchor_link_copy(page):
+    """見出しアンカーリンクのコピー機能とターゲットハイライトがある。"""
+    assert "anchor-link" in page
+    assert "section:target" in page
+    assert "replaceState" in page
+
+
 def test_stats_html_counts():
     """_stats_html は指定した工程数・カーブ数と metrology 関数数を埋め込む。"""
     s = build_manual._stats_html(19, 13)
