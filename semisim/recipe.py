@@ -140,8 +140,20 @@ class Recipe:
                 f"未対応のレシピ形式バージョンです: {version}"
                 f"（対応は {FORMAT_VERSION} 以下）。"
             )
-        config = WaferConfig.from_dict(d.get("config", {}))
-        steps = [Process.from_dict(s) for s in d.get("steps", [])]
+        # 構造を検証し、壊れたレシピは AttributeError でなく明瞭な ValueError に
+        # する（CLI/GUI が一貫して捕捉でき、トレースバック露出を防ぐ）。
+        raw_config = d.get("config", {})
+        if not isinstance(raw_config, dict):
+            raise ValueError("レシピの config は辞書である必要があります。")
+        config = WaferConfig.from_dict(raw_config)
+        raw_steps = d.get("steps", [])
+        if not isinstance(raw_steps, list):
+            raise ValueError("レシピの steps はリストである必要があります。")
+        steps = []
+        for s in raw_steps:
+            if not isinstance(s, dict):
+                raise ValueError("レシピの各 step は辞書である必要があります。")
+            steps.append(Process.from_dict(s))
         return cls(
             config=config,
             steps=steps,
