@@ -87,6 +87,7 @@ def slice_2d(
     nz, ny, nx = grid.shape
     p = wafer.config.pitch_um
 
+    axis = str(axis).upper()  # 大文字小文字を問わない
     if axis == "X":
         index = int(np.clip(index, 0, nx - 1))
         plane = grid[:, :, index]  # (z, y)
@@ -95,10 +96,13 @@ def slice_2d(
         index = int(np.clip(index, 0, ny - 1))
         plane = grid[:, index, :]  # (z, x)
         width_um, height_um = nx * p, nz * p
-    else:  # "Z"
+    elif axis == "Z":
         index = int(np.clip(index, 0, nz - 1))
         plane = grid[index, :, :]  # (y, x)
         width_um, height_um = nx * p, ny * p
+    else:
+        # 無効な軸を黙って Z 断面にせず、明示的にエラーにする（取り違え防止）。
+        raise ValueError(f"axis は 'X'/'Y'/'Z' のいずれかを指定してください: {axis!r}")
 
     plane = plane.copy()
     hide = set(int(i) for i in (hidden_ids or []))
