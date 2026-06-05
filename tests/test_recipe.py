@@ -86,3 +86,29 @@ def test_from_dict_version_check(small_cfg):
     d["format_version"] = 999
     with pytest.raises(ValueError):
         Recipe.from_dict(d)
+
+
+_CFG = {"nx": 20, "ny": 20, "nz": 30, "pitch_um": 0.1, "substrate_um": 2.0}
+
+
+@pytest.mark.parametrize("bad", [
+    {"config": [1, 2], "steps": []},            # config が非 dict
+    {"config": "x", "steps": []},               # config が文字列
+    {"config": _CFG, "steps": "notalist"},      # steps が非 list
+    {"config": _CFG, "steps": {"type": "CVD"}},  # steps が dict
+    {"config": _CFG, "steps": [123]},           # step 要素が非 dict
+    {"config": _CFG, "steps": ["CVD"]},         # step 要素が文字列
+])
+def test_from_dict_malformed_raises_valueerror(bad):
+    """壊れた構造は AttributeError でなく ValueError を投げる（CLI/GUI が捕捉可能）。"""
+    with pytest.raises(ValueError):
+        Recipe.from_dict(bad)
+
+
+def test_from_dict_valid_still_loads():
+    """正常なレシピは引き続き読み込める。"""
+    r = Recipe.from_dict({
+        "format_version": 1, "config": _CFG,
+        "steps": [{"type": "CVD", "material": "oxide", "thickness_um": 0.3}],
+    })
+    assert len(r.steps) == 1
