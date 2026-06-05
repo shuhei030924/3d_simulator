@@ -1178,7 +1178,9 @@ def parasitic_capacitance_ff(wafer: Wafer, name_a, name_b) -> float:
         return 0.0
     pitch = wafer.config.pitch_um
     eps_field = permittivity_field(wafer)
-    is_cond = np.isin(grid, list(_conductor_ids()))
+    # 指定した 2 材料は導体分類でなくても電極＝導体として走査対象に含める
+    # （無ドープ Si 基板を対向電極にする等で 0 を返す不具合を防ぐ）。
+    is_cond = np.isin(grid, list(_conductor_ids() | {a.id, b.id}))
     pair = {a.id, b.id}
     coef0 = _EPS0_FF * (pitch ** 2)
 
@@ -4146,6 +4148,10 @@ def _solve_slice_capacitance(
 
     h, w = eps_diel.shape
     fixed = is_a | is_b
+    # 明示指定された電極は導体分類（ρ>0）でなくても常に導体として扱う。
+    # （非導体材料を電極指定すると diel と fixed の二重割当で行列が特異化し
+    # NaN を返す不具合を防ぐ。例: 無ドープ Si 基板を対向電極にする場合）
+    is_cond = is_cond | fixed
     floating = is_cond & ~fixed
     float_lab, n_float = ndimage.label(floating)  # 浮遊導体の連結成分
     diel = ~is_cond  # 誘電体（非導体）セル
@@ -4284,6 +4290,8 @@ def _solve_slice_charges(eps_diel, electrode_masks, electrode_volts, is_cond):
     for mask, volt in zip(electrode_masks, electrode_volts):
         fixed |= mask
         phi_fixed[mask] = volt
+    # 指定電極は導体分類でなくても常に導体扱い（特異化・NaN 防止）。
+    is_cond = is_cond | fixed
     floating = is_cond & ~fixed
     float_lab, n_float = ndimage.label(floating)
     diel = ~is_cond
