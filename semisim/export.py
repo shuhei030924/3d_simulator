@@ -76,9 +76,11 @@ def _facets(wafer: Wafer, name_or_id) -> list[tuple]:
                 ((x + cx) * p, (y + cy) * p, (z + cz) * p)
                 for cx, cy, cz in corners
             ]
-            # 矩形 → 2 三角形（0-1-2, 0-2-3）で CCW を保つ
-            out.append((normal, verts[0], verts[1], verts[2]))
-            out.append((normal, verts[0], verts[2], verts[3]))
+            # 矩形 → 2 三角形。corners は外側から見て時計回り（=外向き法線に
+            # 対し内向き巻き）に並んでいるため、0-2-1, 0-3-2 の順で出力して
+            # 右手系の巻き順を外向き法線に一致させる（STL 標準準拠）。
+            out.append((normal, verts[0], verts[2], verts[1]))
+            out.append((normal, verts[0], verts[3], verts[2]))
     return out
 
 
