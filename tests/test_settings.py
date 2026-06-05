@@ -62,6 +62,39 @@ def test_load_corrupt_file_returns_defaults(tmp_path):
     assert isinstance(loaded, AppSettings)
 
 
+def test_load_bad_typed_fields_falls_back_per_field(tmp_path):
+    """型が壊れたフィールドは既定値へ、妥当なフィールドは保持する。"""
+    import json
+    p = tmp_path / "bt.json"
+    p.write_text(json.dumps({
+        "last_dir": "/keep", "ui_theme": "dark",
+        "max_recent": "abc", "recent_recipes": "notalist",
+        "default_config": [1, 2],
+    }), encoding="utf-8")
+    s = AppSettings.load(p)
+    assert s.last_dir == "/keep"          # 妥当な値は保持
+    assert s.ui_theme == "dark"           # 妥当な値は保持
+    assert s.max_recent == 10             # 不正 int -> 既定
+    assert s.recent_recipes == []         # 非 list -> []
+    assert s.default_config == {}         # 非 dict -> {}
+
+
+def test_load_nondict_json_returns_defaults(tmp_path):
+    """JSON が妥当でも dict でない（list/数値）場合は既定値。"""
+    for content in ("[1,2,3]", "42", '"a string"'):
+        p = tmp_path / "nd.json"
+        p.write_text(content, encoding="utf-8")
+        s = AppSettings.load(p)
+        assert isinstance(s, AppSettings)
+        assert s.ui_theme == "light"
+
+
+def test_from_dict_invalid_recent_items_coerced_to_str(tmp_path):
+    """recent_recipes の要素が文字列でなくても str 化される。"""
+    s = AppSettings.from_dict({"recent_recipes": [1, 2.5, "x"]})
+    assert s.recent_recipes == ["1", "2.5", "x"]
+
+
 def test_config_dir_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("SEMISIM_CONFIG_DIR", str(tmp_path))
     from semisim import settings as st

@@ -77,13 +77,26 @@ class AppSettings:
     def from_dict(cls, d: dict) -> AppSettings:
         if not isinstance(d, dict):
             raise ValueError("設定データが不正です（辞書ではありません）。")
+
+        # 型が壊れたフィールドはアプリ起動不能にせず既定値へフォールバックする
+        # （手編集やバージョン差で型が崩れた設定でも安全に読み込む）。
+        def _int(value, default: int) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        recent = d.get("recent_recipes", [])
+        recent = [str(x) for x in recent] if isinstance(recent, list) else []
+        cfg = d.get("default_config", {})
+        cfg = dict(cfg) if isinstance(cfg, dict) else {}
         return cls(
             last_dir=str(d.get("last_dir", "")),
-            recent_recipes=list(d.get("recent_recipes", [])),
-            default_config=dict(d.get("default_config", {})),
+            recent_recipes=recent,
+            default_config=cfg,
             show_resist=bool(d.get("show_resist", True)),
             window_geometry=str(d.get("window_geometry", "")),
-            max_recent=int(d.get("max_recent", DEFAULT_MAX_RECENT)),
+            max_recent=_int(d.get("max_recent", DEFAULT_MAX_RECENT), DEFAULT_MAX_RECENT),
             ui_theme=("dark" if str(d.get("ui_theme", "light")) == "dark" else "light"),
         )
 
@@ -108,4 +121,8 @@ class AppSettings:
         except (json.JSONDecodeError, OSError):
             # 壊れた設定でアプリが起動不能にならないよう既定値にフォールバック
             return cls()
-        return cls.from_dict(data)
+        try:
+            return cls.from_dict(data)
+        except (ValueError, TypeError):
+            # JSON は妥当でも構造/型が不正（dict でない等）な場合の安全網
+            return cls()
