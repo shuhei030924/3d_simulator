@@ -277,7 +277,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"実効拡散長 L_eff = {tb['effective_length_um']:.4f} um")
         return 0
 
-    wafer = recipe.simulate()
+    # シミュレーション中の検証エラー（不正な膜厚・未知の材料など）も
+    # トレースバックでなく一貫した「エラー: ...」メッセージで返す。
+    try:
+        wafer = recipe.simulate()
+    except (ValueError, KeyError) as exc:
+        print(f"エラー: {exc}", file=sys.stderr)
+        return 1
     report = metrology.report(wafer)
     print(report)
 

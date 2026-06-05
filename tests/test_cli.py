@@ -66,6 +66,34 @@ def test_no_args_errors():
         main([])
 
 
+def _write_recipe(path, steps):
+    cfg = {"nx": 20, "ny": 20, "nz": 30, "pitch_um": 0.1, "substrate_um": 2.0}
+    path.write_text(json.dumps({"config": cfg, "steps": steps}), encoding="utf-8")
+
+
+def test_invalid_param_returns_clean_error(tmp_path, capsys):
+    """シミュレーション中の検証エラー（不正な膜厚）はトレースバックでなく
+    「エラー: ...」で返す（rc=1）。"""
+    p = tmp_path / "neg.json"
+    _write_recipe(p, [{"type": "CVD", "material": "oxide", "thickness_um": -1.0}])
+    rc = main([str(p)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "エラー" in err
+    assert "Traceback" not in err
+
+
+def test_unknown_material_returns_clean_error(tmp_path, capsys):
+    """未知の材料名もトレースバックでなくクリーンなエラーで返す。"""
+    p = tmp_path / "mat.json"
+    _write_recipe(p, [{"type": "CVD", "material": "unobtainium", "thickness_um": 0.3}])
+    rc = main([str(p)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "エラー" in err
+    assert "Traceback" not in err
+
+
 def test_png_export(tmp_path):
     pytest.importorskip("matplotlib")
     out = tmp_path / "slice.png"
