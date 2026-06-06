@@ -552,7 +552,7 @@ def defect_section() -> tuple[str, str]:
     # 埋めるのが実プロセスなので、PVD ではなく Fill（void_ar）を使う。
     # 細かいボクセル(pitch=0.005µm)で薄いシームとバリア側壁を滑らかに描く。
     pitch = 0.005
-    width, depth = 0.45, 1.3
+    width, depth = 0.30, 1.4
     span = 1000 * pitch
     frac = width / span
     r = Recipe(config=WaferConfig(nx=1000, ny=10, nz=820, pitch_um=pitch, substrate_um=2.0))
@@ -567,7 +567,7 @@ def defect_section() -> tuple[str, str]:
     r.add(Fill(material="metal_cu", overfill_um=0.2, void_ar=1.6))  # Cu 電解めっき
     w = r.simulate()
     render(w, "ダマシン Cu のシーム／キーホールボイド: 電解めっきの側壁合体で残る縦空隙",
-           "defect_void.png", ylim=(1.9, 3.7))
+           "defect_void.png", ylim=(1.9, 3.95))
     vm = metrology.void_metrics(w)
     rep = metrology.defect_report(w)
     has_void = "検出" if vm["count"] > 0 else "なし"
