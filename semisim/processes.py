@@ -2201,12 +2201,18 @@ class Fill(Process):
                     narrow = recess & (depth > self.void_ar * width)
                     centerline = hw >= (hw_feat - 0.5)
                     cand = narrow & centerline
-                    lo = z_top.astype(float) + hw_feat  # ボトムアップ充填上端
-                    hi = float(field_level) - hw_feat  # トップピンチオフ下端
+                    # コンフォーマル成長では側壁が中央で合体し、底のボトムアップ
+                    # 充填の頂点（z_top+ハーフ幅）から口元（フィールド面）まで縦に
+                    # 繋がったシームが残る。上端はオーバーフィル/CMP 前の被覆膜で
+                    # 封止される。中空に浮いた短い線でなく、底の充填部から口元まで
+                    # 連続する実際のシーム形状にする。
+                    lo = z_top.astype(float) + hw_feat  # ボトムアップ充填の頂点
+                    # 口元から 1 ボクセルだけ封止膜を残してシーム上端とする
+                    hi = float(field_level) - 1.0
                     void = (
                         cand[None, :, :]
                         & (z_idx > lo[None, :, :])
-                        & (z_idx <= hi[None, :, :])
+                        & (z_idx <= hi)
                         & (grid == mat_id)
                     )
                     grid[void] = materials.AIR
