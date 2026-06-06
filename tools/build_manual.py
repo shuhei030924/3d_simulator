@@ -546,40 +546,41 @@ def demos() -> list:
 
 def defect_section() -> tuple[str, str]:
     """不良モード検証デモ（ボイド／ピンホール）画像 + 説明 HTML を返す。"""
-    # ボイド: 高アスペクト比トレンチを等角性の悪い PVD で埋め、口元が先に
-    # 塞がって内部にキーホール（ティアドロップ）状の空洞が残る様子を再現する。
-    # 細かいボクセル(pitch=0.005µm)で側壁被覆と口元の絞り込みを滑らかに描く。
+    # ボイド: 実際のダマシン Cu フロー（酸化膜トレンチ→TaN バリア→Cu 電解
+    # めっき）で、ボトムアップ充填が不十分なとき側壁が中央で合体して残る縦の
+    # シーム/キーホール空隙を再現する。Cu はスパッタでなく電解めっき(ECD)で
+    # 埋めるのが実プロセスなので、PVD ではなく Fill（void_ar）を使う。
+    # 細かいボクセル(pitch=0.005µm)で薄いシームとバリア側壁を滑らかに描く。
     pitch = 0.005
-    width, depth = 0.5, 1.5
-    span = 1200 * pitch
+    width, depth = 0.45, 1.3
+    span = 1000 * pitch
     frac = width / span
-    r = Recipe(config=WaferConfig(nx=1200, ny=12, nz=960, pitch_um=pitch, substrate_um=2.0))
-    r.add(CVD(material="oxide", thickness_um=depth + 0.3))
+    r = Recipe(config=WaferConfig(nx=1000, ny=10, nz=820, pitch_um=pitch, substrate_um=2.0))
+    r.add(CVD(material="oxide", thickness_um=depth + 0.2))
     r.add(Photo(
         mask=Mask(shapes=[Shape("rect", {"x0": (1 - frac) / 2, "y0": 0.0,
                                          "x1": (1 + frac) / 2, "y1": 1.0})]),
         thickness_um=0.6, polarity="positive"))
     r.add(DryEtch(targets=["oxide"], depth_um=depth))
     r.add(Strip(material="photoresist"))
-    r.add(PVD(material="metal_cu", thickness_um=0.7, step_coverage=0.72, overhang=0.5))
+    r.add(CVD(material="tan", thickness_um=0.04))               # バリアメタル(TaN)
+    r.add(Fill(material="metal_cu", overfill_um=0.2, void_ar=1.6))  # Cu 電解めっき
     w = r.simulate()
-    # ylim はトレンチ底〜被覆金属の上面まで含め、口元が塞がった様子（埋め込み
-    # 空洞の上端が金属で封止される）まで見えるようにする。狭く切ると封止部が
-    # 枠外になり、ティアドロップ空洞が開いたトレンチのように誤解されるため。
-    render(w, "キーホールボイド: 段差被覆不良で口元が先に塞がった埋め込み空洞",
-           "defect_void.png", ylim=(1.9, 4.7))
+    render(w, "ダマシン Cu のシーム／キーホールボイド: 電解めっきの側壁合体で残る縦空隙",
+           "defect_void.png", ylim=(1.9, 3.7))
     vm = metrology.void_metrics(w)
     rep = metrology.defect_report(w)
     has_void = "検出" if vm["count"] > 0 else "なし"
     body = (
         "<p>本シミュレータは主要な半導体不良モードを計測 (metrology) で検証できます。"
-        "下図は段差被覆（ステップカバレッジ）の悪い PVD で高アスペクト比トレンチを"
-        "埋めた例です。側壁より口元の堆積が速いため上端が先に閉じ、内部に上方ほど"
-        "細る<strong>キーホール（ティアドロップ）状の埋め込みボイド</strong>が"
-        f"残ります（void_metrics 個数={vm['count']} → {has_void}）。"
-        "口元が塞がった瞬間に内部の空気は最上面との連結が切れ、以降フラックスが"
-        "届かず空洞として凍結する——という実プロセスの封止機構をそのまま再現して"
-        "います。</p>"
+        "下図は実際の<strong>ダマシン Cu フロー</strong>（酸化膜トレンチ→TaN バリア→"
+        "Cu 電解めっき）で、ボトムアップ充填（スーパーフィル）が不十分なときに生じる"
+        "<strong>シーム／キーホールボイド</strong>を再現した例です。側壁から成長した"
+        "Cu が中央で合体（または上端で先にピンチオフ）すると、トレンチ中心に縦長の"
+        f"空隙が継ぎ目として残ります（void_metrics 個数={vm['count']} → {has_void}）。"
+        "Cu はスパッタではなく電解めっき (ECD) で埋めるのが実プロセスのため、PVD では"
+        "なく <code>Fill</code>（<code>void_ar</code>）でこの封止機構を再現しています。"
+        "灰色の薄い層はバリアメタル (TaN)、橙が Cu、白い縦線が残存シームです。</p>"
         "<table class='param'><tr><th>不良モード</th><th>計測関数</th></tr>"
         "<tr><td>ボイド（充填不良）</td><td><code>void_metrics</code></td></tr>"
         "<tr><td>エッチ残渣・ストリンガー</td><td><code>etch_residue_metrics</code></td></tr>"
