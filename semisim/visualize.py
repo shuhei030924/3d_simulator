@@ -68,6 +68,32 @@ def solid_unstructured(
     return solid
 
 
+def smoothed_surface(mesh, plane=None, n_iter: int = 30,
+                     relaxation_factor: float = 0.1, plane_tol: float = 0.05):
+    """メッシュ表面をラプラシアン平滑化して返す（スムーズ表示用）。
+
+    plane=(origin, normal) を渡すと、その平面（断面の切断面）上にあった頂点を
+    平滑化後に平面へ射影し直す。これにより断面のクリップ面が波打たず平坦に
+    保たれる（ラプラシアン平滑化は本来クリップ面も丸めてしまうため）。
+    plane_tol は「切断面上」と判定する平面からの許容距離（µm, 目安はピッチ半分）。
+    平滑化で点数が変わった場合は射影をスキップする（安全側）。
+    """
+    surf = mesh.extract_surface()
+    out = surf.smooth(n_iter=n_iter, relaxation_factor=relaxation_factor)
+    if plane is not None and out.n_points == surf.n_points:
+        origin = np.asarray(plane[0], dtype=float)
+        nrm = np.asarray(plane[1], dtype=float)
+        ln = float(np.linalg.norm(nrm))
+        if ln > 0:
+            nrm = nrm / ln
+            on_plane = np.abs((surf.points - origin) @ nrm) < plane_tol
+            if on_plane.any():
+                pts = out.points.copy()
+                pts[on_plane] -= np.outer((pts[on_plane] - origin) @ nrm, nrm)
+                out.points = pts
+    return out
+
+
 def slice_2d(
     wafer: Wafer,
     axis: str,

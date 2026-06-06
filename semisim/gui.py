@@ -2103,7 +2103,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 clipped = mesh
             if clipped.n_cells == 0:
                 clipped = mesh
-            self.plotter.add_mesh(self._maybe_smooth(clipped), **common)
+            self.plotter.add_mesh(
+                self._maybe_smooth(clipped, plane=(origin, normal)), **common
+            )
             self._update_pos_label(origin)
         elif self.clip_mode == "free":
             self.plotter.add_mesh_clip_plane(self._maybe_smooth(mesh), **common)
@@ -2141,12 +2143,18 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.pos_label.setText("")
 
-    def _maybe_smooth(self, mesh):
-        """スムーズ表示が有効ならサーフェスを抽出して平滑化する。"""
+    def _maybe_smooth(self, mesh, plane=None):
+        """スムーズ表示が有効ならサーフェスを抽出して平滑化する。
+
+        plane=(origin, normal) を渡すと断面のクリップ面を平坦に保つ（平滑化で
+        切断面が波打つのを防ぐ）。
+        """
         if not self.smooth:
             return mesh
         try:
-            return mesh.extract_surface().smooth(n_iter=30, relaxation_factor=0.1)
+            tol = 0.5 * (self.wafer.config.pitch_um
+                         if getattr(self, "wafer", None) is not None else 0.05)
+            return visualize.smoothed_surface(mesh, plane=plane, plane_tol=tol)
         except Exception:
             return mesh
 
