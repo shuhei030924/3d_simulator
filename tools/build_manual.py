@@ -517,8 +517,11 @@ def defect_section() -> tuple[str, str]:
     r.add(Strip(material="photoresist"))
     r.add(PVD(material="metal_cu", thickness_um=0.7, step_coverage=0.72, overhang=0.5))
     w = r.simulate()
+    # ylim はトレンチ底〜被覆金属の上面まで含め、口元が塞がった様子（埋め込み
+    # 空洞の上端が金属で封止される）まで見えるようにする。狭く切ると封止部が
+    # 枠外になり、ティアドロップ空洞が開いたトレンチのように誤解されるため。
     render(w, "キーホールボイド: 段差被覆不良で口元が先に塞がった埋め込み空洞",
-           "defect_void.png", ylim=(1.9, 3.7))
+           "defect_void.png", ylim=(1.9, 4.7))
     vm = metrology.void_metrics(w)
     rep = metrology.defect_report(w)
     has_void = "検出" if vm["count"] > 0 else "なし"
