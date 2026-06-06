@@ -108,6 +108,46 @@ def render(wafer: Wafer, title: str, fname: str, ylim=None) -> None:
     plt.close(fig)
 
 
+def render_steps(stages, suptitle, fname, ylim=None, xlim=None) -> None:
+    """複数ステージの中央 Y 断面を横並びパネルで 1 枚に描く（工程の Step-by-Step）。
+
+    stages: (ラベル, wafer) のリスト。各パネルは同じ x/z 範囲で並べ、工程の
+    進行が一目で比較できるようにする。共通凡例を上部に置く。
+    """
+    n = len(stages)
+    fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 3.6), dpi=110)
+    if n == 1:
+        axes = [axes]
+    cmap, norm = visualize.material_listed_cmap()
+    present_all: set[int] = set()
+    for ax, (label, wafer) in zip(axes, stages):
+        plane, width_um, height_um = visualize.slice_2d(
+            wafer, "Y", wafer.config.ny // 2)
+        ax.imshow(plane, origin="lower", cmap=cmap, norm=norm,
+                  extent=[0, width_um, 0, height_um],
+                  interpolation="nearest", aspect="auto")
+        ax.set_title(label, fontsize=10)
+        ax.set_xlabel("x (µm)")
+        if ylim:
+            ax.set_ylim(*ylim)
+        if xlim:
+            ax.set_xlim(*xlim)
+        present_all |= set(int(v) for v in np.unique(plane)) - {materials.AIR}
+    axes[0].set_ylabel("z (µm)")
+    handles = [
+        mpatches.Patch(color=materials.BY_ID[mid].color, label=materials.BY_ID[mid].name)
+        for mid in sorted(present_all) if mid in materials.BY_ID
+    ]
+    if handles:
+        fig.legend(handles=handles, loc="upper center",
+                   ncol=len(handles), fontsize=8, framealpha=0.9)
+    fig.suptitle(suptitle, fontsize=12, y=1.02)
+    os.makedirs(IMG_DIR, exist_ok=True)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(os.path.join(IMG_DIR, fname), bbox_inches="tight")
+    plt.close(fig)
+
+
 def _stepped(material="oxide", thick=0.6, mask_w=0.4, etch=0.5) -> Recipe:
     """段差（トレンチ）を持つ下地を作る共通レシピ。成膜デモの土台に使う。"""
     r = Recipe(config=cfg())
@@ -233,19 +273,25 @@ def demos() -> list:
 
     # --- SADP（ピッチダブリング）---
     def d_sadp():
+        # ピッチ半減の仕組みは「マンドレル→側壁スペーサ→マンドレル引抜き→転写」
+        # の各段階を見ないと伝わらないので、工程を Step-by-Step で並べて描く。
         r = Recipe(config=cfg())
-        # 被パターン層（ポリシリコン）
-        r.add(CVD(material="poly", thickness_um=0.30))
-        # マンドレル（犠牲レジスト）をリソ解像度の緩いピッチで 3 本形成
+        r.add(CVD(material="poly", thickness_um=0.30))            # 0 被パターン層
         r.add(Photo(mask=_mandrel_mask([0.28, 0.5, 0.72], 0.10),
-                    thickness_um=0.30, polarity="positive"))
-        # コンフォーマル成膜＋エッチバックでマンドレル側壁にスペーサを残す
-        r.add(Spacer(material="oxide", thickness_um=0.08, overetch_um=0.02))
-        # マンドレル引き抜き → 自立スペーサ（1 マンドレルあたり 2 本＝ピッチ半減）
-        r.add(Strip(material="photoresist"))
-        # スペーサをハードマスクに被パターン層へ転写
-        r.add(DryEtch(targets=["poly"], depth_um=0.32))
-        return r.simulate()
+                    thickness_um=0.30, polarity="positive"))      # 1 マンドレル
+        r.add(Spacer(material="oxide", thickness_um=0.08, overetch_um=0.02))  # 2 スペーサ
+        r.add(Strip(material="photoresist"))                      # 3 マンドレル引抜き
+        r.add(DryEtch(targets=["poly"], depth_um=0.32))           # 4 下地へ転写
+        stages = [
+            ("① マンドレル形成\n(緩ピッチ 3 本)", r.simulate(up_to=2)),
+            ("② 側壁スペーサ\n(コンフォーマル膜+EB)", r.simulate(up_to=3)),
+            ("③ マンドレル引抜き\n(自立スペーサ 6 本=2×)", r.simulate(up_to=4)),
+            ("④ 下地へ転写\n(6 本のフィン)", r.simulate(up_to=5)),
+        ]
+        # 3 本のマンドレル→6 本のフィン全体が入るよう拡大（ピッチ半減が分かる）
+        render_steps(stages, "ピッチダブリング (SADP) の工程",
+                     "sadp.png", ylim=(1.85, 2.95), xlim=(1.5, 6.5))
+        return stages[-1][1]
     items.append((
         "sadp", "ピッチダブリング (SADP / 自己整合ダブルパターニング)", "微細化",
         "リソ解像限界より細かい配線ピッチを作る先端微細化プロセスです。"
@@ -1566,9 +1612,12 @@ def main() -> None:
     nav_parts = []
     section_parts = []
     last_cat = None
+    # builder が自前で複数パネル画像（Step-by-Step）を描く工程は既定描画を行わない
+    step_keys = {"sadp"}
     for key, title, cat, desc, params, code, builder, ylim in items:
         wafer = builder()
-        render(wafer, title, f"{key}.png", ylim=ylim)
+        if key not in step_keys:
+            render(wafer, title, f"{key}.png", ylim=ylim)
         print(f"  生成: img/{key}.png")
         if cat != last_cat:
             nav_parts.append(f'<div class="cat">{html.escape(cat)}</div>')
