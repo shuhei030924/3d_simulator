@@ -2108,7 +2108,10 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self._update_pos_label(origin)
         elif self.clip_mode == "free":
-            self.plotter.add_mesh_clip_plane(self._maybe_smooth(mesh), **common)
+            # 自由クリップは体積メッシュを対話的に切り、断面の中身を常に詰めて
+            # 見せる（設計上の不変条件）。表面抽出は中空シェル化して断面が空洞に
+            # 見えるため、幾何平滑化はかけない（見た目の平滑化は smooth_shading）。
+            self.plotter.add_mesh_clip_plane(mesh, **common)
             self.pos_label.setText("")
         else:
             self.plotter.add_mesh(self._maybe_smooth(mesh), **common)

@@ -65,3 +65,21 @@ def test_smoothed_surface_no_plane_runs():
     """plane なしでも例外なくサーフェスを返す。"""
     out = V.smoothed_surface(_mesh())
     assert out.n_points > 0
+
+
+def test_smoothing_is_volume_preserving():
+    """Taubin 平滑化は外形を縮めない（収縮 5% 未満）。"""
+    surf = _mesh().extract_surface()
+    out = V.smoothed_surface(_mesh())
+    shrink = 1.0 - out.volume / surf.volume
+    assert abs(shrink) < 0.05
+
+
+def test_tiny_structure_not_collapsed():
+    """微小グリッドでも平滑化で潰れない（ラプラシアンでは約 33% 収縮した）。"""
+    from semisim.grid import Wafer
+    w = Wafer(WaferConfig(nx=6, ny=6, nz=8, pitch_um=0.1, substrate_um=0.3))
+    mesh = V.solid_unstructured(w)
+    surf = mesh.extract_surface()
+    out = V.smoothed_surface(mesh)
+    assert abs(1.0 - out.volume / surf.volume) < 0.1  # ほぼ体積保存
