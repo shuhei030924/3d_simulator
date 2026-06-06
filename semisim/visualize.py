@@ -69,17 +69,21 @@ def solid_unstructured(
 
 
 def smoothed_surface(mesh, plane=None, n_iter: int = 30,
-                     relaxation_factor: float = 0.1, plane_tol: float = 0.05):
-    """メッシュ表面をラプラシアン平滑化して返す（スムーズ表示用）。
+                     pass_band: float = 0.1, plane_tol: float = 0.05):
+    """メッシュ表面を平滑化して返す（スムーズ表示用）。
+
+    体積を保つ Taubin（windowed-sinc）平滑化を用いる。ラプラシアン平滑化は
+    形状を縮める（小さな構造で顕著, 例: 微小グリッドで約 33% 収縮）が、Taubin は
+    収縮をほぼ起こさず（±1% 程度）外形だけを滑らかにする。
 
     plane=(origin, normal) を渡すと、その平面（断面の切断面）上にあった頂点を
     平滑化後に平面へ射影し直す。これにより断面のクリップ面が波打たず平坦に
-    保たれる（ラプラシアン平滑化は本来クリップ面も丸めてしまうため）。
+    保たれる（平滑化は本来クリップ面も丸めてしまうため）。
     plane_tol は「切断面上」と判定する平面からの許容距離（µm, 目安はピッチ半分）。
     平滑化で点数が変わった場合は射影をスキップする（安全側）。
     """
     surf = mesh.extract_surface()
-    out = surf.smooth(n_iter=n_iter, relaxation_factor=relaxation_factor)
+    out = surf.smooth_taubin(n_iter=n_iter, pass_band=pass_band)
     if plane is not None and out.n_points == surf.n_points:
         origin = np.asarray(plane[0], dtype=float)
         nrm = np.asarray(plane[1], dtype=float)
