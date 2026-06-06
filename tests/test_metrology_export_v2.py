@@ -569,6 +569,40 @@ def test_continuity_axis_selectable(wafer):
     assert metrology.electrical_continuity(wafer, "tungsten", "x")["connected"] is False
 
 
+def test_continuity_diagonal_pinch_connected_by_default(wafer):
+    """段差の角で辺接触（対角ピンチ）する配線は既定（面+辺）で導通とみなす。
+
+    薄いコンフォーマル膜が角で 1 ボクセルずれて辺接触するケースを再現。面のみ
+    (connectivity=1) では断線扱いだが、既定の面+辺(2) では連続＝導通になる。
+    """
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, y = 25, 20
+    nx = grid.shape[2]
+    # x の前半を z、後半を z+1 に置き、境界で辺接触（対角）させる
+    grid[z, y, 0:nx // 2] = w_id
+    grid[z + 1, y, nx // 2:nx] = w_id
+    assert metrology.electrical_continuity(wafer, "tungsten", "x", connectivity=1)[
+        "connected"] is False                       # 面のみでは断線扱い
+    assert metrology.electrical_continuity(wafer, "tungsten", "x")[
+        "connected"] is True                        # 既定(面+辺)で導通
+    assert metrology.electrical_continuity(wafer, "tungsten", "x")[
+        "n_components"] == 1
+
+
+def test_continuity_real_break_open_all_connectivity(wafer):
+    """真の断線（1 ボクセル以上の隙間）はどの connectivity でもオープン。"""
+    grid = wafer.grid
+    w_id = materials.BY_NAME["tungsten"].id
+    z, y = 25, 20
+    nx = grid.shape[2]
+    grid[z, y, 0:nx] = w_id
+    grid[z, y, nx // 2] = materials.AIR  # 完全な隙間
+    for c in (1, 2, 3):
+        assert metrology.electrical_continuity(
+            wafer, "tungsten", "x", connectivity=c)["connected"] is False
+
+
 # --- 配線抵抗推定 (断面積考慮の直列抵抗) ----------------------------------
 def test_line_resistance_finite_for_full_line(wafer):
     grid = wafer.grid

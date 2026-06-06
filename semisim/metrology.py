@@ -949,13 +949,22 @@ def dominant_wavelength_um(wafer: Wafer) -> float:
     return (1.0 / f) * wafer.config.pitch_um
 
 
-def electrical_continuity(wafer: Wafer, name_or_id, axis: str = "x") -> dict:
+def electrical_continuity(
+    wafer: Wafer, name_or_id, axis: str = "x", connectivity: int = 2
+) -> dict:
     """導体材料が指定軸の両端を連結しているか（導通/オープン）を判定する。
 
-    指定材料のボクセルを 6 近傍でラベリングし、指定軸（"x"/"y"）の最小端
+    指定材料のボクセルを連結成分ラベリングし、指定軸（"x"/"y"）の最小端
     （index 0 の面）と最大端（最終 index の面）の両方に同時に接する連結成分が
     あれば「導通」とみなす。エッチング過多による配線断線（オープン不良）や、
     パターンが両端に届かない欠損の検出に使う。
+
+    connectivity: 連結とみなす接触の種類（1=面のみ/6近傍, 2=面+辺/18近傍,
+    3=面+辺+角/26近傍）。既定は 2。1 ボクセル厚のコンフォーマル膜は段差の角で
+    辺接触になり、面のみ(1)では物理的に連続な膜が「断線」と誤判定されるため、
+    辺接触（実際の線接触＝導通）まで連結とみなす 2 を既定とする。真の断線は
+    1 ボクセル以上の隙間なのでどの connectivity でも検出される。
+
     返り値: {"connected", "n_components", "spanning_components", "largest_um3"}。
     材料が存在しなければ全て 0/False。
     """
@@ -970,7 +979,8 @@ def electrical_continuity(wafer: Wafer, name_or_id, axis: str = "x") -> dict:
             "largest_um3": 0.0,
         }
     a = {"x": 2, "y": 1, "z": 0}.get(axis, 2)  # grid 軸 [z,y,x]
-    structure = ndimage.generate_binary_structure(3, 1)  # 6 近傍
+    conn = int(min(3, max(1, connectivity)))
+    structure = ndimage.generate_binary_structure(3, conn)
     labels, n = ndimage.label(mask, structure=structure)
     n_axis = grid.shape[a]
     lo = set(np.unique(np.take(labels, 0, axis=a)))
