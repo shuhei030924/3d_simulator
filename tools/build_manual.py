@@ -277,9 +277,12 @@ def demos() -> list:
         # の各段階を見ないと伝わらないので、工程を Step-by-Step で並べて描く。
         r = Recipe(config=cfg())
         r.add(CVD(material="poly", thickness_um=0.30))            # 0 被パターン層
-        r.add(Photo(mask=_mandrel_mask([0.28, 0.5, 0.72], 0.10),
+        # マンドレル幅 0.5µm・ピッチ 1.0µm、スペーサ 0.20µm。スペーサ幅＝最終
+        # 線幅なので、これでライン:スペースがほぼ均等(≒1:1.4)の現実的なフィンに
+        # なる（細すぎるスパイクと広すぎる隙間を解消）。中心 3.0/4.0/5.0µm。
+        r.add(Photo(mask=_mandrel_mask([0.375, 0.5, 0.625], 0.0625),
                     thickness_um=0.30, polarity="positive"))      # 1 マンドレル
-        r.add(Spacer(material="oxide", thickness_um=0.08, overetch_um=0.02))  # 2 スペーサ
+        r.add(Spacer(material="oxide", thickness_um=0.20, overetch_um=0.02))  # 2 スペーサ
         r.add(Strip(material="photoresist"))                      # 3 マンドレル引抜き
         r.add(DryEtch(targets=["poly"], depth_um=0.32))           # 4 下地へ転写
         stages = [
@@ -290,7 +293,7 @@ def demos() -> list:
         ]
         # 3 本のマンドレル→6 本のフィン全体が入るよう拡大（ピッチ半減が分かる）
         render_steps(stages, "ピッチダブリング (SADP) の工程",
-                     "sadp.png", ylim=(1.85, 2.95), xlim=(1.5, 6.5))
+                     "sadp.png", ylim=(1.85, 2.95), xlim=(2.3, 5.7))
         return stages[-1][1]
     items.append((
         "sadp", "ピッチダブリング (SADP / 自己整合ダブルパターニング)", "微細化",
