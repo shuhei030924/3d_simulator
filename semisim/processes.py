@@ -2197,22 +2197,29 @@ class Fill(Process):
                     hw_feat = lut[labels]  # トレンチごとの代表ハーフ幅
                     depth = np.where(recess, field_level - z_top, 0.0).astype(float)
                     width = np.maximum(2.0 * hw_feat, 1.0)
-                    # AR が閾値を超える狭いリセスの中心線（ハーフ幅が最大の列）
+                    # AR が閾値を超える狭いリセスを対象にキーホール空隙を残す
                     narrow = recess & (depth > self.void_ar * width)
-                    centerline = hw >= (hw_feat - 0.5)
-                    cand = narrow & centerline
-                    # コンフォーマル成長では側壁が中央で合体し、底のボトムアップ
-                    # 充填の頂点（z_top+ハーフ幅）から口元（フィールド面）まで縦に
-                    # 繋がったシームが残る。上端はオーバーフィル/CMP 前の被覆膜で
-                    # 封止される。中空に浮いた短い線でなく、底の充填部から口元まで
-                    # 連続する実際のシーム形状にする。
-                    lo = z_top.astype(float) + hw_feat  # ボトムアップ充填の頂点
-                    # 口元から 1 ボクセルだけ封止膜を残してシーム上端とする
-                    hi = float(field_level) - 1.0
+                    # キーホール（ティアドロップ）空隙: 側壁から成長したコンフォーマル
+                    # Cu が中央を埋めきる前に口元がピンチオフして封じ込められる空洞。
+                    # 底のボトムアップ充填の頂点(lo, V 底)から口元の封止膜直下(hi)まで
+                    # 縦に伸び、中央が膨らみ上下で絞れるティアドロップ形にする。空隙の
+                    # ハーフ幅は壁からの距離 hw が被覆 Cu 厚 coat を超える中央部。
+                    # coat は z 位置で変化し、口元(u→1)で hw_feat に達してピンチオフ、
+                    # 中段で薄くなって最大空隙幅になる（hw_feat の keyhole 倍まで）。
+                    lo = z_top.astype(float) + hw_feat  # ボトムアップ充填の頂点(V底)
+                    hi = float(field_level) - 1.0       # 口元の封止膜直下
+                    span = np.maximum(hi - lo, 1.0)
+                    zf = z_idx.astype(float)            # (nz,1,1)
+                    u = np.clip((zf - lo[None, :, :]) / span[None, :, :], 0.0, 1.0)
+                    # 下寄りで最大、上端ほど細るティアドロップ断面(0→1→0)
+                    profile = np.sin(np.pi * u) ** 0.6
+                    keyhole = 0.7                        # 最大空隙幅 / トレンチ幅
+                    coat = hw_feat[None, :, :] * (1.0 - keyhole * profile)
                     void = (
-                        cand[None, :, :]
-                        & (z_idx > lo[None, :, :])
-                        & (z_idx <= hi)
+                        narrow[None, :, :]
+                        & (zf > lo[None, :, :])
+                        & (zf <= hi)
+                        & (hw[None, :, :] > coat)
                         & (grid == mat_id)
                     )
                     grid[void] = materials.AIR

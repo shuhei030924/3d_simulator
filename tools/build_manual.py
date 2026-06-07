@@ -555,7 +555,7 @@ def defect_section() -> tuple[str, str]:
     # 埋めるのが実プロセスなので、PVD ではなく Fill（void_ar）を使う。
     # 細かいボクセル(pitch=0.005µm)で薄いシームとバリア側壁を滑らかに描く。
     pitch = 0.005
-    width, depth = 0.30, 1.4
+    width, depth = 0.55, 1.3
     span = 1000 * pitch
     frac = width / span
     r = Recipe(config=WaferConfig(nx=1000, ny=10, nz=820, pitch_um=pitch, substrate_um=2.0))
@@ -578,12 +578,13 @@ def defect_section() -> tuple[str, str]:
         "<p>本シミュレータは主要な半導体不良モードを計測 (metrology) で検証できます。"
         "下図は実際の<strong>ダマシン Cu フロー</strong>（酸化膜トレンチ→TaN バリア→"
         "Cu 電解めっき）で、ボトムアップ充填（スーパーフィル）が不十分なときに生じる"
-        "<strong>シーム／キーホールボイド</strong>を再現した例です。側壁から成長した"
-        "Cu が中央で合体（または上端で先にピンチオフ）すると、トレンチ中心に縦長の"
-        f"空隙が継ぎ目として残ります（void_metrics 個数={vm['count']} → {has_void}）。"
+        "<strong>キーホール（ティアドロップ）ボイド</strong>を再現した例です。側壁から"
+        "成長した Cu が中央を埋めきる前に口元が先にピンチオフして封止されると、底の"
+        "充填頂点から口元直下まで、中央が膨らみ上下で絞れる涙滴状の空洞が残ります"
+        f"（void_metrics 個数={vm['count']} → {has_void}）。"
         "Cu はスパッタではなく電解めっき (ECD) で埋めるのが実プロセスのため、PVD では"
         "なく <code>Fill</code>（<code>void_ar</code>）でこの封止機構を再現しています。"
-        "灰色の薄い層はバリアメタル (TaN)、橙が Cu、白い縦線が残存シームです。</p>"
+        "灰色の薄い層はバリアメタル (TaN)、橙が Cu、白い涙滴状の空洞が残存ボイドです。</p>"
         "<table class='param'><tr><th>不良モード</th><th>計測関数</th></tr>"
         "<tr><td>ボイド（充填不良）</td><td><code>void_metrics</code></td></tr>"
         "<tr><td>エッチ残渣・ストリンガー</td><td><code>etch_residue_metrics</code></td></tr>"
