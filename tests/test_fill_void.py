@@ -67,14 +67,14 @@ def test_void_roundtrip():
     assert Fill._from_params(d).void_ar == 8.0
 
 
-def test_seam_is_continuous_to_mouth():
-    """シームは底のボトムアップ充填頂点から口元付近まで縦に連続する。
+def test_keyhole_is_teardrop_not_floating():
+    """キーホール空隙は底の充填頂点から口元付近まで縦に伸びるティアドロップ。
 
-    中空に浮いた短い線でなく、トレンチ高さの大半を占める連続シームになること
-    （上端は封止膜直下、下端は底の充填頂点付近）を確認する。
+    中空に浮いた短い線でなく、トレンチ高さの大半を占め、中段で最大幅を持つ
+    （ハーフ幅 1 ボクセルの細線でない）ことを確認する。
     """
-    cfg = WaferConfig(nx=60, ny=12, nz=80, pitch_um=0.05, substrate_um=1.0)
-    mask = Mask(shapes=[Shape("rect", {"x0": 0.45, "y0": 0.0, "x1": 0.55, "y1": 1.0})])
+    cfg = WaferConfig(nx=80, ny=12, nz=80, pitch_um=0.05, substrate_um=1.0)
+    mask = Mask(shapes=[Shape("rect", {"x0": 0.4, "y0": 0.0, "x1": 0.6, "y1": 1.0})])
     depth = 1.6
     r = Recipe(config=cfg)
     r.add(CVD(material="oxide", thickness_um=depth))
@@ -85,8 +85,10 @@ def test_seam_is_continuous_to_mouth():
     g = r.simulate().grid
     cu = materials.get("metal_cu").id
     y = cfg.ny // 2
-    # 埋没空気（上下を Cu で挟まれた）の z 範囲
     sl = g[:, y, :]
+    pitch = cfg.pitch_um
+    # 各 z での埋没空気（上下を Cu で挟まれた）の幅
+    width_by_z = {}
     void_z = []
     for x in range(cfg.nx):
         col = sl[:, x]
@@ -94,17 +96,25 @@ def test_seam_is_continuous_to_mouth():
         cu_z = np.where(col == cu)[0]
         if cu_z.size and air.size:
             buried = air[(air > cu_z.min()) & (air < cu_z.max())]
-            void_z.extend(buried.tolist())
-    assert void_z, "シームが検出されない"
-    pitch = cfg.pitch_um
+            for z in buried.tolist():
+                width_by_z[z] = width_by_z.get(z, 0) + 1
+                void_z.append(z)
+    assert void_z, "キーホール空隙が検出されない"
     seam_lo, seam_hi = min(void_z) * pitch, max(void_z) * pitch
-    trench_top = 1.0 + depth                      # oxide 上面（フィールド面）
-    trench_bot = trench_top - depth               # トレンチ底
-    seam_height = seam_hi - seam_lo
-    # シームはトレンチ高さの半分以上を占める（浮いた短い線ではない）
-    assert seam_height > 0.5 * depth, f"シームが短すぎる: {seam_height:.2f}um"
-    # 上端は口元(フィールド面)近くまで達する
-    assert seam_hi > trench_top - 0.2, f"シーム上端が低い: {seam_hi:.2f} vs {trench_top}"
+    trench_top = 1.0 + depth
+    trench_bot = trench_top - depth
+    # トレンチ高さの半分以上を占める連続空隙（浮いた短い線でない）
+    assert (seam_hi - seam_lo) > 0.5 * depth
+    # 上端は口元近くまで達する / 下端は底の充填頂点より上（底は埋まる）
+    assert seam_hi > trench_top - 0.25
+    assert seam_lo > trench_bot
+    # ティアドロップ: 最大幅が複数ボクセル（ハーフ幅 1 の細線でない）
+    assert max(width_by_z.values()) >= 4
+    # 中段の幅 > 上端付近の幅（上ほど細るピンチオフ形状）
+    zs = sorted(width_by_z)
+    mid_w = width_by_z[zs[len(zs) // 2]]
+    top_w = width_by_z[zs[-2]] if len(zs) >= 2 else width_by_z[zs[-1]]
+    assert mid_w > top_w
     # 下端は底の充填頂点より上（底は埋まっている）
     assert seam_lo > trench_bot, "シームが底まで開いている"
 
