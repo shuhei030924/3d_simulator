@@ -1595,6 +1595,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_cb.stateChanged.connect(lambda *_: self.rebuild_and_render())
         left.addWidget(self.preview_cb)
 
+        # 工程の再生（タイムラインアニメーション）と GIF 書き出し
+        arow = QtWidgets.QHBoxLayout()
+        self.play_btn = QtWidgets.QPushButton("▶ 工程を再生")
+        self.play_btn.setToolTip("初期状態から 1 工程ずつ適用して順に表示します")
+        self.play_btn.clicked.connect(self.toggle_play)
+        arow.addWidget(self.play_btn)
+        self.play_speed = QtWidgets.QComboBox()
+        self.play_speed.addItems(["0.5 秒/工程", "1 秒/工程", "2 秒/工程"])
+        self.play_speed.setCurrentIndex(1)
+        self.play_speed.setToolTip("再生速度")
+        arow.addWidget(self.play_speed)
+        gif_btn = QtWidgets.QPushButton("GIF書出")
+        gif_btn.setToolTip("工程進行の断面アニメーション GIF を保存します")
+        gif_btn.clicked.connect(self.export_gif)
+        arow.addWidget(gif_btn)
+        left.addLayout(arow)
+
         # 中央列の層構成リードアウト
         left.addWidget(QtWidgets.QLabel("<b>層構成（中央列, 上→下）</b>"))
         self.stack_view = QtWidgets.QTextEdit()
@@ -1998,6 +2015,81 @@ class MainWindow(QtWidgets.QMainWindow):
         """2D タブに切り替わったら最新ウェハで描画する。"""
         if self.tabs.tabText(idx).startswith("2D") and hasattr(self, "view2d"):
             self.view2d.set_wafer(getattr(self, "wafer", None), self.show_resist)
+
+    # -- 工程の再生（タイムラインアニメーション） ---------------------------
+    def toggle_play(self):
+        """工程列を初期状態から 1 工程ずつ適用して順に表示する/停止する。"""
+        timer = getattr(self, "_play_timer", None)
+        if timer is not None and timer.isActive():
+            self._stop_play()
+            return
+        if not self.recipe.steps:
+            self.status.showMessage("再生する工程がありません", 3000)
+            return
+        self.preview_cb.setChecked(True)  # 選択工程まで表示モードで再生する
+        self._play_index = 0
+        intervals = {0: 500, 1: 1000, 2: 2000}
+        if timer is None:
+            self._play_timer = QtCore.QTimer(self)
+            self._play_timer.timeout.connect(self._play_tick)
+        self._play_timer.setInterval(
+            intervals.get(self.play_speed.currentIndex(), 1000)
+        )
+        self.play_btn.setText("■ 停止")
+        self._play_tick()  # 最初のフレームを即時表示
+        self._play_timer.start()
+
+    def _play_tick(self):
+        if self._play_index >= len(self.recipe.steps):
+            self._stop_play(done=True)
+            return
+        self.list.setCurrentRow(self._play_index)  # 選択変更で再描画される
+        self.status.showMessage(
+            f"再生中: 工程 {self._play_index + 1}/{len(self.recipe.steps)}"
+        )
+        self._play_index += 1
+
+    def _stop_play(self, done: bool = False):
+        timer = getattr(self, "_play_timer", None)
+        if timer is not None:
+            timer.stop()
+        self.play_btn.setText("▶ 工程を再生")
+        self.status.showMessage(
+            "再生が完了しました" if done else "再生を停止しました", 3000
+        )
+
+    def export_gif(self):
+        """工程進行の断面アニメーション GIF を書き出す。"""
+        if not self.recipe.steps:
+            self.status.showMessage("書き出す工程がありません", 3000)
+            return
+        start = "process.gif"
+        if self.settings.last_dir:
+            start = os.path.join(self.settings.last_dir, "process.gif")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "GIF アニメーションを保存", start, "GIF (*.gif)"
+        )
+        if not path:
+            return
+        from . import animation
+
+        def prog(done, total):
+            self.status.showMessage(f"GIF 書出中... {done}/{total} フレーム")
+            QtWidgets.QApplication.processEvents()
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            n = animation.save_gif(
+                self.recipe, path,
+                include_resist=self.show_resist,
+                progress=prog,
+            )
+        except Exception as ex:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "GIF書出", f"書き出しに失敗しました:\n{ex}")
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.status.showMessage(f"GIF を保存しました（{n} フレーム）: {path}", 5000)
 
     def save_screenshot(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
