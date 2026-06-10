@@ -239,6 +239,73 @@ def ldd_mosfet_flow() -> Recipe:
     return r
 
 
+def sti_isolation_flow() -> Recipe:
+    """STI（シャロートレンチ素子分離）。
+
+    現代 CMOS の素子分離の標準モジュール。パッド酸化＋窒化膜（CMP ストップ）
+    の積層にトレンチを掘り、ライナー酸化で側壁ダメージを回復してから酸化膜で
+    充填。窒化膜ストップの CMP で平坦化し、窒化膜を除去すると酸化膜の
+    アイソレーションだけが残る。
+    """
+    r = Recipe(config=_default_cfg())
+    r.name = "STI 素子分離"
+    r.description = "パッド酸化→窒化膜→トレンチ→ライナー→充填→ストップ CMP の標準 STI"
+    r.add(Oxidation(thickness_um=0.1))  # パッド酸化（窒化膜応力の緩衝）
+    r.add(CVD(material="nitride", thickness_um=0.25))  # CMP ストップ窒化膜
+    r.add(Photo(mask=_stripe_mask(0.5, 0.22), thickness_um=0.8, polarity="positive"))
+    r.add(DryEtch(targets=["nitride", "oxide", "silicon"], depth_um=0.85))  # トレンチ
+    r.add(Strip(material="photoresist"))
+    r.add(Oxidation(thickness_um=0.04))  # ライナー酸化（エッチダメージ回復）
+    r.add(CVD(material="oxide", thickness_um=0.7))  # トレンチ充填（HDP 相当）
+    r.add(CMP(remove_um=0.9, stop_material="nitride"))  # 窒化膜ストップ研磨
+    r.add(Strip(material="nitride"))  # 窒化膜除去 → STI 完成
+    return r
+
+
+def finfet_fin_flow() -> Recipe:
+    """FinFET フィン形成＋メタルゲート。
+
+    フィンパターニング→フィンエッチ→STI 酸化膜の充填と平坦化→
+    酸化膜リセスでフィン上部を露出→high-k(HfO2) ALD→TiN メタルゲートの
+    順で、ゲートがフィンを 3 面から包む（トライゲート）構造を作る
+    先端ロジックの代表モジュール。
+    """
+    r = Recipe(config=WaferConfig(nx=120, ny=120, nz=120, pitch_um=0.05, substrate_um=2.5))
+    r.name = "FinFET フィン形成"
+    r.description = "フィンエッチ→STI→リセス→high-k/メタルゲートのトライゲート構造"
+    r.add(Photo(mask=_stripe_mask(0.34, 0.12), thickness_um=0.5, polarity="negative"))
+    r.add(DryEtch(targets=["silicon"], depth_um=0.7))  # フィンエッチ
+    r.add(Strip(material="photoresist"))
+    r.add(CVD(material="oxide", thickness_um=0.5))  # STI 酸化膜充填
+    r.add(CMP(remove_um=0.55))  # 平坦化
+    r.add(DryEtch(targets=["oxide"], depth_um=0.35))  # リセス: フィン上部を露出
+    r.add(ALD(material="hafnia", cycles=30, growth_per_cycle_nm=1.0))  # high-k ゲート絶縁膜
+    r.add(CVD(material="tin", thickness_um=0.08))  # メタルゲート（フィンを 3 面被覆）
+    return r
+
+
+def w_contact_plug_flow() -> Recipe:
+    """W（タングステン）コンタクトプラグ。
+
+    拡散層の上に層間絶縁膜を成膜し、コンタクトホールを開口。TiN バリア/
+    グルー層を ALD で着けてから W を CVD 充填し、CMP でプラグを分離する。
+    ロジック/メモリのコンタクト工程の標準モジュール。
+    """
+    r = Recipe(config=_default_cfg())
+    r.name = "W コンタクトプラグ"
+    r.description = "ILD→ホール開口→TiN バリア→W 充填→CMP のコンタクト標準フロー"
+    # 表面から拡散層を形成（コンタクトは表面のドープ層に着底する必要がある）
+    r.add(Diffusion(dopant="doped_n", depth_um=0.35))
+    r.add(CVD(material="oxide", thickness_um=1.0))  # 層間絶縁膜 (ILD)
+    r.add(Photo(mask=_center_mask(0.18), thickness_um=0.9, polarity="positive"))
+    r.add(DryEtch(targets=["oxide"], depth_um=1.1, taper_deg=3.0))  # ホール開口
+    r.add(Strip(material="photoresist"))
+    r.add(ALD(material="tin", cycles=40, growth_per_cycle_nm=1.0))  # バリア/グルー層
+    r.add(Fill(material="tungsten", overfill_um=0.2))  # W CVD 充填
+    r.add(CMP(remove_um=0.35, stop_material="oxide"))  # プラグ分離
+    return r
+
+
 def particle_micromask_flow() -> Recipe:
     """パーティクル欠陥によるマイクロマスキング。
 
@@ -289,6 +356,9 @@ PRESETS: dict[str, callable] = {
     "TSV 貫通ビア": tsv_flow,
     "多層 Cu 配線": multilevel_interconnect,
     "薄化 3D-IC": thinned_3dic_flow,
+    "STI 素子分離": sti_isolation_flow,
+    "FinFET フィン形成": finfet_fin_flow,
+    "W コンタクトプラグ": w_contact_plug_flow,
     "欠陥: マイクロマスキング": particle_micromask_flow,
     "欠陥: 埋込ボイド開口": buried_void_exposure_flow,
 }
