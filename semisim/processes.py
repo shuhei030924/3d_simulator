@@ -2749,6 +2749,165 @@ class Reflow(Process):
         )
 
 
+# === DEFECT（欠陥注入: パーティクル / 埋込ボイド / スクラッチ）===============
+@register
+@dataclass
+class Defect(Process):
+    """代表的な欠陥モードを意図的に配置し、後続工程との相互作用を検証する。
+
+    実工場の歩留り解析で問題になる欠陥を what-if で再現するための工程。
+    - particle: 表面に載る硬質パーティクル（球）。エッチ不能の異物として
+      後続の異方性エッチをブロックし、マイクロマスキング（欠陥下にピラーが
+      残る不良）を引き起こす。成膜では膜が異物に被さりバンプになる。
+      depth_um>0 で表面に埋まり込んだ異物（成膜中の取り込み等）を再現。
+      除去は STRIP（洗浄相当）。
+    - void: 表面下 depth_um（0=直径分）に埋め込まれた球状ボイド。後続の
+      エッチ / CMP が到達すると開口し、コンタクト不良・断線の原因になる。
+    - scratch: CMP スクラッチ相当の x 方向に横断する線状の溝。size_um が
+      溝幅、depth_um（0=幅と同じ）が深さ。
+
+    位置は面内正規化座標 x_frac / y_frac（0〜1）。count>1 のときは seed 付き
+    乱数で count 個をランダム散布する（欠陥密度の再現、決定的）。
+    """
+
+    type = "DEFECT"
+    label = "欠陥注入"
+
+    kind: str = "particle"  # particle / void / scratch
+    size_um: float = 0.3  # パーティクル/ボイドの直径, スクラッチの溝幅
+    x_frac: float = 0.5
+    y_frac: float = 0.5
+    count: int = 1
+    seed: int = 0
+    depth_um: float = 0.0  # particle: 埋まり込み / void: 中心深さ / scratch: 溝深さ
+    material: str = "particle"  # particle のとき配置する材料
+
+    _KIND_LABEL = {"particle": "パーティクル", "void": "埋込ボイド", "scratch": "スクラッチ"}
+
+    def summary(self) -> str:
+        kl = self._KIND_LABEL.get(self.kind, self.kind)
+        if self.kind == "scratch":
+            d = self.depth_um if self.depth_um > 0 else self.size_um
+            return f"DEFECT  {kl}  幅{self.size_um:.2f}µm 深さ{d:.2f}µm ×{self.count}"
+        cnt = f" ×{self.count}" if self.count > 1 else ""
+        dp = f"  深さ{self.depth_um:.2f}µm" if self.depth_um > 0 else ""
+        return f"DEFECT  {kl}  φ{self.size_um:.2f}µm{dp}{cnt}"
+
+    def _positions(self) -> list[tuple[float, float]]:
+        """配置位置（面内正規化座標）のリスト。count>1 は seed 乱数で散布。"""
+        if self.count <= 1:
+            return [(self.x_frac, self.y_frac)]
+        rng = np.random.default_rng(int(self.seed))
+        # 端ぎわは球が枠外に切れるので 5〜95% の範囲に散布する
+        pts = rng.uniform(0.05, 0.95, size=(int(self.count), 2))
+        return [(float(p[0]), float(p[1])) for p in pts]
+
+    def apply(self, wafer: Wafer) -> None:
+        if self.kind not in self._KIND_LABEL:
+            raise ValueError(
+                f"kind は particle/void/scratch のいずれか（指定値: {self.kind}）。"
+            )
+        _require_positive(self.size_um, "欠陥サイズ")
+        _require_range(self.x_frac, 0.0, 1.0, "位置 x")
+        _require_range(self.y_frac, 0.0, 1.0, "位置 y")
+        _require_non_negative(self.depth_um, "深さ")
+        if int(self.count) < 1:
+            raise ValueError(f"count は 1 以上（指定値: {self.count}）。")
+        grid = wafer.grid
+        nz, ny, nx = grid.shape
+        r = max(1, int(round(self.size_um / 2.0 / wafer.config.pitch_um)))
+        z_top = wafer.top_surface_z()  # 散布欠陥は互いに独立なので 1 回で良い
+        zz = np.arange(nz)[:, None, None]
+        yy = np.arange(ny)[None, :, None]
+        xx = np.arange(nx)[None, None, :]
+        for fx, fy in self._positions():
+            cx = int(round(fx * (nx - 1)))
+            cy = int(round(fy * (ny - 1)))
+            zt = int(z_top[cy, cx])
+            if zt < 0:
+                continue  # 固体の無い列には置けない
+            if self.kind == "particle":
+                self._place_particle(wafer, zz, yy, xx, cx, cy, zt, r)
+            elif self.kind == "void":
+                self._place_void(wafer, zz, yy, xx, cx, cy, zt, r)
+            else:  # scratch
+                self._place_scratch(wafer, z_top, cy, r)
+
+    def _place_particle(self, wafer, zz, yy, xx, cx, cy, zt, r) -> None:
+        """表面に接して載る球状異物。depth_um>0 で表面に埋まり込む。"""
+        grid = wafer.grid
+        nz = grid.shape[0]
+        mat_id = materials.get(self.material).id
+        sink = wafer.um_to_vox(self.depth_um) if self.depth_um > 0 else 0
+        zc = min(nz - 1, zt + r - sink)
+        sphere = (zz - zc) ** 2 + (yy - cy) ** 2 + (xx - cx) ** 2 <= r * r
+        if sink <= 0:
+            # 表面に載る: 既存固体は侵さず空気のみ置換（最下点が表面に接する）
+            region = sphere & (grid == materials.AIR)
+        else:
+            # 埋まり込み: 既存材料を押しのけて置換（最下層の基板は保護）
+            region = sphere.copy()
+            region[0, :, :] = False
+        grid[region] = mat_id
+
+    def _place_void(self, wafer, zz, yy, xx, cx, cy, zt, r) -> None:
+        """表面下に完全に埋まる球状ボイド（固体→空気）。"""
+        grid = wafer.grid
+        depth = wafer.um_to_vox(self.depth_um) if self.depth_um > 0 else 2 * r
+        zc = zt - depth
+        zc = min(zc, zt - r - 1)  # 上端が表面を破らない（完全埋込）
+        zc = max(zc, r + 1)  # 下端が最下層に達しない
+        if zc + r >= zt:
+            return  # 浅すぎて埋め込めない（薄い構造）
+        sphere = (zz - zc) ** 2 + (yy - cy) ** 2 + (xx - cx) ** 2 <= r * r
+        grid[sphere & (grid != materials.AIR)] = materials.AIR
+
+    def _place_scratch(self, wafer, z_top, cy, r) -> None:
+        """x 方向に横断する線状の溝（各列の上面から深さ分を除去）。"""
+        grid = wafer.grid
+        nz, ny, nx = grid.shape
+        depth = wafer.um_to_vox(self.depth_um) if self.depth_um > 0 else 2 * r
+        width = wafer.um_to_vox(self.size_um)  # 溝の全幅（ボクセル）
+        half_w = max(0, (width - 1) // 2)
+        band = np.abs(np.arange(ny) - cy) <= half_w
+        zz = np.arange(nz)[:, None, None]
+        zt = z_top[None, :, :]
+        remove = (
+            band[None, :, None]
+            & (zt >= 0)
+            & (zz <= zt)
+            & (zz > zt - depth)
+            & (zz >= 1)  # 最下層の基板は保護
+            & (grid != materials.AIR)
+        )
+        grid[remove] = materials.AIR
+
+    def params_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "size_um": self.size_um,
+            "x_frac": self.x_frac,
+            "y_frac": self.y_frac,
+            "count": self.count,
+            "seed": self.seed,
+            "depth_um": self.depth_um,
+            "material": self.material,
+        }
+
+    @classmethod
+    def _from_params(cls, d: dict) -> Defect:
+        return cls(
+            kind=d.get("kind", "particle"),
+            size_um=float(d.get("size_um", 0.3)),
+            x_frac=float(d.get("x_frac", 0.5)),
+            y_frac=float(d.get("y_frac", 0.5)),
+            count=int(d.get("count", 1)),
+            seed=int(d.get("seed", 0)),
+            depth_um=float(d.get("depth_um", 0.0)),
+            material=d.get("material", "particle"),
+        )
+
+
 # 各工程の 1 行説明（GUI のダイアログ上部バナー等で使用, GUI 非依存）
 _PROCESS_HELP = {
     "PHOTO": "レジストを塗布・露光・現像してマスクパターンを転写します。後続のエッチ／注入のマスクになります。",
@@ -2776,6 +2935,7 @@ _PROCESS_HELP = {
     "CLEAN": "プラズマ洗浄。残渣・有機物を除去します。",
     "LIFTOFF": "リフトオフ。レジスト上の金属ごと剥離し、開口部の金属だけを残します。",
     "STRIP": "ストリップ。レジスト等を除去します。",
+    "DEFECT": "欠陥を意図的に配置します（パーティクル／埋込ボイド／スクラッチ）。後続エッチのブロック（マイクロマスキング）など欠陥と工程の相互作用を what-if 検証できます。",
 }
 
 
@@ -2787,6 +2947,7 @@ def process_help(proc_type: str) -> str:
 # 工程の分類（GUI の「工程を追加」メニューをカテゴリ分けする, GUI 非依存）
 _CATEGORY_ORDER = [
     "リソグラフィ", "成膜", "エッチング", "ドーピング・熱処理", "平坦化・仕上げ",
+    "欠陥・歩留り",
 ]
 _PROCESS_CATEGORY = {
     "PHOTO": "リソグラフィ",
@@ -2798,6 +2959,7 @@ _PROCESS_CATEGORY = {
     "ANNEAL": "ドーピング・熱処理", "RTP": "ドーピング・熱処理", "OXIDE": "ドーピング・熱処理",
     "CMP": "平坦化・仕上げ", "BACKGRIND": "平坦化・仕上げ", "REFLOW": "平坦化・仕上げ",
     "CLEAN": "平坦化・仕上げ", "STRIP": "平坦化・仕上げ",
+    "DEFECT": "欠陥・歩留り",
 }
 
 
@@ -2813,6 +2975,7 @@ _CATEGORY_COLOR = {
     "エッチング": "#e67e22",
     "ドーピング・熱処理": "#c0392b",
     "平坦化・仕上げ": "#16a085",
+    "欠陥・歩留り": "#b03a8c",
     "その他": "#7f8c8d",
 }
 
@@ -2848,6 +3011,7 @@ def available_types() -> list[tuple[str, str]]:
         "DRY", "WET", "ALE", "KOH", "DRIE", "SPUTTER",
         "DIFFUSION", "IMPLANT", "ANNEAL", "RTP", "OXIDE",
         "SALICIDE", "FILL", "SPINON", "CMP", "BACKGRIND", "REFLOW", "CLEAN", "LIFTOFF", "STRIP",
+        "DEFECT",
     ]
     out = []
     for t in order:

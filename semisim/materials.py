@@ -139,6 +139,14 @@ _MATERIALS: list[Material] = [
              resistivity_ohm_um=0.15, thermal_conductivity_w_mk=50.0,
              volumetric_heat_capacity_j_m3k=3.5e6, cte_ppm_k=12.0,
              youngs_modulus_gpa=130.0, refractive_index_n=3.0, extinction_k=3.5),
+    # 欠陥パーティクル: 装置/環境由来の硬質残渣（SiC/アルミナ等の無機異物相当）。
+    # 通常のエッチでは除去できず（etchable=False）、異方性エッチをブロックして
+    # マイクロマスキングを引き起こす。除去は STRIP（洗浄）で行う。
+    Material(17, "particle", "パーティクル (欠陥)", (0.16, 0.15, 0.17),
+             etchable=False, rel_permittivity=9.8, breakdown_field_mv_cm=8.0,
+             thermal_conductivity_w_mk=30.0, volumetric_heat_capacity_j_m3k=3.0e6,
+             cte_ppm_k=7.0, youngs_modulus_gpa=400.0,
+             refractive_index_n=2.6, extinction_k=0.3),
 ]
 
 # 名前 / ID での高速参照
@@ -155,7 +163,7 @@ def all_materials() -> list[Material]:
 
 def deposit_materials() -> list[Material]:
     """成膜（CVD/PVD）で選択可能な材料を返す。"""
-    skip = {"air", "silicon", "doped_n", "doped_p", "epi_si"}
+    skip = {"air", "silicon", "doped_n", "doped_p", "epi_si", "particle"}
     return [m for m in _MATERIALS if m.name not in skip]
 
 
