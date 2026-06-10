@@ -74,16 +74,24 @@ def _conformal_air_distance(
     高さ方向に余裕のあるウェハで数倍速くなる）。固体はすべて帯域内にあるので、
     帯域内の距離は全体で計算した場合と厳密に一致する。
 
+    下限側も切る: 最下空気より t+1 以上 下の固体は、どの空気からも距離 > t
+    なので最近傍になり得ず、堆積判定 dist<=t に影響しない（基板の深い部分を
+    距離計算から除外できる）。
+
     戻り値: (帯域ビュー sub_grid, 帯域内 air マスク, 距離配列)。
     sub_grid は grid のビューなので、書き込みは元のグリッドに反映される。
+    帯域は z=0 始まりとは限らない点に注意（z インデックスは帯域内相対）。
     """
     nz = grid.shape[0]
+    any_air = (grid == materials.AIR).any(axis=(1, 2))
     solid_z = np.nonzero((grid != materials.AIR).any(axis=(1, 2)))[0]
     if solid_z.size == 0:  # 固体が無ければ堆積面も無い
         empty = grid[:0]
         return empty, np.zeros_like(empty, dtype=bool), np.zeros(empty.shape)
+    air_z = np.nonzero(any_air)[0]
     z_hi = int(min(nz, int(solid_z.max()) + 1 + t + 1))
-    sub = grid[:z_hi]
+    z_lo = 0 if air_z.size == 0 else max(0, int(air_z.min()) - t - 1)
+    sub = grid[z_lo:z_hi]
     air = sub == materials.AIR
     dist = ndimage.distance_transform_edt(air)
     return sub, air, dist
@@ -589,7 +597,7 @@ class Spacer(Process):
         mat_id = materials.get(self.material).id
         t = wafer.um_to_vox(self.thickness_um)
         # 1) コンフォーマル成膜: 既存固体表面から距離 t 以内の空気に堆積
-        #    （帯域ビュー sub は z=0 始まりなので以降の z インデックスは不変）
+        #    （以降の処理は帯域ビュー sub 内の相対 z でのみ操作する）
         sub, air, dist = _conformal_air_distance(grid, t)
         coat = air & (dist <= t)
         if not coat.any():
@@ -688,6 +696,16 @@ class PVD(Process):
             return
         sc = float(np.clip(self.step_coverage, 0.0, 1.0))
         oh = float(self.overhang)
+
+        # 成長は固体最上面 + t を超えないため、z 帯域に限定して処理する
+        # （反復ごとの連結ラベリング/距離変換が支配的コスト）。帯域上端の
+        # 平面 z=solid_max+t+1 は最後まで全て空気のままなので、帯域上面での
+        # _open_to_top 連結判定は全グリッドで行った場合と厳密に一致する。
+        solid_z = np.nonzero((grid != materials.AIR).any(axis=(1, 2)))[0]
+        if solid_z.size == 0:
+            return  # 固体が無ければ堆積面も無い
+        grid = grid[: min(nz, int(solid_z.max()) + t + 2)]  # 元グリッドのビュー
+        nz = grid.shape[0]
 
         # 成膜前から存在する閉空気（上面に連結しない空洞）。庇なし成膜では
         # 新たに空洞を封止しないことを保証するため、後段で「成膜後に新たに
@@ -915,6 +933,54 @@ class PVD(Process):
         )
 
 
+def _etch_columns_topdown(
+    grid: np.ndarray,
+    candidate: np.ndarray,
+    cost: np.ndarray | None = None,
+    budget: np.ndarray | None = None,
+    max_count: np.ndarray | None = None,
+) -> np.ndarray:
+    """各列を上から走査して candidate ボクセルを削るマスクを一括計算する。
+
+    旧実装（DryEtch/CMP ディッシング等）は「1 反復 = 各列の最上面 1 ボクセル」
+    を深さ回繰り返し、反復ごとに全グリッドの最上面探索を行っていた
+    （O(深さ×N)）。本関数は同じ規則を z 方向の累積和で閉形式に書き直した
+    O(N) 版で、逐次版と同じ結果を返す:
+
+      - 走査は列ごとに上→下。air は素通り（コストも本数も消費しない。
+        逐次版で上を削ると下の空隙越しに次の固体が最上面になるのと同じ）。
+      - candidate でない固体（バリア: 非ターゲット材料・レジスト等）に
+        当たるとその列の走査は終了し、それ以深は削らない。
+      - cost/budget 指定時: 累積コストが budget 以下の範囲まで削る（選択比。
+        逐次版の「budget >= cost なら削って差し引く」と同値）。
+      - max_count 指定時: 削り本数 n が (n-1) < max_count を満たす範囲まで
+        削る（逐次版の `etched < cap` 判定と同値。float の cap も可）。
+
+    cost は grid と同形のボクセル別コスト、budget / max_count は (ny, nx)。
+    戻り値: 削るボクセルの bool マスク（grid と同形）。
+    """
+    out = np.zeros(grid.shape, dtype=bool)
+    solid = grid != materials.AIR
+    # エッチは固体最上面より上では起こらないので、累積計算は z 帯域に限定する
+    solid_zs = np.nonzero(solid.any(axis=(1, 2)))[0]
+    if solid_zs.size == 0:
+        return out
+    z_hi = int(solid_zs.max()) + 1
+    cand_d = candidate[z_hi - 1 :: -1]  # 上→下走査を z 反転の累積で表す
+    barrier_d = solid[z_hi - 1 :: -1] & ~cand_d
+    blocked_d = np.maximum.accumulate(barrier_d, axis=0)
+    etch_d = cand_d & ~blocked_d
+    allowed_d = etch_d
+    if cost is not None and budget is not None:
+        cum_cost = np.cumsum(np.where(allowed_d, cost[z_hi - 1 :: -1], 0.0), axis=0)
+        etch_d = etch_d & (cum_cost <= budget[None, :, :])
+    if max_count is not None:
+        cum_cnt = np.cumsum(allowed_d, axis=0)
+        etch_d = etch_d & (cum_cnt - 1 < max_count[None, :, :])
+    out[:z_hi] = etch_d[::-1]
+    return out
+
+
 def _resolve_targets(targets) -> list[int]:
     """ターゲット材料名のリストを ID リストに変換。空なら全エッチ可能材料。"""
     if not targets:
@@ -1027,44 +1093,43 @@ class DryEtch(Process):
             with np.errstate(invalid="ignore"):
                 factor = np.where(width > 0, width / (width + ll), 1.0)
             depth_cap = depth_cap * factor
-        etched = np.zeros((ny, nx), dtype=float)  # 列ごとの除去ボクセル数
-
         # 選択比を 1 列あたりのエッチ予算（ボクセル）で表現する。
-        # 削るたびに cost=1/速度 を消費し、速度<1 の材料ほど予算を多く使う
-        # ＝削れる量が減る。速度1.0なら従来どおり depth ボクセル削る。
+        # ボクセル別コスト 1/速度 を LUT 化し、列の累積コストが予算 depth に
+        # 達するまで削る（速度<1 の材料ほど予算を多く使う＝削れる量が減る。
+        # 速度 1.0 なら従来どおり depth ボクセル削る）。逐次の最上面ループと
+        # 同値の累積和カーネル _etch_columns_topdown で O(N) で計算する。
         budget = np.where(eligible, float(depth), 0.0)
-        for _ in range(depth):
-            z_top, top_id = _top_material(wafer)
-            top_is_target = np.isin(top_id, list(target_ids))
-            rate = self._rate_map(top_id)
-            cost = np.where(rate > 0, 1.0 / np.where(rate > 0, rate, 1.0), np.inf)
-            do = (
-                eligible
-                & top_is_target
-                & (z_top >= 0)
-                & (budget >= cost)
-                & (etched < depth_cap)
+        candidate = np.isin(grid, list(target_ids)) & eligible[None, :, :]
+        if self.selectivity:
+            cost_lut = np.ones(max(materials.BY_ID) + 1, dtype=np.float64)
+            for name, rv in self.selectivity.items():
+                cost_lut[materials.get(name).id] = (1.0 / rv) if rv > 0 else np.inf
+            remove = _etch_columns_topdown(
+                grid, candidate, cost=cost_lut[grid], budget=budget,
+                max_count=depth_cap,
             )
-            if not do.any():
-                break
-            ys, xs = np.nonzero(do)
-            grid[z_top[ys, xs], ys, xs] = materials.AIR
-            budget[do] -= cost[do]
-            etched[do] += 1.0
+        else:
+            # 全ターゲット速度 1.0 ではコスト=本数なので、本数制限
+            # min(depth_cap, budget) だけで予算制約と同値（float 累積を省略）。
+            remove = _etch_columns_topdown(
+                grid, candidate, max_count=np.minimum(depth_cap, budget)
+            )
+        grid[remove] = materials.AIR
 
         # オーバーエッチ: ターゲット直下に露出した下層を追加で削る。
         # レジスト(is_resist)は保護膜なので削らない。
         oe = max(0, int(round(depth * self.overetch_pct / 100.0)))
         if oe > 0:
             resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
-            for _ in range(oe):
-                z_top, top_id = _top_material(wafer)
-                exposed = eligible & (z_top >= 0) & ~np.isin(top_id, resist_ids)
-                exposed &= top_id != materials.AIR
-                if not exposed.any():
-                    break
-                ys, xs = np.nonzero(exposed)
-                grid[z_top[ys, xs], ys, xs] = materials.AIR
+            candidate = (
+                (grid != materials.AIR)
+                & ~np.isin(grid, resist_ids)
+                & eligible[None, :, :]
+            )
+            remove = _etch_columns_topdown(
+                grid, candidate, max_count=np.full((ny, nx), float(oe))
+            )
+            grid[remove] = materials.AIR
 
         # 横方向エッチバイアス: 生成した空気に隣接するターゲットを lat 分削る。
         # レジストは保護されるため、マスク端下へのアンダーカットを再現する。
@@ -1116,13 +1181,11 @@ class DryEtch(Process):
         )
         if erode > 0:
             resist_ids = [m.id for m in materials.all_materials() if m.is_resist]
-            for _ in range(erode):
-                z_top, top_id = _top_material(wafer)
-                do = (z_top >= 0) & np.isin(top_id, resist_ids)
-                if not do.any():
-                    break
-                ys, xs = np.nonzero(do)
-                grid[z_top[ys, xs], ys, xs] = materials.AIR
+            candidate = np.isin(grid, resist_ids)
+            remove = _etch_columns_topdown(
+                grid, candidate, max_count=np.full((ny, nx), float(erode))
+            )
+            grid[remove] = materials.AIR
 
     def params_dict(self) -> dict:
         return {
@@ -1413,17 +1476,12 @@ class CMP(Process):
                 profile = dish_max * (edt / (edt + char_vox))
                 depth_map = np.round(profile).astype(int)
                 depth_map[~exposed] = 0
-                max_d = int(depth_map.max())
-                for _ in range(max_d):
-                    z_top2 = wafer.top_surface_z()
-                    ys, xs = np.nonzero((z_top2 >= 0) & (depth_map > 0))
-                    if ys.size == 0:
-                        break
-                    zt = z_top2[ys, xs]
-                    is_soft = grid[zt, ys, xs] == soft_id
-                    sel_y, sel_x, sel_z = ys[is_soft], xs[is_soft], zt[is_soft]
-                    grid[sel_z, sel_y, sel_x] = materials.AIR
-                    depth_map[sel_y, sel_x] -= 1
+                if depth_map.any():
+                    # 各列の上面から軟材料のみを depth_map 本だけ削る
+                    remove = _etch_columns_topdown(
+                        grid, grid == soft_id, max_count=depth_map.astype(float)
+                    )
+                    grid[remove] = materials.AIR
 
         # パターン密度依存エロージョン: 軟材料が密集する領域ほど余計に削れる。
         # 近傍の軟材料存在率（局所密度）に比例して追加除去する。
@@ -1437,17 +1495,12 @@ class CMP(Process):
                 )
                 ero = wafer.um_to_vox(self.erosion_um)
                 depth_map = np.round(ero * density).astype(int)  # (ny, nx)
-                max_d = int(depth_map.max())
-                for _ in range(max_d):
-                    z_top2 = wafer.top_surface_z()
-                    ys, xs = np.nonzero((z_top2 >= 0) & (depth_map > 0))
-                    if ys.size == 0:
-                        break
-                    zt = z_top2[ys, xs]
-                    is_soft = grid[zt, ys, xs] == soft_id
-                    sel_y, sel_x, sel_z = ys[is_soft], xs[is_soft], zt[is_soft]
-                    grid[sel_z, sel_y, sel_x] = materials.AIR
-                    depth_map[sel_y, sel_x] -= 1
+                if depth_map.any():
+                    # 各列の上面から軟材料のみを depth_map 本だけ削る
+                    remove = _etch_columns_topdown(
+                        grid, grid == soft_id, max_count=depth_map.astype(float)
+                    )
+                    grid[remove] = materials.AIR
 
     def params_dict(self) -> dict:
         return {
