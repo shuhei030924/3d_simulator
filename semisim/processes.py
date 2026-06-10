@@ -64,6 +64,31 @@ def _isotropic_dilate(mask: np.ndarray, radius: int) -> np.ndarray:
     return dist <= radius
 
 
+def _conformal_air_distance(
+    grid: np.ndarray, t: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """コンフォーマル成膜用に「固体表面からの空気の距離」を帯域限定で計算する。
+
+    固体最上面より t を超えて上の空気には堆積し得ないため、z ≤ 固体最上面+t+1
+    の帯域に切ってから 3D 距離変換を行う（全グリッド EDT は成膜のホットスポット。
+    高さ方向に余裕のあるウェハで数倍速くなる）。固体はすべて帯域内にあるので、
+    帯域内の距離は全体で計算した場合と厳密に一致する。
+
+    戻り値: (帯域ビュー sub_grid, 帯域内 air マスク, 距離配列)。
+    sub_grid は grid のビューなので、書き込みは元のグリッドに反映される。
+    """
+    nz = grid.shape[0]
+    solid_z = np.nonzero((grid != materials.AIR).any(axis=(1, 2)))[0]
+    if solid_z.size == 0:  # 固体が無ければ堆積面も無い
+        empty = grid[:0]
+        return empty, np.zeros_like(empty, dtype=bool), np.zeros(empty.shape)
+    z_hi = int(min(nz, int(solid_z.max()) + 1 + t + 1))
+    sub = grid[:z_hi]
+    air = sub == materials.AIR
+    dist = ndimage.distance_transform_edt(air)
+    return sub, air, dist
+
+
 def deal_grove_thickness_um(
     time_min: float, temperature_c: float, ambient: str = "dry"
 ) -> float:
@@ -338,11 +363,10 @@ class CVD(Process):
         grid = wafer.grid
         mat_id = materials.get(self.material).id
         t = self._effective_thickness_vox(wafer)
-        air = grid == materials.AIR
         # 固体表面からの距離 t 以内の空気に堆積（コンフォーマル）
-        dist = ndimage.distance_transform_edt(air)
+        sub, air, dist = _conformal_air_distance(grid, t)
         deposit = air & (dist <= t)
-        grid[deposit] = mat_id
+        sub[deposit] = mat_id
         if self.roughness_um > 0:
             self._apply_roughness(wafer, mat_id)
 
@@ -405,9 +429,8 @@ class ALD(Process):
         grid = wafer.grid
         mat_id = materials.get(self.material).id
         t = wafer.um_to_vox(self.thickness_um)
-        air = grid == materials.AIR
         # 固体表面からの距離 t 以内の空気に等方堆積（超コンフォーマル）
-        dist = ndimage.distance_transform_edt(air)
+        sub, air, dist = _conformal_air_distance(grid, t)
         if self.ar_coverage >= 0.999:
             deposit = air & (dist <= t)
         else:
@@ -433,7 +456,7 @@ class ALD(Process):
                     )
                     t_field = np.where(recess, np.maximum(1.0, t * cov), float(t))
             deposit = air & (dist <= t_field[None, :, :])
-        grid[deposit] = mat_id
+        sub[deposit] = mat_id
 
     def params_dict(self) -> dict:
         return {
@@ -566,12 +589,12 @@ class Spacer(Process):
         mat_id = materials.get(self.material).id
         t = wafer.um_to_vox(self.thickness_um)
         # 1) コンフォーマル成膜: 既存固体表面から距離 t 以内の空気に堆積
-        air = grid == materials.AIR
-        dist = ndimage.distance_transform_edt(air)
+        #    （帯域ビュー sub は z=0 始まりなので以降の z インデックスは不変）
+        sub, air, dist = _conformal_air_distance(grid, t)
         coat = air & (dist <= t)
         if not coat.any():
             return
-        grid[coat] = mat_id
+        sub[coat] = mat_id
         # 2) 異方性エッチバック: 各列のスペーサ縦連続ラン高さがしきい値以下
         #    （＝水平膜）なら除去し、高いラン（側壁）は残す。
         thresh = t + (wafer.um_to_vox(self.overetch_um) if self.overetch_um > 0 else 0)
@@ -583,7 +606,7 @@ class Spacer(Process):
             for run in np.split(colz, breaks):
                 if run.size <= thresh:
                     remove[run, y, x] = True
-        grid[remove] = materials.AIR
+        sub[remove] = materials.AIR
 
     def params_dict(self) -> dict:
         return {
