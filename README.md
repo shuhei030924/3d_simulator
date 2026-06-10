@@ -32,6 +32,11 @@
   `estimate_convergence_order`（誤差≈C·hᵖ の次数 p を最小二乗推定）で定量検証できます。
   いずれも約 1 次精度（p≈1）で解析解に収束することを確認済み（`tests/test_solver_convergence.py`）。
 - **プリセットレシピ**: 代表的な 15 フロー（ダマシン・MOSFET・LDD MOSFET・KOH・DRIE・TSV 貫通ビア・サリサイドゲート・薄化 3D-IC・欠陥再現＝マイクロマスキング/ボイド開口 等）をメニューから即読込（`semisim/presets.py`）。
+- **工程アニメーション**: レシピを 1 工程ずつ適用した断面を順に表示する再生機能
+  （GUI の「▶ 工程を再生」、速度 0.5/1/2 秒/工程）と、断面アニメーション GIF の
+  書き出し（GUI「GIF書出」/ CLI `--gif`。工程名入りフレーム＋最終形の静止表示）。
+  製造フローのレビュー・教育資料・報告書に「工程がどう進むか」を動画で添付できます
+  （`semisim/animation.py`、GUI 非依存・ヘッドレス可）。
 - **設定の永続化**: 最後に使ったフォルダ・最近開いたレシピ・既定ウェハ設定・ウィンドウ位置を
   保存し次回起動時に復元（`semisim/settings.py`、`~/.semisim/settings.json`）。
 - **アンドゥ / リドゥ**、レシピの JSON 保存 / 読込、STL エクスポート、スナップショット
@@ -84,6 +89,9 @@ py -m semisim recipe.json --report out.txt --stl shape.stl --png slice.png
 
 # 中央列の縦方向材料スタックを CSV 出力（依存なし、SEM/TEM 断面比較用）
 py -m semisim --preset "MOSFET フロー" --csv-column column.csv
+
+# 工程進行の断面アニメーション GIF を出力（軸・速度は --gif-axis/--gif-fps）
+py -m semisim --preset "Cu ダマシン配線" --gif flow.gif
 
 # 特定材料を非表示にして PNG/STL 出力（例: 酸化膜を隠して下層を確認）
 py -m semisim --preset "MOSFET フロー" --png cs.png --hide oxide,poly

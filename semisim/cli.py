@@ -46,6 +46,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="中央列の縦方向材料スタックを CSV 出力（依存なし）",
     )
     p.add_argument(
+        "--gif",
+        metavar="PATH",
+        help="工程進行の断面アニメーション GIF を出力（要 matplotlib/Pillow）",
+    )
+    p.add_argument(
+        "--gif-axis",
+        choices=["X", "Y", "Z"],
+        default="Y",
+        help="GIF の断面軸（既定: Y = 中央 XZ 断面）",
+    )
+    p.add_argument(
+        "--gif-fps",
+        type=float,
+        default=1.25,
+        help="GIF のフレーム毎秒（既定: 1.25 = 1 工程 0.8 秒）",
+    )
+    p.add_argument(
         "--no-resist",
         action="store_true",
         help="STL/PNG 出力時にレジストを除外",
@@ -308,6 +325,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.png:
         _export_png(wafer, args.png, include_resist, hidden)
         print(f"PNG を保存しました: {args.png}", file=sys.stderr)
+    if args.gif:
+        from . import animation
+
+        try:
+            n_frames = animation.save_gif(
+                recipe,
+                args.gif,
+                axis=args.gif_axis,
+                fps=args.gif_fps,
+                include_resist=include_resist,
+                hidden_ids=hidden,
+            )
+        except ValueError as exc:
+            print(f"エラー: {exc}", file=sys.stderr)
+            return 1
+        print(
+            f"GIF アニメーションを保存しました（{n_frames} フレーム）: {args.gif}",
+            file=sys.stderr,
+        )
     if args.csv_column:
         from . import export
 
