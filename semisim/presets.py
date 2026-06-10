@@ -19,6 +19,7 @@ from .processes import (
     AnisoWetEtch,
     Anneal,
     Backgrind,
+    Defect,
     Diffusion,
     DryEtch,
     Epitaxy,
@@ -238,6 +239,41 @@ def ldd_mosfet_flow() -> Recipe:
     return r
 
 
+def particle_micromask_flow() -> Recipe:
+    """パーティクル欠陥によるマイクロマスキング。
+
+    エッチ前にウェハ表面へ硬質パーティクルを散布し、異方性エッチを掛ける。
+    パーティクル直下はイオンが遮蔽されて削れず、エッチ後に欠陥の「影」と
+    してシリコンのピラー（グラス/草と呼ばれる不良）が残る様子を再現する。
+    最後の STRIP は洗浄相当で、ピラー上のパーティクルだけを除去する。
+    """
+    r = Recipe(config=_default_cfg())
+    r.name = "欠陥: マイクロマスキング"
+    r.description = "表面パーティクルが異方性エッチをブロックしピラーが残る不良の再現"
+    # 中央に 1 個（断面ビューで必ず見える）＋ 4 個を乱数散布
+    r.add(Defect(kind="particle", size_um=0.4, x_frac=0.5, y_frac=0.5))
+    r.add(Defect(kind="particle", size_um=0.4, count=4, seed=7))
+    r.add(DryEtch(targets=["silicon"], depth_um=1.0))
+    r.add(Strip(material="particle"))  # 洗浄: 残ったピラーが欠陥の証拠
+    return r
+
+
+def buried_void_exposure_flow() -> Recipe:
+    """埋込ボイドの CMP 開口。
+
+    層間絶縁膜の成膜中に取り込まれたボイド（空洞）が、CMP の平坦化で
+    研磨面に開口して表面欠陥になる様子を再現する。開口部は後続工程の
+    パーティクル源・配線ショート/断線の原因になる。
+    """
+    r = Recipe(config=_default_cfg())
+    r.name = "欠陥: 埋込ボイド開口"
+    r.description = "絶縁膜中の埋込ボイドが CMP 平坦化で表面に開口する不良の再現"
+    r.add(CVD(material="oxide", thickness_um=1.6))
+    r.add(Defect(kind="void", size_um=0.8, depth_um=0.6))
+    r.add(CMP(remove_um=0.6))  # 研磨面がボイド赤道に到達して開口
+    return r
+
+
 # 表示ラベル -> 生成関数（GUI メニュー/テストで使用）
 PRESETS: dict[str, callable] = {
     "イオン注入 埋込層": implant_buried_layer,
@@ -253,6 +289,8 @@ PRESETS: dict[str, callable] = {
     "TSV 貫通ビア": tsv_flow,
     "多層 Cu 配線": multilevel_interconnect,
     "薄化 3D-IC": thinned_3dic_flow,
+    "欠陥: マイクロマスキング": particle_micromask_flow,
+    "欠陥: 埋込ボイド開口": buried_void_exposure_flow,
 }
 
 

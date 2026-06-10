@@ -24,6 +24,7 @@ from .processes import (
     Anneal,
     AtomicLayerEtch,
     Backgrind,
+    Defect,
     Diffusion,
     DryEtch,
     Epitaxy,
@@ -867,6 +868,43 @@ class ProcessDialog(QtWidgets.QDialog):
             note.setStyleSheet("color: gray;")
             self.form.addRow(note)
 
+        elif t == "DEFECT":
+            self.kind = QtWidgets.QComboBox()
+            for val, lbl in (
+                ("particle", "パーティクル（表面異物）"),
+                ("void", "埋込ボイド（空洞）"),
+                ("scratch", "スクラッチ（線状の溝）"),
+            ):
+                self.kind.addItem(lbl, val)
+            if e is not None:
+                idx = self.kind.findData(e.kind)
+                if idx >= 0:
+                    self.kind.setCurrentIndex(idx)
+            self.form.addRow("欠陥の種類", self.kind)
+            self.size = _spin(getattr(e, "size_um", 0.3), 0.02, 5.0, 0.05, 3)
+            self.form.addRow("サイズ φ/幅 (µm)", self.size)
+            self.xf = _spin(getattr(e, "x_frac", 0.5), 0.0, 1.0, 0.05, 2)
+            self.form.addRow("位置 x (0〜1)", self.xf)
+            self.yf = _spin(getattr(e, "y_frac", 0.5), 0.0, 1.0, 0.05, 2)
+            self.form.addRow("位置 y (0〜1)", self.yf)
+            self.count = QtWidgets.QSpinBox()
+            self.count.setRange(1, 200)
+            self.count.setValue(int(getattr(e, "count", 1)))
+            self.form.addRow("個数 (2以上で乱数散布)", self.count)
+            self.seed = QtWidgets.QSpinBox()
+            self.seed.setRange(0, 99999)
+            self.seed.setValue(int(getattr(e, "seed", 0)))
+            self.form.addRow("乱数シード", self.seed)
+            self.depth = _spin(getattr(e, "depth_um", 0.0), 0.0, 10.0, 0.05, 3)
+            self.form.addRow("深さ (µm, 0=自動)", self.depth)
+            note = QtWidgets.QLabel(
+                "パーティクルは後続の異方性エッチをブロックし、欠陥下にピラーが残ります"
+                "（マイクロマスキング）。除去は STRIP（パーティクル指定）で行えます。"
+            )
+            note.setStyleSheet("color: gray;")
+            note.setWordWrap(True)
+            self.form.addRow(note)
+
     # -- 結果取得 ----------------------------------------------------------
     def build_process(self) -> Process:
         t = self.proc_type
@@ -1033,6 +1071,16 @@ class ProcessDialog(QtWidgets.QDialog):
             return Reflow(
                 target=self.material.currentData(),
                 radius_um=self.radius.value(),
+            )
+        if t == "DEFECT":
+            return Defect(
+                kind=self.kind.currentData(),
+                size_um=self.size.value(),
+                x_frac=self.xf.value(),
+                y_frac=self.yf.value(),
+                count=self.count.value(),
+                seed=self.seed.value(),
+                depth_um=self.depth.value(),
             )
         raise ValueError(t)
 
