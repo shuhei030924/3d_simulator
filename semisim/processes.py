@@ -548,6 +548,8 @@ class AtomicLayerEtch(Process):
             if not remove.any():
                 break
             grid[remove] = materials.AIR
+        if lr > 0:  # 等方成分がある場合のみアンダーカット脱落が起こり得る
+            _remove_detached_solids(grid)
 
     def params_dict(self) -> dict:
         return {
@@ -981,6 +983,31 @@ def _etch_columns_topdown(
     return out
 
 
+def _remove_detached_solids(grid: np.ndarray) -> int:
+    """基板底面（z=0）に連結しない固体＝完全に支持を失った孤立片を除去する。
+
+    アンダーカット系のエッチ（等方/横方向/ノッチ/スキャロップ）や欠陥の
+    切断で完全に切り離された材料は、物理的には脱落して系外へ除かれる
+    （重力・リンス。例: パーティクル直下を掘り抜くと粒子は流される）。
+    1 ボクセル厚のコンフォーマル膜が段差の角で辺接触のみで繋がる正当な
+    構造を誤って切り離さないよう、26 近傍（面+辺+角）で連結判定する。
+    戻り値: 除去したボクセル数（0 なら変更なし）。
+    """
+    solid = grid != materials.AIR
+    if not solid.any():
+        return 0
+    lbl, n = ndimage.label(solid, structure=np.ones((3, 3, 3), dtype=bool))
+    if n <= 1:
+        return 0
+    anchored = np.unique(lbl[0])
+    anchored = anchored[anchored != 0]
+    detached = solid & ~np.isin(lbl, anchored)
+    cnt = int(detached.sum())
+    if cnt:
+        grid[detached] = materials.AIR
+    return cnt
+
+
 def _resolve_targets(targets) -> list[int]:
     """ターゲット材料名のリストを ID リストに変換。空なら全エッチ可能材料。"""
     if not targets:
@@ -1187,6 +1214,11 @@ class DryEtch(Process):
             )
             grid[remove] = materials.AIR
 
+        # 横バイアス/ノッチのアンダーカットで完全に切り離された孤立片
+        # （例: 直下を掘り抜かれたパーティクル）は支持を失い脱落する。
+        if lat > 0 or notch > 0:
+            _remove_detached_solids(grid)
+
     def params_dict(self) -> dict:
         return {
             "targets": list(self.targets),
@@ -1272,6 +1304,8 @@ class WetEtch(Process):
             if not remove.any():
                 break
             grid[remove] = materials.AIR
+        if lr > 0:  # アンダーカットで完全に切り離された孤立片は脱落する
+            _remove_detached_solids(grid)
 
     def params_dict(self) -> dict:
         return {
@@ -1501,6 +1535,10 @@ class CMP(Process):
                         grid, grid == soft_id, max_count=depth_map.astype(float)
                     )
                     grid[remove] = materials.AIR
+
+        # 上面切除で基板への連結を断たれた孤立片（上経由でのみ繋がっていた
+        # 構造）は研磨で剥ぎ取られる＝脱落する。
+        _remove_detached_solids(grid)
 
     def params_dict(self) -> dict:
         return {
@@ -2190,6 +2228,7 @@ class AnisoWetEtch(Process):
             & (grid == target_id)
         )
         grid[etch_mask] = materials.AIR
+        _remove_detached_solids(grid)  # 斜め側壁の切り離しで浮いた孤立片は脱落
 
     def params_dict(self) -> dict:
         return {
@@ -2597,6 +2636,9 @@ class DRIE(Process):
             )
             grid[coat] = target_id
 
+        # スキャロップ/ノッチの横方向加工で切り離された孤立片は脱落する
+        _remove_detached_solids(grid)
+
     def params_dict(self) -> dict:
         return {
             "target": self.target,
@@ -2705,6 +2747,10 @@ class SputterEtch(Process):
                     break
                 grid[convex] = materials.AIR
 
+        if self.isotropic > 0 or self.faceting > 0:
+            # 等方成分/面取りの横方向加工で切り離された孤立片は脱落する
+            _remove_detached_solids(grid)
+
     def params_dict(self) -> dict:
         return {
             "depth_um": self.depth_um,
@@ -2753,6 +2799,7 @@ class PlasmaClean(Process):
         dist_from_air = ndimage.distance_transform_edt(~air)
         remove = target & (dist_from_air <= t)
         grid[remove] = materials.AIR
+        _remove_detached_solids(grid)  # 等方除去で切り離された孤立片は脱落
 
     def params_dict(self) -> dict:
         return {"target": self.target, "thickness_um": self.thickness_um}
@@ -2896,6 +2943,10 @@ class Defect(Process):
         zz = np.arange(nz)[:, None, None]
         yy = np.arange(ny)[None, :, None]
         xx = np.arange(nx)[None, None, :]
+        if self.kind == "particle":
+            # 凝集（粒子同士の重なり）で新たに密閉される空気の基準を取る
+            pre_air = grid == materials.AIR
+            pre_sealed = pre_air & ~PVD._open_to_top(pre_air)
         for fx, fy in self._positions():
             cx = int(round(fx * (nx - 1)))
             cy = int(round(fy * (ny - 1)))
@@ -2908,6 +2959,17 @@ class Defect(Process):
                 self._place_void(wafer, zz, yy, xx, cx, cy, zt, r)
             else:  # scratch
                 self._place_scratch(wafer, z_top, cy, r)
+        if self.kind == "particle":
+            # 粒子の重なりが囲い込んだ微小空気は凝集体の一部として充填する
+            # （意図しない密閉ボイド偽像を作らない。PVD #79 と同じ規約）。
+            air = grid == materials.AIR
+            new_sealed = air & ~PVD._open_to_top(air) & ~pre_sealed
+            if new_sealed.any():
+                grid[new_sealed] = materials.get(self.material).id
+        else:
+            # ボイド/スクラッチが構造を完全に切断した場合、上部は支持を
+            # 失って脱落する（細い柱より大きいボイド等の what-if）。
+            _remove_detached_solids(grid)
 
     def _place_particle(self, wafer, zz, yy, xx, cx, cy, zt, r) -> None:
         """表面に接して載る球状異物。depth_um>0 で表面に埋まり込む。"""
