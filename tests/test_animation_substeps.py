@@ -211,3 +211,49 @@ def test_fill_pvd_default_unchanged():
     p = PVD(material="metal_al", thickness_um=0.3)
     p2 = Process.from_dict(p.to_dict())
     assert p2.growth_fraction == 1.0
+
+
+# --- config 進化の一貫性（スナップショットに config も保存） -----------------
+def test_cache_resume_preserves_evolved_config():
+    """BACKGRIND 後のキャッシュ再開でも進化した config（基板厚）が復元される。
+
+    スナップショットがグリッドのみだと、キャッシュ再開時に後続工程
+    （CMP の研磨下限等）が初期 config を見てしまい、コールドリプレイと
+    結果が食い違う。
+    """
+    from semisim.processes import Backgrind
+
+    def build():
+        r = Recipe(config=_cfg())
+        r.add(CVD(material="oxide", thickness_um=0.4))
+        r.add(Backgrind(thin_um=0.6))
+        r.add(CVD(material="nitride", thickness_um=0.2))
+        return r
+
+    cold = build()
+    w_cold = cold.simulate()  # 先頭から一括
+    warm = build()
+    warm.simulate(up_to=2)  # BACKGRIND までキャッシュを作る
+    w_warm = warm.simulate()  # スナップショットから再開
+    assert np.array_equal(w_cold.grid, w_warm.grid)
+    # 再開ウェハの config も進化済み（基板が薄い）
+    assert w_warm.config.substrate_um == pytest.approx(w_cold.config.substrate_um)
+    assert w_warm.config.substrate_um < 1.5
+
+
+def test_partial_frames_use_evolved_config():
+    """BACKGRIND 後の CMP 途中フレームは進化後の基板厚を研磨下限に使う。"""
+    from semisim.processes import CMP, Backgrind
+
+    r = Recipe(config=_cfg())  # 基板 1.5µm
+    r.add(CVD(material="oxide", thickness_um=0.5))
+    r.add(Backgrind(thin_um=0.5))  # 基板 1.0µm に薄化、上面は 1.5µm へ
+    r.add(CMP(remove_um=5.0))  # 過大研磨 → 下限は「現在の」基板上面
+    slices = animation.step_slices(r, substeps=4)
+    cmp_frames = [p for t, p, _w, _h in slices if "CMP" in t]
+    assert len(cmp_frames) == 4
+    pre = [p for t, p, _w, _h in slices if "BACKGRIND" in t][-1]
+    pre_top = int(np.nonzero((pre != 0).any(axis=1))[0].max())
+    # 途中フレームでも研磨が実際に進む（古い config の下限だと何も削れない）
+    mid_top = int(np.nonzero((cmp_frames[1] != 0).any(axis=1))[0].max())
+    assert mid_top < pre_top

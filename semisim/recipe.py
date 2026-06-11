@@ -30,9 +30,13 @@ class Recipe:
     name: str = ""
     description: str = ""
     author: str = ""
-    # 各ステップ適用後のグリッドのスナップショット（増分計算用キャッシュ）。
-    # index i = steps[0..i] を適用済みのグリッド。古いものは None で解放され得る。
-    _snapshots: list[np.ndarray | None] = field(
+    # 各ステップ適用後の (グリッド, config 辞書) のスナップショット
+    # （増分計算用キャッシュ）。index i = steps[0..i] を適用済みの状態。
+    # config も保存するのは、BACKGRIND のように config（substrate_um）を
+    # 更新する工程があるため。グリッドだけ復元すると、キャッシュ再開時と
+    # 先頭からのリプレイ時で後続工程（CMP の研磨下限等）が見る config が
+    # 食い違い、結果が変わってしまう。古いものは None で解放され得る。
+    _snapshots: list[tuple[np.ndarray, dict] | None] = field(
         default_factory=list, init=False, repr=False, compare=False
     )
 
@@ -105,17 +109,19 @@ class Recipe:
         wafer = Wafer(copy.deepcopy(self.config))
 
         # n-1 以下で生きているキャッシュのうち最も深いものから再開する
+        # （グリッドと一緒に当時の config も復元する）
         start = 0
         for j in range(min(n, len(self._snapshots)) - 1, -1, -1):
             snap = self._snapshots[j]
             if snap is not None:
-                wafer.grid = snap.copy()
+                wafer.grid = snap[0].copy()
+                wafer.config = WaferConfig.from_dict(snap[1])
                 start = j + 1
                 break
 
         for i in range(start, n):
             self.steps[i].apply(wafer)
-            snap = wafer.grid.copy()
+            snap = (wafer.grid.copy(), wafer.config.to_dict())
             if i < len(self._snapshots):
                 self._snapshots[i] = snap
             else:

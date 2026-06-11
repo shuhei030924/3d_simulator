@@ -15,8 +15,6 @@ GIF アニメーションとして書き出す。製造フローのレビュー�
 """
 from __future__ import annotations
 
-import copy
-
 import numpy as np
 from scipy import ndimage
 
@@ -161,10 +159,11 @@ def step_slices(
                 if partial is None:
                     break  # 補間不可の工程は途中フレームなし
                 base = recipe.simulate(up_to=k - 1)  # キャッシュ済み
-                # config は必ずコピーを使う: BACKGRIND は config.substrate_um を
-                # 破壊的に更新するため、レシピと共有するとアニメーション生成が
-                # 本体のレシピ設定を壊してしまう。
-                w = Wafer(copy.deepcopy(recipe.config))
+                # config は base のもの（k-1 工程まで進化済み・呼び出しごとに
+                # 独立コピー）を使う。recipe.config（初期値）だと、手前に
+                # BACKGRIND がある場合に substrate_um が古く、CMP の研磨下限
+                # 等が本来の途中状態と食い違う。
+                w = Wafer(base.config)
                 w.grid = base.grid  # simulate は独立コピーを返すのでそのまま使える
                 partial.apply(w)
                 out.append(_slice(w, f"{head}（{f:.0%}）"))
