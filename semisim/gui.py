@@ -12,7 +12,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from pyvistaqt import QtInteractor
 
 from . import export, materials, metrology, presets, processes, visualize
-from .grid import WaferConfig
+from .grid import Wafer, WaferConfig
 from .masks import Mask, Shape
 from .processes import (
     ALD,
@@ -1606,6 +1606,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.play_speed.setCurrentIndex(1)
         self.play_speed.setToolTip("再生速度")
         arow.addWidget(self.play_speed)
+        self.smooth_play_cb = QtWidgets.QCheckBox("なめらか")
+        self.smooth_play_cb.setChecked(True)
+        self.smooth_play_cb.setToolTip(
+            "1 工程を物理的な途中状態（薄い成膜・浅いエッチ）に分割して補間再生します"
+        )
+        arow.addWidget(self.smooth_play_cb)
         gif_btn = QtWidgets.QPushButton("GIF書出")
         gif_btn.setToolTip("工程進行の断面アニメーション GIF を保存します")
         gif_btn.clicked.connect(self.export_gif)
@@ -2017,8 +2023,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.view2d.set_wafer(getattr(self, "wafer", None), self.show_resist)
 
     # -- 工程の再生（タイムラインアニメーション） ---------------------------
+    _PLAY_SUBSTEPS = 4  # なめらか再生時の 1 工程の分割数
+
     def toggle_play(self):
-        """工程列を初期状態から 1 工程ずつ適用して順に表示する/停止する。"""
+        """工程列を初期状態から 1 工程ずつ適用して順に表示する/停止する。
+
+        「なめらか」が有効な場合、量をスケールできる工程は途中状態
+        （25%→50%→75%→100%）を物理エンジンで生成して補間再生する。
+        """
         timer = getattr(self, "_play_timer", None)
         if timer is not None and timer.isActive():
             self._stop_play()
@@ -2026,27 +2038,58 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.recipe.steps:
             self.status.showMessage("再生する工程がありません", 3000)
             return
+        from . import animation
+
         self.preview_cb.setChecked(True)  # 選択工程まで表示モードで再生する
+        # 再生リスト: (工程 index, 進捗率)。1.0 = 工程確定フレーム。
+        m = self._PLAY_SUBSTEPS if self.smooth_play_cb.isChecked() else 1
+        playlist: list[tuple[int, float]] = []
+        for k, proc in enumerate(self.recipe.steps):
+            if m > 1 and animation.scaled_process(proc, 0.5) is not None:
+                playlist.extend((k, j / m) for j in range(1, m))
+            playlist.append((k, 1.0))
+        self._playlist = playlist
         self._play_index = 0
-        intervals = {0: 500, 1: 1000, 2: 2000}
+        self._play_step_ms = {0: 500, 1: 1000, 2: 2000}.get(
+            self.play_speed.currentIndex(), 1000
+        )
         if timer is None:
             self._play_timer = QtCore.QTimer(self)
             self._play_timer.timeout.connect(self._play_tick)
-        self._play_timer.setInterval(
-            intervals.get(self.play_speed.currentIndex(), 1000)
-        )
         self.play_btn.setText("■ 停止")
         self._play_tick()  # 最初のフレームを即時表示
         self._play_timer.start()
 
     def _play_tick(self):
-        if self._play_index >= len(self.recipe.steps):
+        playlist = getattr(self, "_playlist", [])
+        if self._play_index >= len(playlist):
             self._stop_play(done=True)
             return
-        self.list.setCurrentRow(self._play_index)  # 選択変更で再描画される
-        self.status.showMessage(
-            f"再生中: 工程 {self._play_index + 1}/{len(self.recipe.steps)}"
-        )
+        k, frac = playlist[self._play_index]
+        n = len(self.recipe.steps)
+        if frac >= 1.0:
+            self.list.setCurrentRow(k)  # 選択変更で正確な状態を再描画
+            self._play_timer.setInterval(self._play_step_ms)
+            self.status.showMessage(f"再生中: 工程 {k + 1}/{n}")
+        else:
+            # 途中状態: 直前状態に量を frac 倍した工程を適用して表示する
+            from . import animation
+
+            try:
+                partial = animation.scaled_process(self.recipe.steps[k], frac)
+                base = self.recipe.simulate(up_to=k)  # キャッシュ済み
+                w = Wafer(self.recipe.config)
+                w.grid = base.grid  # simulate は独立コピーを返す
+                partial.apply(w)
+                self.wafer = w
+                self._rebuild_mesh()
+                self.render()
+            except Exception:  # noqa: BLE001 - 補間失敗時は確定フレームに任せる
+                pass
+            self._play_timer.setInterval(
+                max(60, self._play_step_ms // self._PLAY_SUBSTEPS)
+            )
+            self.status.showMessage(f"再生中: 工程 {k + 1}/{n}（{frac:.0%}）")
         self._play_index += 1
 
     def _stop_play(self, done: bool = False):

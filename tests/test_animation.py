@@ -51,13 +51,15 @@ def test_render_frame_consistent_shape():
 
 
 def test_save_gif(tmp_path):
-    """GIF が工程数+1 フレームのアニメーションとして書き出される。"""
+    """GIF が工程数+1 フレーム（substeps=1）のアニメーションとして書き出される。"""
     from PIL import Image
 
     r = _recipe()
     out = tmp_path / "anim.gif"
     calls = []
-    n = animation.save_gif(r, str(out), progress=lambda d, t: calls.append((d, t)))
+    n = animation.save_gif(
+        r, str(out), substeps=1, progress=lambda d, t: calls.append((d, t))
+    )
     assert n == len(r.steps) + 1
     assert out.exists()
     with Image.open(out) as im:
@@ -65,6 +67,19 @@ def test_save_gif(tmp_path):
         assert im.n_frames == n
     # 進捗コールバックが全フレーム分呼ばれる
     assert calls[-1] == (n, n)
+
+
+def test_save_gif_substeps_more_frames(tmp_path):
+    """substeps>1 で補間可能な工程が分割され、フレーム数が増える。"""
+    from PIL import Image
+
+    r = _recipe()  # CVD(補間可)・PHOTO(瞬時)・DRY(補間可)
+    out = tmp_path / "anim4.gif"
+    n = animation.save_gif(r, str(out), substeps=4)
+    # 初期 1 + CVD 4 + PHOTO 1 + DRY 4 = 10 フレーム
+    assert n == 10
+    with Image.open(out) as im:
+        assert im.n_frames == n
 
 
 def test_save_gif_invalid_fps(tmp_path):
