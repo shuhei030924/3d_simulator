@@ -97,7 +97,12 @@ class Recipe:
         """
         n = len(self.steps) if up_to is None else min(up_to, len(self.steps))
         n = max(0, n)
-        wafer = Wafer(self.config)
+        # ウェハには config のコピーを渡す。BACKGRIND のように config
+        # （substrate_um）を更新する工程があり、レシピ本体の config と共有
+        # するとリプレイのたびに初期基板が薄くなり決定論が壊れる。
+        # コピーなら工程は「自分のウェハの設定」だけを更新でき、後続工程
+        # （CMP の研磨下限等）からは一貫して見える。
+        wafer = Wafer(copy.deepcopy(self.config))
 
         # n-1 以下で生きているキャッシュのうち最も深いものから再開する
         start = 0
