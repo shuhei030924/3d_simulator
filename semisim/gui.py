@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import copy
 import os
 
 import numpy as np
@@ -2156,8 +2155,8 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 partial = animation.scaled_process(self.recipe.steps[k], frac)
                 base = self.recipe.simulate(up_to=k)  # キャッシュ済み
-                # config はコピーを使う（BACKGRIND が config を破壊的に更新するため）
-                w = Wafer(copy.deepcopy(self.recipe.config))
+                # config は base のもの（進化済み・呼び出しごとに独立）を使う
+                w = Wafer(base.config)
                 w.grid = base.grid  # simulate は独立コピーを返す
                 partial.apply(w)
                 self.wafer = w
