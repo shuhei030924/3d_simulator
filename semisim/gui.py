@@ -1386,7 +1386,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.recipe = Recipe(config=base_cfg)
         self.solid_mesh = None  # キャッシュした固体メッシュ
-        self.clip_mode = "Y"     # none / X / Y / Z / angle / free（既定: Y 縦断面）
+        # 断面モードは前回終了時の状態を復元（初期既定は Y 縦断面）
+        self.clip_mode = self.settings.clip_mode
         self.clip_invert = False
         self.clip_frac = 50      # 0..100
         self.azimuth = 0         # 方位角(度)
@@ -1487,6 +1488,9 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             self.settings.default_config = self.recipe.config.to_dict()
             self.settings.show_resist = self.show_resist
+            self.settings.clip_mode = self.clip_mode
+            self.settings.rotate_style = self.rotate_combo.currentIndex()
+            self.settings.smooth_play = self.smooth_play_cb.isChecked()
             self.settings.window_geometry = bytes(
                 self.saveGeometry().toBase64()
             ).decode("ascii")
@@ -1607,7 +1611,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.play_speed.setToolTip("再生速度")
         arow.addWidget(self.play_speed)
         self.smooth_play_cb = QtWidgets.QCheckBox("なめらか")
-        self.smooth_play_cb.setChecked(True)
+        self.smooth_play_cb.setChecked(self.settings.smooth_play)
         self.smooth_play_cb.setToolTip(
             "1 工程を物理的な途中状態（薄い成膜・浅いエッチ）に分割して補間再生します"
         )
@@ -1635,9 +1639,12 @@ class MainWindow(QtWidgets.QMainWindow):
         ctrl.addWidget(QtWidgets.QLabel("断面:"))
         self.clip_combo = QtWidgets.QComboBox()
         self.clip_combo.addItems(["なし", "X断面", "Y断面", "Z断面", "角度指定", "自由(マウス操作)"])
-        # 既定は Y 縦断面（XZ 面）。膜の積層が見える半導体断面の標準ビュー。
-        # Z 水平断面は上面しか見えず初見で分かりにくい。
-        self.clip_combo.setCurrentIndex(2)
+        # 既定は Y 縦断面（XZ 面、膜の積層が見える半導体断面の標準ビュー）。
+        # 前回終了時のモードがあればそれを復元する。
+        modes = ["none", "X", "Y", "Z", "angle", "free"]
+        self.clip_combo.setCurrentIndex(
+            modes.index(self.clip_mode) if self.clip_mode in modes else 2
+        )
         self.clip_combo.setToolTip(
             "断面の切り方。角度指定では方位/仰角で好きな向きの平面を作り、"
             "スライダーで法線方向に平行移動できます。"
@@ -1697,6 +1704,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "自由: トラックボール式（任意軸で回転、ロールあり）。"
         )
         self.rotate_combo.currentIndexChanged.connect(self._on_rotate_style)
+        if self.settings.rotate_style == 1:
+            self.rotate_combo.setCurrentIndex(1)  # 変更シグナルで自由回転へ切替
         ctrl.addWidget(self.rotate_combo)
 
         # 視点プリセット & 画像保存
@@ -1885,6 +1894,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         QtWidgets.QListWidget.keyPressEvent(self.list, event)
 
+    def _update_title(self, label: str = ""):
+        """ウィンドウタイトルに現在のレシピ名/ファイル名を表示する。"""
+        base = "半導体プロセス 3D シミュレータ"
+        self.setWindowTitle(f"{label} — {base}" if label else base)
+
     def new_recipe(self):
         dlg = WaferDialog(self.recipe.config, parent=self)
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
@@ -1892,6 +1906,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.recipe = Recipe(config=dlg.get_config())
             self._refresh_list()
             self.rebuild_and_render()
+            self._update_title("無題")
 
     def save_recipe(self):
         start = self.settings.last_dir or "recipe.json"
@@ -1903,6 +1918,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if path:
             self.recipe.save(path)
             self._remember_recipe(path)
+            self._update_title(os.path.basename(path))
             self.status.showMessage(f"保存しました: {path}", 5000)
 
     def load_recipe(self):
@@ -1924,6 +1940,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_list()
         self.rebuild_and_render()
         self._remember_recipe(path)
+        self._update_title(loaded.name or os.path.basename(path))
         self.status.showMessage(f"読込みました: {path}", 5000)
 
     def load_preset(self, name: str):
@@ -1937,6 +1954,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.recipe = recipe
         self._refresh_list()
         self.rebuild_and_render()
+        self._update_title(name)
         self.status.showMessage(f"プリセットを読込みました: {name}", 5000)
 
     def show_report(self):

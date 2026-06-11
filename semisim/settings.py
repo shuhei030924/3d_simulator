@@ -48,6 +48,10 @@ class AppSettings:
     window_geometry: str = ""
     max_recent: int = DEFAULT_MAX_RECENT
     ui_theme: str = "light"  # GUI のテーマ（"light" / "dark"）
+    # ビュー操作の既定（前回終了時の状態を復元する）
+    clip_mode: str = "Y"  # 断面モード none/X/Y/Z/angle/free
+    rotate_style: int = 0  # 0=ターンテーブル / 1=自由（トラックボール）
+    smooth_play: bool = True  # 再生のなめらか補間
 
     # -- 編集ヘルパ --------------------------------------------------------
     def add_recent(self, path: str) -> None:
@@ -98,6 +102,13 @@ class AppSettings:
             window_geometry=str(d.get("window_geometry", "")),
             max_recent=_int(d.get("max_recent", DEFAULT_MAX_RECENT), DEFAULT_MAX_RECENT),
             ui_theme=("dark" if str(d.get("ui_theme", "light")) == "dark" else "light"),
+            clip_mode=(
+                str(d.get("clip_mode", "Y"))
+                if str(d.get("clip_mode", "Y")) in ("none", "X", "Y", "Z", "angle", "free")
+                else "Y"
+            ),
+            rotate_style=1 if _int(d.get("rotate_style", 0), 0) == 1 else 0,
+            smooth_play=bool(d.get("smooth_play", True)),
         )
 
     # -- 永続化 ------------------------------------------------------------

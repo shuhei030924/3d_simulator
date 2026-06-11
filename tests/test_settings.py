@@ -109,3 +109,34 @@ def test_default_config_persisted(tmp_path):
     s.save(path)
     loaded = AppSettings.load(path)
     assert loaded.default_config["nx"] == 80
+
+
+def test_view_preferences_roundtrip(tmp_path):
+    """ビュー設定（断面モード/回転スタイル/なめらか再生）が保存・復元される。"""
+    from semisim.settings import AppSettings
+
+    s = AppSettings(clip_mode="angle", rotate_style=1, smooth_play=False)
+    p = tmp_path / "s.json"
+    s.save(p)
+    loaded = AppSettings.load(p)
+    assert loaded.clip_mode == "angle"
+    assert loaded.rotate_style == 1
+    assert loaded.smooth_play is False
+
+
+def test_view_preferences_invalid_fallback(tmp_path):
+    """壊れたビュー設定値は安全な既定値にフォールバックする。"""
+    import json
+
+    from semisim.settings import AppSettings
+
+    p = tmp_path / "s.json"
+    p.write_text(
+        json.dumps({"clip_mode": "diagonal!?", "rotate_style": "abc",
+                    "smooth_play": 1}),
+        encoding="utf-8",
+    )
+    loaded = AppSettings.load(p)
+    assert loaded.clip_mode == "Y"
+    assert loaded.rotate_style == 0
+    assert loaded.smooth_play is True
