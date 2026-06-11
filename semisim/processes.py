@@ -659,6 +659,13 @@ class PVD(Process):
     # から斜めにフラックスが入り、背の高い構造の風下(-x)側に影ができて膜が
     # 付かない。電子ビーム蒸着の指向性シャドーイング/リフトオフに対応。
     tilt_deg: float = 0.0
+    # 成長時間比率（0〜1）。1 未満で、フル条件（垂直バジェット/側壁テーパは
+    # 最終膜厚 t から決まる）の反復成長を途中で止めた状態になる。膜厚自体を
+    # スケールすると t 依存のバジェット再計算で途中状態どうしの単調性が
+    # 崩れるため、アニメーションはこちらを使う（反復ループ＝時間発展の
+    # プレフィックスなので材料が減ることは構造的にない）。肩カスプと封止
+    # 偽像の除去は成膜完了時（=1.0）にのみ適用する。
+    growth_fraction: float = 1.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
@@ -690,6 +697,7 @@ class PVD(Process):
         _require_range(self.step_coverage, 0.0, 1.0, "ステップカバレッジ")
         _require_non_negative(self.overhang, "オーバーハング")
         _require_range(self.tilt_deg, 0.0, 89.0, "入射角")
+        _require_range(self.growth_fraction, 0.0, 1.0, "成長時間比率")
         grid = wafer.grid
         nz, ny, nx = grid.shape
         mat_id = materials.get(self.material).id
@@ -792,7 +800,12 @@ class PVD(Process):
         #             _open_to_top の連結が切れてボイドとして凍結する。
         side_acc = np.zeros(nz, dtype=np.float64)
         oh_acc = 0.0
-        for _ in range(t):
+        # 途中成長（アニメーション）: バジェット類はフル膜厚 t から決めたまま、
+        # 反復だけを途中で止める（時間発展のプレフィックス）。
+        iters = t if self.growth_fraction >= 1.0 else max(
+            0, int(round(t * self.growth_fraction))
+        )
+        for _ in range(iters):
             air = grid == materials.AIR
             open_air = self._open_to_top(air)
             if not open_air.any():
@@ -850,6 +863,11 @@ class PVD(Process):
                     nxt &= grid == materials.AIR
                     nxt &= self._open_to_top(grid == materials.AIR)
                     grid[nxt] = mat_id
+
+        if self.growth_fraction < 1.0:
+            # 肩カスプ・封止偽像の除去は成膜完了時にのみ適用する（途中状態は
+            # 成長フロントそのものを見せる）。
+            return
 
         # === 凸トップコーナーのカスプ ===
         # 指向性フラックスはトレンチ／段差の凸角（肩）に広い立体角で入射する
@@ -922,6 +940,7 @@ class PVD(Process):
             "step_coverage": self.step_coverage,
             "overhang": self.overhang,
             "tilt_deg": self.tilt_deg,
+            "growth_fraction": self.growth_fraction,
         }
 
     @classmethod
@@ -932,6 +951,7 @@ class PVD(Process):
             step_coverage=float(d.get("step_coverage", 1.0)),
             overhang=float(d.get("overhang", 0.0)),
             tilt_deg=float(d.get("tilt_deg", 0.0)),
+            growth_fraction=float(d.get("growth_fraction", 1.0)),
         )
 
 
@@ -2265,6 +2285,11 @@ class Fill(Process):
     # 超える狭いトレンチはコンフォーマル成長が上部で先に塞がり（ピンチオフ）、
     # 中央に縦長の空隙（シーム/ボイド）を残す。0 で完全充填（従来動作）。
     void_ar: float = 0.0
+    # 充填レベル比率（0〜1）。1 未満で、充填開始高さ（最下の充填対象）から
+    # 最終レベルまでの途中までボトムアップに埋めた状態になる。めっきの
+    # 時間発展（下から上へ液面が上がる）をアニメーションで再現するための
+    # パラメータで、通常のレシピでは 1.0（完全充填）のまま使う。
+    level_fraction: float = 1.0
 
     def summary(self) -> str:
         m = materials.get(self.material)
@@ -2296,10 +2321,18 @@ class Fill(Process):
             & (grid == materials.AIR)
             & solid_below
         )
+        # 途中充填: めっき液面が下から上へ上がる途中状態。充填対象の最下端から
+        # 最終レベル fill_to までを level_fraction で内分した高さまでに制限する。
+        _require_range(self.level_fraction, 0.0, 1.0, "充填レベル比率")
+        if self.level_fraction < 1.0 and deposit.any():
+            z_lo = int(np.nonzero(deposit.any(axis=(1, 2)))[0].min())
+            level = z_lo + self.level_fraction * (fill_to - z_lo)
+            deposit &= z_idx <= level
         grid[deposit] = mat_id
 
         # キーホール空隙: 狭いトレンチで上部ピンチオフ → 中央に縦空隙を残す。
-        if self.void_ar > 0:
+        # 空隙が確定するのは口元が塞がる充填完了時なので、途中充填では作らない。
+        if self.void_ar > 0 and self.level_fraction >= 1.0:
             field_level = int(z_top.max())
             # 周囲フィールドより低い（=リセス/トレンチ）列のみ対象
             recess = has_solid & (z_top < field_level)
@@ -2344,6 +2377,7 @@ class Fill(Process):
             "material": self.material,
             "overfill_um": self.overfill_um,
             "void_ar": self.void_ar,
+            "level_fraction": self.level_fraction,
         }
 
     @classmethod
@@ -2352,6 +2386,7 @@ class Fill(Process):
             material=d.get("material", "metal_cu"),
             overfill_um=float(d.get("overfill_um", 0.1)),
             void_ar=float(d.get("void_ar", 0.0)),
+            level_fraction=float(d.get("level_fraction", 1.0)),
         )
 
 

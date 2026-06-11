@@ -112,3 +112,102 @@ def test_smooth_plane_keeps_bulk_regions():
     out = animation.smooth_plane(plane, factor=3)
     assert (out[:24] == 1).all()  # 境界から十分離れた内部
     assert (out[36:] == 0).all()
+
+
+# --- 物理方向の検証（どこから増える/減るか） ---------------------------------
+def test_fill_animates_bottom_up():
+    """FILL の途中フレームは下から上へ充填レベルが上がる。"""
+    from semisim.processes import Fill
+
+    r = Recipe(config=_cfg())
+    mask = Mask(shapes=[Shape("rect", {"x0": 0.3, "y0": 0.0, "x1": 0.7, "y1": 1.0})])
+    r.add(Photo(mask=mask, thickness_um=0.4, polarity="positive"))
+    r.add(DryEtch(targets=["silicon"], depth_um=1.0))
+    r.add(Strip(material="photoresist"))
+    r.add(Fill(material="metal_cu", overfill_um=0.2))
+    slices = animation.step_slices(r, substeps=4)
+    cu = materials.get("metal_cu").id
+    frames = [p for t, p, _w, _h in slices if "FILL" in t]
+    assert len(frames) == 4  # 25/50/75/100%
+    tops, counts = [], []
+    for p in frames:
+        zs = np.nonzero((p == cu).any(axis=1))[0]
+        assert zs.size > 0
+        tops.append(int(zs.max()))
+        counts.append(int(np.count_nonzero(p == cu)))
+    # 充填上面が単調に上がり、量も単調増加（=下から埋まる）
+    assert all(a <= b for a, b in zip(tops, tops[1:]))
+    assert all(a < b for a, b in zip(counts, counts[1:]))
+    # 25% 時点では完全充填レベルに達していない
+    assert tops[0] < tops[-1]
+
+
+def test_pvd_substeps_never_lose_material():
+    """PVD の途中フレームは時間発展プレフィックス＝材料が消えない。"""
+    from semisim.processes import PVD
+
+    r = Recipe(config=_cfg())
+    mask = Mask(shapes=[Shape("rect", {"x0": 0.3, "y0": 0.0, "x1": 0.7, "y1": 1.0})])
+    r.add(Photo(mask=mask, thickness_um=0.4, polarity="positive"))
+    r.add(DryEtch(targets=["silicon"], depth_um=0.8))
+    r.add(Strip(material="photoresist"))
+    r.add(PVD(material="metal_al", thickness_um=0.4, step_coverage=0.5))
+    slices = animation.step_slices(r, substeps=4)
+    pvd_frames = [p for t, p, _w, _h in slices if "PVD" in t]
+    assert len(pvd_frames) == 4
+    for a, b in zip(pvd_frames, pvd_frames[1:]):
+        lost = (a != 0) & (b == 0)
+        assert not lost.any()  # 成膜中に材料が消えない
+
+
+def test_dry_lateral_undercut_develops_progressively():
+    """DRY の横アンダーカットは進行とともに発達する（最初から全量出ない）。"""
+    from semisim.processes import DryEtch as DE
+
+    p25 = animation.scaled_process(
+        DE(targets=["silicon"], depth_um=1.0, lateral_um=0.4, notch_um=0.2), 0.25
+    )
+    assert p25.depth_um == pytest.approx(0.25)
+    assert p25.lateral_um == pytest.approx(0.1)
+    assert p25.notch_um == pytest.approx(0.05)
+
+
+def test_cmp_dishing_scales_with_progress():
+    from semisim.processes import CMP as C
+
+    p50 = animation.scaled_process(
+        C(remove_um=0.6, soft_material="metal_cu", dishing_um=0.2, erosion_um=0.1), 0.5
+    )
+    assert p50.remove_um == pytest.approx(0.3)
+    assert p50.dishing_um == pytest.approx(0.1)
+    assert p50.erosion_um == pytest.approx(0.05)
+
+
+def test_backgrind_substeps_do_not_corrupt_recipe_config():
+    """BACKGRIND の途中フレーム生成がレシピの config を破壊しない。"""
+    from semisim.processes import Backgrind
+
+    r = Recipe(config=_cfg())
+    r.add(CVD(material="oxide", thickness_um=0.3))
+    r.add(Backgrind(thin_um=0.8))
+    sub_before = r.config.substrate_um
+    animation.step_slices(r, substeps=4)
+    assert r.config.substrate_um == pytest.approx(sub_before)
+    # 再シミュレーションも以前と同一結果（config 非破壊の外形的証拠）
+    w1 = r.simulate()
+    r.invalidate()
+    w2 = r.simulate()
+    assert np.array_equal(w1.grid, w2.grid)
+
+
+def test_fill_pvd_default_unchanged():
+    """level_fraction/growth_fraction の既定値 1.0 では従来結果と同一。"""
+    from semisim.processes import PVD, Fill, Process
+
+    f = Fill(material="metal_cu", overfill_um=0.2)
+    f2 = Process.from_dict({"type": "FILL", "material": "metal_cu",
+                            "overfill_um": 0.2})
+    assert f.to_dict() == f2.to_dict()
+    p = PVD(material="metal_al", thickness_um=0.3)
+    p2 = Process.from_dict(p.to_dict())
+    assert p2.growth_fraction == 1.0

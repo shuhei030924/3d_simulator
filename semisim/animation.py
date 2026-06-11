@@ -15,6 +15,8 @@ GIF アニメーションとして書き出す。製造フローのレビュー�
 """
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 from scipy import ndimage
 
@@ -51,40 +53,64 @@ def _setup_matplotlib():
     return plt
 
 
-# 工程タイプ → 「量」を表すパラメータ名。この値を f 倍（0<f<1）した工程を
-# 直前状態に適用すると、物理的に意味のある途中状態（薄い成膜・浅いエッチ）
-# になる。量に比例して進む工程のみを載せる（PHOTO/STRIP/LIFTOFF/IMPLANT/
-# SALICIDE/FILL/SPINON/DEFECT は瞬時または比例配分が定義できないため対象外）。
-_SCALABLE_PARAM = {
-    "CVD": "thickness_um", "PVD": "thickness_um", "OXIDE": "thickness_um",
-    "EPI": "thickness_um", "SPACER": "thickness_um", "CLEAN": "thickness_um",
-    "DRY": "depth_um", "WET": "depth_um", "KOH": "depth_um", "DRIE": "depth_um",
-    "SPUTTER": "depth_um", "DIFFUSION": "depth_um", "ANNEAL": "depth_um",
-    "RTP": "depth_um", "CMP": "remove_um", "BACKGRIND": "thin_um",
-    "ALD": "cycles", "ALE": "cycles", "REFLOW": "radius_um",
+# 工程タイプ → スケールするパラメータ名（先頭が主パラメータ＝工程の「量」）。
+# 主パラメータを f 倍（0<f<1）した工程を直前状態に適用すると、物理的に意味の
+# ある途中状態（薄い成膜・浅いエッチ・低い充填レベル）になる。
+# 2 番目以降は工程の進行とともに「蓄積する」副次効果（横アンダーカット・
+# RIE ノッチ・ディッシング・再付着等）。固定のままだと最初の途中フレームから
+# 全量現れてしまうため、主パラメータと一緒に比例配分する。
+# 量に比例して進まない瞬時工程（PHOTO/STRIP/LIFTOFF/IMPLANT/SPINON/DEFECT）
+# は対象外（1 フレームのまま）。
+_SCALABLE_PARAMS: dict[str, tuple[str, ...]] = {
+    # 成膜系: 既存表面から外側へ厚みが増える。PVD は膜厚スケールだと
+    # t 依存バジェットの再計算で途中状態の単調性が崩れるため、フル条件の
+    # 反復成長を途中で止める growth_fraction（時間発展プレフィックス）を使う
+    "CVD": ("thickness_um",), "PVD": ("growth_fraction",),
+    "EPI": ("thickness_um",), "SALICIDE": ("thickness_um",),
+    "OXIDE": ("thickness_um",), "ALD": ("cycles",),
+    "SPACER": ("thickness_um", "overetch_um"),
+    # 充填系: トレンチをボトムアップで充填レベルが上がる
+    "FILL": ("level_fraction",),
+    # エッチ系: 露出面から深さが進む（横バイアス/ノッチ/再付着は進行と共に蓄積）
+    "DRY": ("depth_um", "lateral_um", "notch_um"),
+    "WET": ("depth_um",), "KOH": ("depth_um",),
+    "DRIE": ("depth_um", "redeposit_um", "microtrench_um"),
+    "SPUTTER": ("depth_um",), "ALE": ("cycles",), "CLEAN": ("thickness_um",),
+    # 熱・拡散系: 界面/表面から拡散フロントが進む
+    "DIFFUSION": ("depth_um",), "ANNEAL": ("depth_um",), "RTP": ("depth_um",),
+    # 平坦化系: 上面（CMP）/底面（裏面研削）から削れる
+    "CMP": ("remove_um", "dishing_um", "erosion_um"),
+    "BACKGRIND": ("thin_um",),
+    "REFLOW": ("radius_um",),
 }
 
 
 def scaled_process(proc: Process, fraction: float) -> Process | None:
-    """工程の量パラメータを fraction 倍した複製を返す（補間できない工程は None）。
+    """工程の量パラメータ群を fraction 倍した複製を返す（補間不可の工程は None）。
 
     OXIDE / ANNEAL が時間指定モード（time_min>0）のときは時間を比例配分する。
     Deal-Grove では厚さ∝√t、拡散では深さ∝√t となり、実際の時間発展に従った
     途中状態になる。cycles（ALD/ALE）は整数に丸め、最低 1 サイクル。
+    副パラメータ（横バイアス等）は正の値を持つ場合のみ比例配分する。
     """
-    field = _SCALABLE_PARAM.get(proc.type)
-    if field is None:
+    fields = _SCALABLE_PARAMS.get(proc.type)
+    if not fields:
         return None
     params = proc.params_dict()
+    primary = fields[0]
     if proc.type in ("OXIDE", "ANNEAL") and float(params.get("time_min", 0) or 0) > 0:
-        field = "time_min"
-    val = params.get(field)
+        primary = "time_min"
+    val = params.get(primary)
     if val is None or not np.isfinite(float(val)) or float(val) <= 0:
         return None
-    if field == "cycles":
-        params[field] = max(1, int(round(int(val) * fraction)))
+    if primary == "cycles":
+        params[primary] = max(1, int(round(int(val) * fraction)))
     else:
-        params[field] = float(val) * float(fraction)
+        params[primary] = float(val) * float(fraction)
+    for extra in fields[1:]:
+        ev = params.get(extra)
+        if ev is not None and np.isfinite(float(ev)) and float(ev) > 0:
+            params[extra] = float(ev) * float(fraction)
     params["type"] = proc.type
     return type(proc)._from_params(params)
 
@@ -135,7 +161,10 @@ def step_slices(
                 if partial is None:
                     break  # 補間不可の工程は途中フレームなし
                 base = recipe.simulate(up_to=k - 1)  # キャッシュ済み
-                w = Wafer(recipe.config)
+                # config は必ずコピーを使う: BACKGRIND は config.substrate_um を
+                # 破壊的に更新するため、レシピと共有するとアニメーション生成が
+                # 本体のレシピ設定を壊してしまう。
+                w = Wafer(copy.deepcopy(recipe.config))
                 w.grid = base.grid  # simulate は独立コピーを返すのでそのまま使える
                 partial.apply(w)
                 out.append(_slice(w, f"{head}（{f:.0%}）"))
