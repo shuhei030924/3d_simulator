@@ -1386,7 +1386,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.recipe = Recipe(config=base_cfg)
         self.solid_mesh = None  # キャッシュした固体メッシュ
-        self.clip_mode = "Z"     # none / X / Y / Z / angle / free
+        self.clip_mode = "Y"     # none / X / Y / Z / angle / free（既定: Y 縦断面）
         self.clip_invert = False
         self.clip_frac = 50      # 0..100
         self.azimuth = 0         # 方位角(度)
@@ -1635,7 +1635,13 @@ class MainWindow(QtWidgets.QMainWindow):
         ctrl.addWidget(QtWidgets.QLabel("断面:"))
         self.clip_combo = QtWidgets.QComboBox()
         self.clip_combo.addItems(["なし", "X断面", "Y断面", "Z断面", "角度指定", "自由(マウス操作)"])
-        self.clip_combo.setCurrentIndex(3)
+        # 既定は Y 縦断面（XZ 面）。膜の積層が見える半導体断面の標準ビュー。
+        # Z 水平断面は上面しか見えず初見で分かりにくい。
+        self.clip_combo.setCurrentIndex(2)
+        self.clip_combo.setToolTip(
+            "断面の切り方。角度指定では方位/仰角で好きな向きの平面を作り、"
+            "スライダーで法線方向に平行移動できます。"
+        )
         self.clip_combo.currentIndexChanged.connect(self._on_clip_mode)
         ctrl.addWidget(self.clip_combo)
 
@@ -1663,6 +1669,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.slider.setRange(0, 100)
         self.slider.setValue(50)
+        self.slider.setToolTip("断面の位置（X/Y/Z 断面は軸方向、角度指定は法線方向に移動）")
         self.slider.valueChanged.connect(self._on_slider)
         ctrl.addWidget(self.slider, 1)
 
@@ -1681,11 +1688,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.smooth_cb.stateChanged.connect(self._on_smooth)
         ctrl.addWidget(self.smooth_cb)
 
+        # 回転スタイル（ターンテーブル/自由）と視点リセット
+        self.rotate_combo = QtWidgets.QComboBox()
+        self.rotate_combo.addItems(["回転: ターンテーブル", "回転: 自由"])
+        self.rotate_combo.setToolTip(
+            "ターンテーブル: 水平ドラッグで方位回転・垂直ドラッグで仰角。\n"
+            "ウェハの上が常に上のままで画面が傾かない（推奨）。\n"
+            "自由: トラックボール式（任意軸で回転、ロールあり）。"
+        )
+        self.rotate_combo.currentIndexChanged.connect(self._on_rotate_style)
+        ctrl.addWidget(self.rotate_combo)
+
         # 視点プリセット & 画像保存
         self.view_combo = QtWidgets.QComboBox()
         self.view_combo.addItems(["等角", "上(XY)", "前(XZ)", "横(YZ)"])
         self.view_combo.currentIndexChanged.connect(self._on_view_preset)
         ctrl.addWidget(self.view_combo)
+        reset_btn = QtWidgets.QPushButton("視点リセット")
+        reset_btn.setToolTip("回転・ズーム・平行移動を初期状態（等角・全体表示）に戻します")
+        reset_btn.clicked.connect(self.reset_view)
+        ctrl.addWidget(reset_btn)
         shot_btn = QtWidgets.QPushButton("画像保存")
         shot_btn.clicked.connect(self.save_screenshot)
         ctrl.addWidget(shot_btn)
@@ -1712,6 +1734,19 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
         self.plotter.set_background("white")
+        # 3D 操作のベストプラクティス:
+        # - 既定はターンテーブル（terrain）スタイル。ウェハの「上」が常に上の
+        #   ままで、水平ドラッグ=方位回転・垂直ドラッグ=仰角になり、トラック
+        #   ボールのように画面がロールして向きを見失うことがない。
+        # - 画面隅に XYZ 方位マーカーを常時表示し、今どの向きかを示す。
+        try:
+            self.plotter.enable_terrain_style(mouse_wheel_zooms=True)
+        except Exception:
+            pass
+        try:
+            self.plotter.add_axes()
+        except Exception:
+            pass
         self.tabs.addTab(tab3d, "3D ビュー")
 
         # --- 2D 断面タブ ---
@@ -2003,6 +2038,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self.smooth = bool(state)
         self.render()
 
+    def _on_rotate_style(self, idx):
+        """マウス回転スタイルを切り替える（0=ターンテーブル, 1=自由）。"""
+        try:
+            if idx == 0:
+                self.plotter.enable_terrain_style(mouse_wheel_zooms=True)
+            else:
+                self.plotter.enable_trackball_style()
+            self.status.showMessage(
+                "回転: ターンテーブル（上が固定）" if idx == 0 else "回転: 自由（トラックボール）",
+                3000,
+            )
+        except Exception:  # noqa: BLE001 - 古い pyvista では未対応でも継続
+            pass
+
+    def reset_view(self):
+        """視点（回転・ズーム・平行移動）を初期状態に戻す。"""
+        try:
+            self.plotter.view_isometric()
+            self.plotter.reset_camera()
+            self.plotter.render()
+            self.status.showMessage("視点をリセットしました", 3000)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _on_view_preset(self, idx):
         views = [
             self.plotter.view_isometric,
@@ -2270,11 +2329,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     np.cos(el) * np.sin(az),
                     np.sin(el),
                 )
-                # 中心からスライダー量だけ法線方向にオフセット
+                # 中心からスライダー量だけ法線方向にオフセット（全域 ±対角半分
+                # まで動かせるので、どの角度でも端から端まで掃引できる）
                 half = 0.5 * np.sqrt(
                     (b[1] - b[0]) ** 2 + (b[3] - b[2]) ** 2 + (b[5] - b[4]) ** 2
                 )
-                off = (frac - 0.5) * 2.0 * half * 0.5
+                off = (frac - 0.5) * 2.0 * half
                 origin = (
                     cx + normal[0] * off,
                     cy + normal[1] * off,
