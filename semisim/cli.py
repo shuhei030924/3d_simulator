@@ -59,8 +59,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--gif-fps",
         type=float,
-        default=1.25,
-        help="GIF のフレーム毎秒（既定: 1.25 = 1 工程 0.8 秒）",
+        default=None,
+        help="GIF のフレーム毎秒（省略時: 1 工程 0.8 秒になるよう自動決定）",
+    )
+    p.add_argument(
+        "--gif-substeps",
+        type=int,
+        default=4,
+        help="1 工程を物理的な途中状態に分割する数（既定 4。1 で従来の工程単位）",
     )
     p.add_argument(
         "--no-resist",
@@ -336,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
                 fps=args.gif_fps,
                 include_resist=include_resist,
                 hidden_ids=hidden,
+                substeps=max(1, args.gif_substeps),
             )
         except ValueError as exc:
             print(f"エラー: {exc}", file=sys.stderr)
