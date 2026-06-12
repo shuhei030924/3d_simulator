@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from semisim import animation, materials
-from semisim.grid import WaferConfig
+from semisim.grid import Wafer, WaferConfig
 from semisim.masks import Mask, Shape
 from semisim.processes import ALD, CVD, DryEtch, Oxidation, Photo, Strip
 from semisim.recipe import Recipe
@@ -257,3 +257,34 @@ def test_partial_frames_use_evolved_config():
     # 途中フレームでも研磨が実際に進む（古い config の下限だと何も削れない）
     mid_top = int(np.nonzero((cmp_frames[1] != 0).any(axis=1))[0].max())
     assert mid_top < pre_top
+
+
+def test_fill_void_region_never_filled_in_partial_frames():
+    """void_ar 付き FILL: キーホール予定領域は途中充填でも埋まらない（非単調防止）。"""
+    from semisim.processes import Fill
+
+    cfg = WaferConfig(nx=44, ny=44, nz=70, pitch_um=0.1, substrate_um=2.0)
+    r = Recipe(config=cfg)
+    r.add(CVD(material="oxide", thickness_um=2.0))
+    r.add(Photo(mask=Mask(shapes=[Shape("rect", {"x0": 0.45, "y0": 0.0,
+                                                 "x1": 0.55, "y1": 1.0})]),
+                thickness_um=0.5, polarity="positive"))
+    r.add(DryEtch(targets=["oxide"], depth_um=1.8))
+    r.add(Strip(material="photoresist"))
+    r.add(Fill(material="metal_cu", overfill_um=0.2, void_ar=2.0))
+    slices = animation.step_slices(r, substeps=4)
+    frames = [p for t, p, _w, _h in slices if "FILL" in t]
+    for a, b in zip(frames, frames[1:]):
+        lost = (a != 0) & (b == 0)
+        assert not lost.any()  # 充填中に材料が消えない（最終ボイド込み）
+
+
+def test_cvd_roughness_never_removes_preexisting_material():
+    """CVD ラフネスの凹みは新しく付いた膜のみを削る（下地は同材料でも不可侵）。"""
+    w = Wafer(_cfg())
+    CVD(material="oxide", thickness_um=0.5).apply(w)
+    pre = w.grid.copy()
+    # 薄い膜 + 大きなラフネス（凹みが膜厚を超えるワーストケース）
+    CVD(material="oxide", thickness_um=0.1, roughness_um=0.3, seed=7).apply(w)
+    lost = (pre != 0) & (w.grid == 0)
+    assert not lost.any()
