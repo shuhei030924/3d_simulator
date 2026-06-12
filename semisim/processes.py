@@ -337,8 +337,16 @@ class CVD(Process):
         t_eff = t * (1.0 - self.loading * density)
         return max(1, int(round(t_eff)))
 
-    def _apply_roughness(self, wafer: Wafer, mat_id: int) -> None:
-        """成膜表面に RMS ラフネスを付与する（膜上面のみ上下に揺らす）。"""
+    def _apply_roughness(
+        self, wafer: Wafer, mat_id: int, pre_solid: np.ndarray
+    ) -> None:
+        """成膜表面に RMS ラフネスを付与する（膜上面のみ上下に揺らす）。
+
+        凹側の掘り込みは「この成膜で新しく付いた膜」に限定する（pre_solid =
+        成膜前の固体）。下地が同じ材料でも成膜前から在った部分は削らない。
+        成膜は材料を増やす工程であり、既存材料を除去するのは非物理（凹みが
+        下地まで食い込むと、薄い途中状態ほど深く削れる逆転も起こる）。
+        """
         grid = wafer.grid
         nz = grid.shape[0]
         sigma_r = max(0.0, float(wafer.um_to_vox(self.roughness_um)))
@@ -356,10 +364,10 @@ class CVD(Process):
                 zmax = min(nz - 1, zt + d)
                 col = grid[zt + 1 : zmax + 1, y, x]
                 col[col == materials.AIR] = mat_id
-            elif d < 0:  # 凹: 上面の膜を削る
+            elif d < 0:  # 凹: この成膜で付いた膜だけを削る
                 zmin = max(0, zt + d + 1)
                 for z in range(zt, zmin - 1, -1):
-                    if grid[z, y, x] == mat_id:
+                    if grid[z, y, x] == mat_id and not pre_solid[z, y, x]:
                         grid[z, y, x] = materials.AIR
                     else:
                         break
@@ -372,11 +380,12 @@ class CVD(Process):
         mat_id = materials.get(self.material).id
         t = self._effective_thickness_vox(wafer)
         # 固体表面からの距離 t 以内の空気に堆積（コンフォーマル）
+        pre_solid = grid != materials.AIR if self.roughness_um > 0 else None
         sub, air, dist = _conformal_air_distance(grid, t)
         deposit = air & (dist <= t)
         sub[deposit] = mat_id
         if self.roughness_um > 0:
-            self._apply_roughness(wafer, mat_id)
+            self._apply_roughness(wafer, mat_id, pre_solid)
 
     def params_dict(self) -> dict:
         return {
@@ -2299,6 +2308,43 @@ class Fill(Process):
         vd = "" if self.void_ar <= 0 else f"  ボイドAR>{self.void_ar:.1f}"
         return f"FILL  {m.label}  +{self.overfill_um:.2f}µm{vd}"
 
+    def _void_geometry(self, wafer, z_top, has_solid, z_idx):
+        """キーホール空隙の幾何領域（充填前の形状だけから決まる）を返す。
+
+        完了時の空隙形成（apply 内の level_fraction>=1 経路）と同じ判定式。
+        途中充填でこの領域を埋めないために使う。該当なしは None。
+        """
+        if self.void_ar <= 0:
+            return None
+        field_level = int(z_top.max())
+        recess = has_solid & (z_top < field_level)
+        if not recess.any():
+            return None
+        hw = ndimage.distance_transform_edt(recess)
+        labels, n = ndimage.label(recess)
+        if n == 0:
+            return None
+        feat = ndimage.maximum(hw, labels, index=range(1, n + 1))
+        lut = np.concatenate(([0.0], np.asarray(feat, dtype=float)))
+        hw_feat = lut[labels]
+        depth = np.where(recess, field_level - z_top, 0.0).astype(float)
+        width = np.maximum(2.0 * hw_feat, 1.0)
+        narrow = recess & (depth > self.void_ar * width)
+        lo = z_top.astype(float) + hw_feat
+        hi = float(field_level) - 1.0
+        span = np.maximum(hi - lo, 1.0)
+        zf = z_idx.astype(float)
+        u = np.clip((zf - lo[None, :, :]) / span[None, :, :], 0.0, 1.0)
+        profile = np.sin(np.pi * u) ** 0.6
+        keyhole = 0.7
+        coat = hw_feat[None, :, :] * (1.0 - keyhole * profile)
+        return (
+            narrow[None, :, :]
+            & (zf > lo[None, :, :])
+            & (zf <= hi)
+            & (hw[None, :, :] > coat)
+        )
+
     def apply(self, wafer: Wafer) -> None:
         if self.overfill_um < 0:
             raise ValueError("オーバーフィル量は 0 以上である必要があります。")
@@ -2331,6 +2377,12 @@ class Fill(Process):
             z_lo = int(np.nonzero(deposit.any(axis=(1, 2)))[0].min())
             level = z_lo + self.level_fraction * (fill_to - z_lo)
             deposit &= z_idx <= level
+            # キーホール空隙の幾何領域は実際のめっき中もコンフォーマル成長の
+            # ピンチオフにより決して埋まらない。途中充填でも埋めない
+            # （埋めると完了フレームで材料が消える非単調＝非物理になる）。
+            vg = self._void_geometry(wafer, z_top, has_solid, z_idx)
+            if vg is not None:
+                deposit &= ~vg
         grid[deposit] = mat_id
 
         # キーホール空隙: 狭いトレンチで上部ピンチオフ → 中央に縦空隙を残す。
