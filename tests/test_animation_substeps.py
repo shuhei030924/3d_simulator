@@ -288,3 +288,36 @@ def test_cvd_roughness_never_removes_preexisting_material():
     CVD(material="oxide", thickness_um=0.1, roughness_um=0.3, seed=7).apply(w)
     lost = (pre != 0) & (w.grid == 0)
     assert not lost.any()
+
+
+def test_sqrt_kinetics_for_diffusion_limited():
+    """拡散律速工程（量指定）は √t 則: f=0.25 で量は 0.5 倍。"""
+    from semisim.processes import Diffusion, Silicidation
+
+    p = animation.scaled_process(Oxidation(thickness_um=0.4), 0.25)
+    assert p.thickness_um == pytest.approx(0.2)  # √0.25 = 0.5
+    p2 = animation.scaled_process(Diffusion(dopant="doped_n", depth_um=0.6), 0.25)
+    assert p2.depth_um == pytest.approx(0.3)
+    p3 = animation.scaled_process(Silicidation(thickness_um=0.08), 0.25)
+    assert p3.thickness_um == pytest.approx(0.04)
+    # 流量律速（CVD）は従来どおり線形
+    p4 = animation.scaled_process(CVD(material="oxide", thickness_um=0.4), 0.25)
+    assert p4.thickness_um == pytest.approx(0.1)
+
+
+def test_implant_dose_accumulation():
+    """IMPLANT はドーズ蓄積: 注入領域が Rp の周りに現れて単調に育つ。"""
+    from semisim.processes import Implant
+
+    proc = Implant(dopant="doped_n", range_um=0.4, straggle_um=0.15)
+    # しきい値換算: f=0.5 で thr/0.5（上限 1.0）
+    p = animation.scaled_process(proc, 0.5)
+    assert p.threshold == pytest.approx(min(1.0, proc.threshold / 0.5))
+    r = Recipe(config=_cfg())
+    r.add(proc)
+    slices = animation.step_slices(r, substeps=4)
+    dn = materials.get("doped_n").id
+    counts = [int(np.count_nonzero(p == dn)) for _t, p, _w, _h in slices]
+    assert counts[0] == 0
+    assert all(a <= b for a, b in zip(counts[1:], counts[2:]))  # 単調に育つ
+    assert counts[-1] > 0

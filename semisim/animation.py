@@ -83,32 +83,56 @@ _SCALABLE_PARAMS: dict[str, tuple[str, ...]] = {
 }
 
 
-def scaled_process(proc: Process, fraction: float) -> Process | None:
-    """工程の量パラメータ群を fraction 倍した複製を返す（補間不可の工程は None）。
+# 拡散律速の工程（量指定モード）。結果量（酸化膜厚・シリサイド厚・拡散深さ）
+# は時間の平方根に比例する（Deal-Grove の放物線律速 x∝√t、拡散長 L=√(Dt)）。
+# 時間比 f のフレームには f でなく √f を掛け、「最初は速く、徐々に遅くなる」
+# 実際の成長カイネティクスを再現する。時間指定モード（time_min>0）は時間
+# そのものを f 倍するので、この補正は不要（モデルが √t を内包する）。
+_SQRT_KINETICS = {"OXIDE", "SALICIDE", "DIFFUSION", "ANNEAL", "RTP"}
 
-    OXIDE / ANNEAL が時間指定モード（time_min>0）のときは時間を比例配分する。
-    Deal-Grove では厚さ∝√t、拡散では深さ∝√t となり、実際の時間発展に従った
-    途中状態になる。cycles（ALD/ALE）は整数に丸め、最低 1 サイクル。
-    副パラメータ（横バイアス等）は正の値を持つ場合のみ比例配分する。
+
+def scaled_process(proc: Process, fraction: float) -> Process | None:
+    """時間比 fraction の途中状態に対応する工程の複製を返す（補間不可は None）。
+
+    - 流量律速（成膜/エッチ/CMP 等）: 量パラメータを f 倍（結果∝t）。
+    - 拡散律速（酸化/シリサイド/拡散の量指定モード）: √f 倍（結果∝√t）。
+      時間指定モード（time_min>0）は時間を f 倍（モデル側が √t を計算）。
+    - IMPLANT: ドーズ∝t なので規格化濃度が f 倍 ⇔ しきい値を 1/f 倍。
+      注入領域が飛程 Rp の周りに現れて育つドーズ蓄積を再現する。
+    - cycles（ALD/ALE）は整数に丸め、最低 1 サイクル。
+    - 副パラメータ（横バイアス等の蓄積効果）は正の値のみ f 倍。
     """
+    if proc.type == "IMPLANT":
+        params = proc.params_dict()
+        thr = float(params.get("threshold", 0.0) or 0.0)
+        if thr <= 0:
+            return None
+        # ドーズが f 倍 → 濃度（ピーク規格化）も f 倍 → しきい値換算で thr/f。
+        # 1.0 超は「まだどこも閾値未達」（ごく薄い注入の初期）として上限化。
+        params["threshold"] = min(1.0, thr / max(fraction, 1e-9))
+        params["type"] = proc.type
+        return type(proc)._from_params(params)
     fields = _SCALABLE_PARAMS.get(proc.type)
     if not fields:
         return None
     params = proc.params_dict()
     primary = fields[0]
+    eff = float(fraction)
     if proc.type in ("OXIDE", "ANNEAL") and float(params.get("time_min", 0) or 0) > 0:
-        primary = "time_min"
+        primary = "time_min"  # 時間指定モード: 時間を線形配分（√t はモデル側）
+    elif proc.type in _SQRT_KINETICS:
+        eff = float(fraction) ** 0.5  # 拡散律速: 結果量∝√t
     val = params.get(primary)
     if val is None or not np.isfinite(float(val)) or float(val) <= 0:
         return None
     if primary == "cycles":
-        params[primary] = max(1, int(round(int(val) * fraction)))
+        params[primary] = max(1, int(round(int(val) * eff)))
     else:
-        params[primary] = float(val) * float(fraction)
+        params[primary] = float(val) * eff
     for extra in fields[1:]:
         ev = params.get(extra)
         if ev is not None and np.isfinite(float(ev)) and float(ev) > 0:
-            params[extra] = float(ev) * float(fraction)
+            params[extra] = float(ev) * eff
     params["type"] = proc.type
     return type(proc)._from_params(params)
 
