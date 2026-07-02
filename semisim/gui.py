@@ -1193,6 +1193,14 @@ class CrossSection2D(QtWidgets.QWidget):
         self.grid_cb.setToolTip("寸法読み取り用の補助グリッド線を表示")
         self.grid_cb.toggled.connect(self._on_grid_toggle)
         bar.addWidget(self.grid_cb)
+        self.smooth_cb = QtWidgets.QCheckBox("なめらか")
+        self.smooth_cb.setToolTip(
+            "材料境界を±半ボクセル以内で超解像表示（曲線・斜面のカクつきを抑える）。\n"
+            "測定・材料リードアウトは元のボクセルのまま。"
+        )
+        self.smooth_cb.setChecked(True)
+        self.smooth_cb.toggled.connect(lambda _on: self.redraw())
+        bar.addWidget(self.smooth_cb)
         self.save_btn = QtWidgets.QPushButton("画像保存")
         self.save_btn.setToolTip("現在の断面を PNG 画像として保存")
         self.save_btn.clicked.connect(self.save_image)
@@ -1317,10 +1325,18 @@ class CrossSection2D(QtWidgets.QWidget):
         self._plane = plane
         self._plane_wh = (w_um, h_um)
         cmap, norm = visualize.material_listed_cmap()
+        # なめらか表示: 表示専用の超解像（境界±半ボクセル以内・材料 ID 不変）。
+        # 測定/材料リードアウトは self._plane（元のボクセル）を使うため影響しない。
+        disp = plane
+        if self.smooth_cb.isChecked():
+            from . import animation
+
+            disp = animation.smooth_plane(plane)
         # Z 断面は縦軸が Y、それ以外は縦軸が Z（下=基板）。origin=lower で下が原点。
         self.ax.imshow(
-            plane, origin="lower", cmap=cmap, norm=norm,
-            extent=[0, w_um, 0, h_um], interpolation="nearest", aspect="equal",
+            disp, origin="lower", cmap=cmap, norm=norm,
+            extent=[0, w_um, 0, h_um], aspect="equal",
+            **visualize.imshow_material_kwargs(),
         )
         labels = {
             "X": ("Y (µm)", "Z (µm)"),
@@ -1393,7 +1409,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.azimuth = 0         # 方位角(度)
         self.elevation = 0       # 仰角(度)
         self.show_resist = self.settings.show_resist
-        self.smooth = False
+        self.smooth = self.settings.smooth_3d  # 3D サーフェス平滑化（既定 ON）
 
         # アンドゥ/リドゥ履歴（レシピ全体の dict スナップショット）
         self._undo_stack: list[dict] = []
@@ -1491,6 +1507,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.settings.clip_mode = self.clip_mode
             self.settings.rotate_style = self.rotate_combo.currentIndex()
             self.settings.smooth_play = self.smooth_play_cb.isChecked()
+            self.settings.smooth_3d = self.smooth_cb.isChecked()
+            self.settings.smooth_2d = self.view2d.smooth_cb.isChecked()
             self.settings.window_geometry = bytes(
                 self.saveGeometry().toBase64()
             ).decode("ascii")
@@ -1692,6 +1710,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.smooth_cb = QtWidgets.QCheckBox("スムーズ")
         self.smooth_cb.setToolTip("外形を平滑化して表示（断面の精度より見た目優先）")
+        self.smooth_cb.setChecked(self.smooth)  # 前回終了時の状態を復元（既定 ON）
         self.smooth_cb.stateChanged.connect(self._on_smooth)
         ctrl.addWidget(self.smooth_cb)
 
@@ -1760,6 +1779,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- 2D 断面タブ ---
         self.view2d = CrossSection2D()
+        self.view2d.smooth_cb.setChecked(self.settings.smooth_2d)  # 前回状態を復元
         self.tabs.addTab(self.view2d, "2D 断面")
         self.tabs.currentChanged.connect(self._on_tab_changed)
 

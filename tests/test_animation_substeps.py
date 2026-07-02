@@ -114,6 +114,22 @@ def test_smooth_plane_keeps_bulk_regions():
     assert (out[36:] == 0).all()
 
 
+def test_smooth_plane_adaptive_factor():
+    """factor 省略時は表示目標解像度から適応決定する（表示と物理解像度の分離）。"""
+    plane = np.zeros((120, 140), dtype=np.uint8)
+    plane[:60] = 1
+    out = animation.smooth_plane(plane)  # 長辺 140 → ceil(720/140)=6 倍
+    assert out.shape == (720, 840)
+    assert set(np.unique(out)) <= {0, 1}
+
+
+def test_smooth_plane_fine_grid_passthrough():
+    """既に十分細かいグリッドは factor=1 で素通し（コストゼロ・同一オブジェクト）。"""
+    plane = np.zeros((800, 900), dtype=np.uint8)
+    out = animation.smooth_plane(plane)
+    assert out is plane
+
+
 # --- 物理方向の検証（どこから増える/減るか） ---------------------------------
 def test_fill_animates_bottom_up():
     """FILL の途中フレームは下から上へ充填レベルが上がる。"""

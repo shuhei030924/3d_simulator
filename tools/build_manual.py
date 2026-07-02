@@ -21,8 +21,15 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 # 画像内の日本語タイトルが豆腐にならないよう日本語フォントを優先設定する。
+# 未インストールのファミリを指定すると図ごとに findfont 警告が出るため、
+# 実在するものだけを設定する（semisim.animation._setup_matplotlib と同方針）。
+from matplotlib import font_manager  # noqa: E402
+
+_installed = {f.name for f in font_manager.fontManager.ttflist}
 matplotlib.rcParams["font.family"] = [
-    "Yu Gothic", "Meiryo", "MS Gothic", "Hiragino Sans", "sans-serif",
+    *[n for n in ("Yu Gothic", "Meiryo", "MS Gothic", "Hiragino Sans")
+      if n in _installed],
+    "sans-serif",
 ]
 matplotlib.rcParams["axes.unicode_minus"] = False
 
@@ -87,8 +94,11 @@ def render(wafer: Wafer, title: str, fname: str, ylim=None) -> None:
     plane, width_um, height_um = visualize.slice_2d(wafer, "Y", wafer.config.ny // 2)
     cmap, norm = visualize.material_listed_cmap()
     fig, ax = plt.subplots(figsize=(7, 4), dpi=110)
+    # 高解像ボクセルを図の画素へ縮小する際の点状エイリアシング（斜面の
+    # ドット状ジャギー）を防ぐ。色変換後ブレンドで材料 ID の混合はしない。
     ax.imshow(plane, origin="lower", cmap=cmap, norm=norm,
-              extent=[0, width_um, 0, height_um], interpolation="nearest", aspect="auto")
+              extent=[0, width_um, 0, height_um], aspect="auto",
+              **visualize.imshow_material_kwargs())
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("x (µm)")
     ax.set_ylabel("z (µm)")
@@ -125,7 +135,7 @@ def render_steps(stages, suptitle, fname, ylim=None, xlim=None) -> None:
             wafer, "Y", wafer.config.ny // 2)
         ax.imshow(plane, origin="lower", cmap=cmap, norm=norm,
                   extent=[0, width_um, 0, height_um],
-                  interpolation="nearest", aspect="auto")
+                  aspect="auto", **visualize.imshow_material_kwargs())
         ax.set_title(label, fontsize=10)
         ax.set_xlabel("x (µm)")
         if ylim:

@@ -52,6 +52,8 @@ class AppSettings:
     clip_mode: str = "Y"  # 断面モード none/X/Y/Z/angle/free
     rotate_style: int = 0  # 0=ターンテーブル / 1=自由（トラックボール）
     smooth_play: bool = True  # 再生のなめらか補間
+    smooth_2d: bool = True  # 2D 断面のなめらか表示（境界±半ボクセルの超解像）
+    smooth_3d: bool = True  # 3D 表示のサーフェス平滑化（Taubin）
 
     # -- 編集ヘルパ --------------------------------------------------------
     def add_recent(self, path: str) -> None:
@@ -109,6 +111,8 @@ class AppSettings:
             ),
             rotate_style=1 if _int(d.get("rotate_style", 0), 0) == 1 else 0,
             smooth_play=bool(d.get("smooth_play", True)),
+            smooth_2d=bool(d.get("smooth_2d", True)),
+            smooth_3d=bool(d.get("smooth_3d", True)),
         )
 
     # -- 永続化 ------------------------------------------------------------
