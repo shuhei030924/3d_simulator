@@ -22,7 +22,7 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from semisim import materials, visualize  # noqa: E402
+from semisim import animation, materials, visualize  # noqa: E402
 from semisim.grid import WaferConfig  # noqa: E402
 from semisim.masks import Mask, Shape  # noqa: E402
 from semisim.processes import (  # noqa: E402
@@ -175,17 +175,21 @@ def render(name: str, recipe: Recipe) -> str:
     cmap, norm = visualize.material_listed_cmap()
 
     fig, ax = plt.subplots(figsize=(6, 5), dpi=130)
-    # ボクセルデータをそのまま忠実に描画する（補間しない）。
-    # 角は正しく直角を保ち、斜め側壁は格子解像度（0.05µm）の細かい階段になる。
-    # ※ガウス平滑化は矩形トレンチの角まで丸めて物理的に誤った形状になるため使わない。
+    # 表示専用の超解像（材料別マスクの双線形×多数決）。境界の移動は±半ボクセル
+    # 以内で材料 ID を発明しないため物理的に安全。斜め側壁（KOH 54.7°/DRIE
+    # スキャロップ）の階段状ジャギーを消す。※ガウス平滑化（角まで丸めて誤形状に
+    # なる）とは別物。
+    # オフライン生成なので表示目標を高めに取り、境界をサブピクセル化する。
+    plane = animation.smooth_plane(plane, target_px=1440)
     ax.imshow(
         plane,
         origin="lower",
         cmap=cmap,
         norm=norm,
         extent=[0, width_um, 0, height_um],
-        interpolation="nearest",
         aspect="equal",
+        # 縮小時の点状エイリアシング防止（色変換後ブレンド・ID 混合なし）
+        **visualize.imshow_material_kwargs(),
     )
     ax.set_title(name, fontsize=11)
     ax.set_xlabel("x (µm)")

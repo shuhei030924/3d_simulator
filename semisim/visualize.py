@@ -143,6 +143,28 @@ def slice_2d(
     return plane, width_um, height_um
 
 
+def imshow_material_kwargs() -> dict:
+    """材料 ID 断面を imshow 表示する際の補間設定を返す。
+
+    'antialiased' は縮小時にアンチエイリアス（拡大時は nearest 相当）となり、
+    超解像した配列を図の画素数へ縮小する際に斜め境界へ出る点状エイリアシング
+    （モアレ）を防ぐ。interpolation_stage='rgba' により補間は**色変換後**に
+    行われるため、材料 ID が混ざって存在しない中間 ID の色が生まれることは
+    ない（表示上の色ブレンドのみで物理的に安全）。
+    interpolation_stage 非対応の古い matplotlib (<3.6) では nearest に
+    フォールバックする（ID 空間の補間は絶対に行わない）。
+    """
+    import matplotlib
+
+    try:
+        major, minor = (int(x) for x in matplotlib.__version__.split(".")[:2])
+        if (major, minor) >= (3, 6):
+            return {"interpolation": "antialiased", "interpolation_stage": "rgba"}
+    except (ValueError, TypeError):
+        pass
+    return {"interpolation": "nearest"}
+
+
 def material_listed_cmap():
     """断面表示用の ListedColormap と正規化境界を返す。"""
     from matplotlib.colors import BoundaryNorm

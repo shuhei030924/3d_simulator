@@ -115,13 +115,29 @@ def test_view_preferences_roundtrip(tmp_path):
     """ビュー設定（断面モード/回転スタイル/なめらか再生）が保存・復元される。"""
     from semisim.settings import AppSettings
 
-    s = AppSettings(clip_mode="angle", rotate_style=1, smooth_play=False)
+    s = AppSettings(clip_mode="angle", rotate_style=1, smooth_play=False,
+                    smooth_2d=False, smooth_3d=False)
     p = tmp_path / "s.json"
     s.save(p)
     loaded = AppSettings.load(p)
     assert loaded.clip_mode == "angle"
     assert loaded.rotate_style == 1
     assert loaded.smooth_play is False
+    assert loaded.smooth_2d is False
+    assert loaded.smooth_3d is False
+
+
+def test_smooth_display_defaults_on(tmp_path):
+    """なめらか表示（2D/3D）は既定 ON（旧設定ファイルにキーが無くても ON）。"""
+    import json
+
+    from semisim.settings import AppSettings
+
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"last_dir": "/x"}), encoding="utf-8")
+    loaded = AppSettings.load(p)
+    assert loaded.smooth_2d is True
+    assert loaded.smooth_3d is True
 
 
 def test_view_preferences_invalid_fallback(tmp_path):

@@ -139,7 +139,7 @@ def _export_png(wafer, path: str, include_resist: bool, hidden_ids=None) -> None
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from . import visualize
+    from . import animation, visualize
 
     plane, ww, hh = visualize.slice_2d(
         wafer,
@@ -148,6 +148,9 @@ def _export_png(wafer, path: str, include_resist: bool, hidden_ids=None) -> None
         include_resist=include_resist,
         hidden_ids=hidden_ids,
     )
+    # 表示専用の超解像（境界±半ボクセル以内・材料 ID 不変）。粗いグリッド
+    # でも曲線・斜面が滑らかに出る。細かいグリッドは素通し（コストゼロ）。
+    plane = animation.smooth_plane(plane)
     cmap, norm = visualize.material_listed_cmap()
     fig, ax = plt.subplots(figsize=(5, 4), dpi=120)
     ax.imshow(
@@ -156,8 +159,8 @@ def _export_png(wafer, path: str, include_resist: bool, hidden_ids=None) -> None
         cmap=cmap,
         norm=norm,
         extent=[0, ww, 0, hh],
-        interpolation="nearest",
         aspect="equal",
+        **visualize.imshow_material_kwargs(),
     )
     ax.set_xlabel("x (µm)")
     ax.set_ylabel("z (µm)")

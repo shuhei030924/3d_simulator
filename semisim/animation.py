@@ -221,8 +221,8 @@ def render_frame(
         cmap=cmap,
         norm=norm,
         extent=[0, w_um, 0, h_um],
-        interpolation="nearest",
         aspect="equal",
+        **visualize.imshow_material_kwargs(),
     )
     a = str(axis).upper()
     ax.set_xlabel(_XLABELS.get(a, "x (µm)"))
@@ -238,13 +238,26 @@ def render_frame(
     return rgb
 
 
-def smooth_plane(plane: np.ndarray, factor: int = 3) -> np.ndarray:
+def smooth_plane(plane: np.ndarray, factor: int | None = None,
+                 target_px: int = 720, max_factor: int = 8) -> np.ndarray:
     """材料境界を保ったまま断面の輪郭を平滑化アップサンプルする。
 
     各材料の 2 値マスクを双線形補間で factor 倍に拡大し、画素ごとに最も
     支配的な材料を採用する（多数決）。存在しない材料 ID を発明しないため
     物理的に安全で、表示上の平滑化は境界 ±半ボクセル以内に収まる。
+
+    factor 省略時は表示目標解像度 target_px から適応決定する: 長辺が
+    target_px 以上になる最小の整数倍率（上限 max_factor）。シミュレーション
+    解像度（ボクセル数）と表示解像度を分離するのが狙いで、粗いグリッドは
+    大きく超解像し、既に十分細かいグリッドは factor=1 → 素通し（コスト
+    ゼロ）になる。計算量は 材料数 × 画素数 × factor² に比例する。
     """
+    if factor is None:
+        longest = max(int(plane.shape[0]), int(plane.shape[1]))
+        factor = max(1, min(int(max_factor), -(-int(target_px) // max(1, longest))))
+    factor = int(factor)
+    if factor <= 1:
+        return plane
     ids = np.unique(plane)
     if ids.size <= 1:
         return np.repeat(np.repeat(plane, factor, axis=0), factor, axis=1)
